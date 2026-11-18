@@ -36,10 +36,12 @@ export interface ResearchLoopAdapters {
   experiment(hypothesis: ResearchHypothesis, signal: AbortSignal): Promise<ExperimentEvidence>;
   /** Persist a bounded learning note; implementations must scope by principal. */
   recordLearning(input: {
+    principalId: string;
     question: string;
     finding: ResearchFinding;
     hypothesis: ResearchHypothesis;
-    evidence: ExperimentEvidence;
+    evidence?: ExperimentEvidence;
+    experimentSkippedReason?: string;
   }, signal: AbortSignal): Promise<void>;
 }
 export interface ResearchLoopOptions {
@@ -119,15 +121,9 @@ export async function runIndependentResearchLoop(
       // Learning from authorized research is still useful; no experiment is run
       // when the sandbox or complete budget attestation is unavailable.
       await options.adapters.recordLearning({
+        principalId: options.principalId,
         question, finding, hypothesis,
-        evidence: {
-          passed: false,
-          summary: "Experiment not run: " + experimentDecision.reason,
-          benchmarkBefore: 0,
-          benchmarkAfter: 0,
-          safetyIncidents: 0,
-          rollbackAvailable: false,
-        },
+        experimentSkippedReason: experimentDecision.reason,
       }, options.signal);
       continue;
     }
@@ -137,7 +133,7 @@ export async function runIndependentResearchLoop(
         evidence.safetyIncidents < 0 || !Number.isSafeInteger(evidence.safetyIncidents)) {
       throw new Error("Experiment adapter returned invalid benchmark or safety evidence.");
     }
-    await options.adapters.recordLearning({ question, finding, hypothesis, evidence }, options.signal);
+    await options.adapters.recordLearning({ principalId: options.principalId, question, finding, hypothesis, evidence }, options.signal);
     cycles.push({ cycle, question, finding, hypothesis, evidence, status: "learned" });
   }
   return { completed: true, stoppedBy: "cycle-budget", cycles };
