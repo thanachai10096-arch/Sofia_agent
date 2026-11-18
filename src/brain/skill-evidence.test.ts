@@ -87,3 +87,28 @@ test("trusted evidence verifier rejects a result whose verification kind differs
   assert.equal(checks.find((check) => check.name === "evidence:evidence-build")?.passed, false);
   assert.equal(checks.find((check) => check.name === "required-verification:build")?.passed, false);
 });
+
+
+test("trusted evidence verifier rejects conflicting audit records that reuse an evidence ID", async () => {
+  const records = [
+    event("typecheck"),
+    event("test"),
+    event("build"),
+    event("typecheck", { result: { kind: "typecheck", code: 1, passed: false } }),
+  ];
+  const verifier = new AuditSkillEvidenceVerifier(async () => records);
+  const checks = await verifier.verify(skill, provenance);
+  assert.equal(checks.find((check) => check.name === "evidence:evidence-typecheck")?.passed, false);
+  assert.equal(checks.find((check) => check.name === "required-verification:typecheck")?.passed, false);
+});
+
+test("trusted evidence verifier rejects surplus evidence IDs instead of silently ignoring them", async () => {
+  const verifier = new AuditSkillEvidenceVerifier(async () => ["typecheck", "test", "build"].map((kind) => event(kind)));
+  const checks = await verifier.verify(skill, {
+    ...provenance,
+    evidenceIds: [...provenance.evidenceIds, "unused-extra-evidence"],
+  });
+  assert.equal(checks.length, 1);
+  assert.equal(checks[0]?.name, "trusted-evidence-count");
+  assert.equal(checks[0]?.passed, false);
+});
