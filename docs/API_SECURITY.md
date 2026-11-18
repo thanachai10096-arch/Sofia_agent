@@ -55,7 +55,7 @@ The `ApprovalBroker` is wired into the API entrypoint when explicitly enabled. I
 
 The `InMemoryApprovalDecisionStore` is for tests and local development only. The built-in `SqliteApprovalDecisionStore` persists requests across restarts and uses conditional SQL updates so only one concurrent decision wins. For deployments across hosts, implement a transactional network-database adapter; SQLite WAL must not be assumed safe on an arbitrary shared network filesystem.
 
-## Enabling the SQLite approval API
+## Enabling the approval API
 
 The API entrypoint can enable the built-in broker with SOFIA_APPROVAL_ENABLED=true. Set SOFIA_APPROVAL_STORE=sqlite (default) for a single-host SQLite store, or SOFIA_APPROVAL_STORE=redis for a shared Upstash Redis REST store. API keys that review their own pending requests must include the explicit approval:manage scope in SOFIA_API_SCOPES.
 
