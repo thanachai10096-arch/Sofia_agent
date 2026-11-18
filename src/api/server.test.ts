@@ -73,6 +73,7 @@ test("API sessions are persisted and scoped to the authenticated API key", async
     ]);
     assert.equal(sessions.get("shared-client-session"), undefined);
   } finally {
+    controller.abort(new Error("test cleanup"));
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
@@ -194,6 +195,7 @@ test("approval API lists and resolves only requests owned by the authenticated p
   const outsiderKey = "approval-outsider-key";
   const ownerId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
   const broker = new ApprovalBroker({ store: new InMemoryApprovalDecisionStore(), pollIntervalMs: 25 });
+  const controller = new AbortController();
   const pending = broker.handle({
     runId: "api-approval-run",
     principalId: ownerId,
@@ -201,6 +203,7 @@ test("approval API lists and resolves only requests owned by the authenticated p
     input: { path: "safe.txt", content: "approved" },
     actionHash: "a".repeat(64),
     risk: "high",
+    signal: controller.signal,
   });
   const [record] = await broker.listPending(ownerId);
   assert.ok(record);
