@@ -85,3 +85,26 @@ test("approval broker validates its expiry and polling bounds", () => {
   assert.throws(() => new ApprovalBroker({ store, ttlMs: 10 }), /TTL/);
   assert.throws(() => new ApprovalBroker({ store, pollIntervalMs: 1 }), /poll interval/);
 });
+
+test("broker rechecks tenant ownership and clones records returned by an untrusted store adapter", async () => {
+  const own = {
+    id: "own-request", runId: "run-own", principalId: "principal-1",
+    toolName: "workspace.write_file", input: { path: "own.txt" }, actionHash: "own-hash",
+    risk: "high" as const, status: "pending" as const, createdAt: 1, expiresAt: 10_000,
+  };
+  const foreign = {
+    ...own, id: "foreign-request", runId: "run-foreign", principalId: "principal-2",
+    input: { path: "foreign.txt" },
+  };
+  const store = new InMemoryApprovalDecisionStore();
+  await store.create(own);
+  await store.create(foreign);
+  store.listPending = async () => [own, foreign];
+
+  const broker = new ApprovalBroker({ store });
+  const visible = await broker.listPending("principal-1");
+  assert.deepEqual(visible.map((record) => record.id), ["own-request"]);
+  visible[0]!.input.path = "mutated-by-caller.txt";
+  assert.equal((await store.get("own-request"))?.input.path, "own.txt");
+  assert.deepEqual(await broker.listPending(" "), []);
+});

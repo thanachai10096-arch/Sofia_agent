@@ -160,9 +160,15 @@ export class ApprovalBroker {
     return false;
   };
 
-  listPending(principalId: string): Promise<ApprovalRecord[]> {
-    if (!principalId.trim()) return Promise.resolve([]);
-    return this.options.store.listPending(principalId);
+  async listPending(principalId: string): Promise<ApprovalRecord[]> {
+    const owner = principalId.trim();
+    if (!owner || owner.length > 256) return [];
+    // Enforce tenant ownership at the broker boundary as well as in each store.
+    // This keeps a faulty or future adapter from leaking another principal's requests.
+    const records = await this.options.store.listPending(owner);
+    return records
+      .filter((record) => record.principalId === owner && record.status === "pending")
+      .map(copy);
   }
 
   get(id: string): Promise<ApprovalRecord | undefined> {
