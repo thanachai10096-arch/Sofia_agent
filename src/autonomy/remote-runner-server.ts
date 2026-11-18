@@ -143,14 +143,21 @@ async function stageFiles(root: string, files: RequestFile[]): Promise<Map<strin
   return originals;
 }
 
-async function collectFiles(originals: Map<string, string>, maxBytes: number): Promise<RequestFile[]> {
+async function collectFiles(originals: Map<string, string>, workspaceRoot: string, maxBytes: number): Promise<RequestFile[]> {
   const output: RequestFile[] = [];
   let total = 0;
   for (const [relative, filename] of originals) {
     try {
       const info = await lstat(filename);
       if (!info.isFile() || info.isSymbolicLink()) continue;
-      const handle = await open(filename, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      // A malicious command can replace an ancestor directory with a symlink.
+      // Resolve the full path and prove it remains under this run's disposable root.
+      const resolved = await realpath(filename);
+      const withinRoot = path.relative(workspaceRoot, resolved);
+      if (!withinRoot || withinRoot === ".." || withinRoot.startsWith(".." + path.sep) || path.isAbsolute(withinRoot)) {
+        throw new Error("Runner output path escaped its disposable workspace.");
+      }
+      const handle = await open(resolved, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
       try {
         const current = await handle.stat();
         if (!current.isFile() || current.size > maxBytes - total) {
@@ -246,7 +253,7 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
         workspaceRoot: workspace,
         cwd: relativeCwd || undefined,
       }, abortController.signal);
-      const files = await collectFiles(originalFiles, maxSnapshotBytes);
+      const files = await collectFiles(originalFiles, workspace, maxSnapshotBytes);
       const outputBytes = Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr);
       if (outputBytes > job.maxOutputBytes) throw new Error("Sandbox runner output exceeded its limit.");
       json(response, 200, {
