@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { AutonomyContext } from "./controller.js";
-import type { ResearchLoopAdapters, ResearchLoopReport } from "./research-loop.js";
+import type { ResearchLoopAdapters } from "./research-loop.js";
 import { PostgresAutonomyJobStore, type AutonomyPgPool } from "./postgres-job-store.js";
 import { AutonomyJobSupervisor, type AutonomyWorkerSessionResult } from "./job-supervisor.js";
-import { SofiaAutonomyRuntime } from "./runtime.js";
+import { SofiaAutonomyRuntime, type AutonomyAuditEvent } from "./runtime.js";
 import type { AutonomyJob } from "./job-store.js";
 
 export interface RailwayAutonomyWorkerConfig<TPayload = unknown> {
@@ -14,7 +14,7 @@ export interface RailwayAutonomyWorkerConfig<TPayload = unknown> {
   budgetContext(job: AutonomyJob<TPayload>): AutonomyContext;
   /** Must check user, project and system kill-switch state. */
   isKilled(job: AutonomyJob<TPayload>): Promise<boolean>;
-  audit?: ConstructorParameters<typeof SofiaAutonomyRuntime>[0]["audit"];
+  audit?: (event: AutonomyAuditEvent) => void | Promise<void>;
   workerId?: string;
   maxJobs?: number;
   idleDelayMs?: number;
