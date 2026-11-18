@@ -23,8 +23,9 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
 let closeApprovalStore: (() => void) | undefined;
+let approvalBroker: ApprovalBroker | undefined;
+let approvalHandler: import("../agent/approval-broker.js").ApprovalHandler | undefined;
 if (process.env.SOFIA_APPROVAL_ENABLED?.trim().toLowerCase() === "true") {
   if (!scopes.includes("approval:manage")) throw new Error("SOFIA_APPROVAL_ENABLED requires approval:manage in SOFIA_API_SCOPES.");
   const storeKind = (process.env.SOFIA_APPROVAL_STORE ?? "sqlite").trim().toLowerCase();
@@ -37,21 +38,23 @@ if (process.env.SOFIA_APPROVAL_ENABLED?.trim().toLowerCase() === "true") {
       token,
       prefix: process.env.SOFIA_APPROVAL_REDIS_PREFIX?.trim() || "sofia",
     });
-    const broker = new ApprovalBroker({ store });
-    deps.approvalBroker = broker;
-    deps.approval = broker.handle;
+    approvalBroker = new ApprovalBroker({ store });
+    approvalHandler = approvalBroker.handle;
   } else if (storeKind === "sqlite") {
     const store = await SqliteApprovalDecisionStore.open(
       process.env.SOFIA_APPROVAL_STORE_PATH?.trim() || path.join(workspace, ".sofia", "approvals.sqlite"),
     );
     closeApprovalStore = () => store.close();
-    const broker = new ApprovalBroker({ store });
-    deps.approvalBroker = broker;
-    deps.approval = broker.handle;
+    approvalBroker = new ApprovalBroker({ store });
+    approvalHandler = approvalBroker.handle;
   } else {
     throw new Error("SOFIA_APPROVAL_STORE must be sqlite or redis.");
   }
 }
+// Inject the handler before createSofiaAgentDependencies builds its Brain factory.
+// Mutating deps.approval afterwards does not update the factory's captured dependency.
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalHandler);
+if (approvalBroker) deps.approvalBroker = approvalBroker;
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
