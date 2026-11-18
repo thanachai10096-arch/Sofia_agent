@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { assessAction, assertSafePath, containsPromptInjection, redactSecrets, riskFor } from "../src/security/guard.js";
 import { MemorySecurityAudit } from "../src/security/audit.js";
-import { classifyToolEffects } from "../src/security/policy.js";
+import { classifyToolEffects, policyForToolScopes } from "../src/security/policy.js";
 import { SecurityController } from "../src/security/controller.js";
 
 describe("Sofia security controls",()=>{
@@ -140,4 +140,32 @@ it("shared tool-effect classification marks privileged actions consistently", ()
     assert.deepEqual(classifyToolEffects("browser.click"), ["browser", "network"]);
   assert.deepEqual(classifyToolEffects("desktop.input.click"), ["destructive"]);
   assert.deepEqual(classifyToolEffects("workspace.read_file"), ["read"]);
+});
+
+
+it("intersects per-key tool scopes with the host execution policy", () => {
+  const host = {
+    allowTools: true, allowNetwork: true, allowShell: true, allowFileWrite: true,
+    allowBrowser: true, allowDestructive: true, maxRisk: "high" as const,
+    maxSteps: 12, maxToolCallsPerStep: 4, blockedPaths: [".env"],
+    allowedHosts: ["example.com"], permissions: {},
+  };
+  const readOnly = policyForToolScopes(host, ["agent:run", "agent:read"]);
+  assert.equal(readOnly.allowFileWrite, false);
+  assert.equal(readOnly.allowShell, false);
+  assert.equal(readOnly.allowNetwork, false);
+  assert.equal(readOnly.allowBrowser, false);
+  assert.equal(readOnly.allowDestructive, false);
+
+  const elevated = policyForToolScopes(host, [
+    "tool:write", "tool:shell", "tool:network", "tool:browser", "tool:destructive",
+  ]);
+  assert.equal(elevated.allowFileWrite, true);
+  assert.equal(elevated.allowShell, true);
+  assert.equal(elevated.allowNetwork, true);
+  assert.equal(elevated.allowBrowser, true);
+  assert.equal(elevated.allowDestructive, true);
+
+  const hostDenied = policyForToolScopes({ ...host, allowShell: false }, ["tool:shell"]);
+  assert.equal(hostDenied.allowShell, false, "a user scope cannot override host policy");
 });
