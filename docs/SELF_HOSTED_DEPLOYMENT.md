@@ -18,15 +18,28 @@ Verified on `main`:
 - `.env.example` documents provider configuration, sandbox policy, capability/audit secrets, and optional messaging integrations.
 - The default branch had no root container deployment manifest at audit time. This feature branch now adds an initial `Dockerfile`, `compose.yaml`, `.dockerignore`, and `docs/SELF_HOSTED_QUICKSTART.md`; these additions are an implementation baseline and have not yet passed clean-host acceptance testing.
 
-## Important gap: state directory contract
+## State directory contract
 
-The documented `SOFIA_STATE_DIR` is not visibly wired into the API entrypoint's run-store and usage-store paths. Before publishing a supported container image, consolidate state path resolution behind one tested configuration helper and make all persistent stores use the configured state root. Keep backward compatibility with existing environment variables:
+The feature branch now routes the durable file-backed runtime stores through the shared `sofiaStateDirectory()` resolver. With `SOFIA_STATE_DIR=/data/state`, the default layout is:
 
-- `SOFIA_STATE_DIR` — canonical persistent root.
-- `SOFIA_RUN_STORE_DIR` — explicit legacy/override path for API run records.
-- Usage records, job records, snapshots, project memory, chat deduplication and browser profiles must each have explicit, documented persistence behavior.
+| Store | Directory / file |
+| --- | --- |
+| API run records | `sofia-agents-api-runs/` |
+| API usage quotas | `sofia-agents-api/usage.json` |
+| Background jobs | `sofia-agents-jobs/` |
+| Brain run snapshots | `sofia-agents-runs/` |
+| Checkpoints | `sofia-agents-checkpoints/` |
+| Project memory | `sofia-agents-memory/` |
+| User memory | `sofia-agents-user-memory/` |
+| SQLite transcripts | `sofia-agents-sessions/sessions.sqlite` |
+| Skill lifecycle | `sofia-agents-skills/skill-lifecycle.json` |
+| Evolution diagnostics | `sofia-agents-evolution/evolution.json` |
+| Security audit | `sofia-agents-security/security-audit.log` |
+| Chat deduplication | `sofia-agents-chat-dedupe/` |
 
-Do not silently migrate or delete existing state. If a migration is required, provide a backup-first migration command and tests.
+`SOFIA_RUN_STORE_DIR` and `SOFIA_CHAT_DEDUPE_DIR` remain explicit optional overrides for compatibility. Browser profile storage remains separately configured by `SOFIA_BROWSER_PROFILE_DIR`, because it may intentionally point to an operator-managed browser profile volume. Workspace files and workspace-local artifacts remain under `SOFIA_WORKSPACE`; in Compose that directory is also on the persistent `/data` volume.
+
+This change does not automatically migrate files from previous workspace-relative or OS-temp locations. Existing operators must back up their current data and perform a deliberate migration before switching roots. Never delete the old paths automatically. Add migration tooling only with a verified source/destination inventory and backup-first tests.
 
 ## Distribution architecture
 
