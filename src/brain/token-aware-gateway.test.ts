@@ -478,3 +478,47 @@ test("gateway does not fail over on provider authentication or billing errors", 
   assert.equal(fallbackCalls, 0);
   assert.equal(budget.snapshot().calls, 1);
 });
+
+test("gateway falls back once when provider returns empty content with a finish reason", async () => {
+  const budget = new TokenBudget(
+    { maxTokens: 10_000, maxCostNanoUsd: 1_000_000n, maxCalls: 10, maxInFlight: 1 },
+    ["primary", "fallback"].map((key) => ({
+      key,
+      limit: { maxTokens: 10_000, maxCostNanoUsd: 1_000_000n, maxCalls: 10, maxInFlight: 1 },
+      price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 1n },
+    })),
+  );
+  let primaryCalls = 0;
+  let fallbackCalls = 0;
+  const primary: InternalRoute = {
+    ...route(async () => {
+      primaryCalls += 1;
+      throw new MeteredProviderError(
+        { inputTokens: 13, outputTokens: 7 },
+        "provider_empty_content_finish_stop",
+      );
+    }),
+    id: "primary",
+    budgetKey: "primary",
+  };
+  const fallback: InternalRoute = {
+    ...route(async () => {
+      fallbackCalls += 1;
+      return {
+        value: { recovered: true },
+        usage: { inputTokens: 11, outputTokens: 6 },
+        finishReason: "complete",
+      };
+    }),
+    id: "fallback",
+    budgetKey: "fallback",
+  };
+
+  const gateway = new TokenAwareGateway(budget, [primary, fallback]);
+  assert.deepEqual(await gateway.generate(request()), { recovered: true });
+  assert.equal(primaryCalls, 1);
+  assert.equal(fallbackCalls, 1);
+  assert.equal(budget.snapshot().calls, 2);
+  assert.equal(budget.snapshot().chargedTokens, 37);
+  assert.equal(budget.snapshot().reservedTokens, 0);
+});
