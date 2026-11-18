@@ -2,8 +2,8 @@
  * Deterministic before/after benchmark for skill evaluations.
  *
  * A candidate may not silently drop a baseline check, introduce a failing check,
- * or turn a previously passing check into a failure. Baselines must themselves
- * be valid and fully passing; otherwise there is no trustworthy regression oracle.
+ * or turn a previously passing check into a failure. Failed baseline checks may
+ * remain unchanged or improve, but a candidate must pass every check to pass.
  */
 export interface SkillBenchmarkCheck {
   name: string;
