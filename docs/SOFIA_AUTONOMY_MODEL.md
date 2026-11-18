@@ -130,3 +130,21 @@ polls it while a job is running. A positive result or a failed kill-switch
 authority check aborts the runtime and cancels the job (fail-closed). The host
 must implement the callback against authoritative user, project and global
 kill-switch state. Model output and job payloads cannot set or disable it.
+
+### Project-memory integration and replay identity
+
+`createProjectMemoryLearningRecorder()` adapts research learning records to
+the existing `ProjectMemoryStore`. It derives a deterministic memory-entry ID
+from the idempotency key, scopes the entry to a host-resolved project for the
+authenticated principal, and writes bounded research evidence as a decision
+memory. The supervisor supplies a job-scoped prefix
+(`autonomy-job:<job-id>`) so different jobs owned by the same principal do
+not collide on cycle numbers. The host must provide the correct project
+resolver and a memory store appropriate to its deployment concurrency model.
+
+The research loop validates that a resumed checkpoint contains exactly the
+completed cycle prefix and checks cancellation between adapter stages. A
+completed experiment whose worker crashes before its learning/checkpoint write
+may still be repeated; experiment adapters must use deterministic artifacts or
+their own idempotency/operation ledger. This is not an exactly-once execution
+guarantee.
