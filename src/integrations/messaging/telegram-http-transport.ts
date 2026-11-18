@@ -48,6 +48,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
   let pollLeaseHandle: TelegramPollLeaseHandle | undefined;
   let leaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
   let leaseRenewalInFlight = false;
+  let leaseLost = false;
 
   async function request<T>(method: string, body: Record<string, unknown> | undefined, signal: AbortSignal): Promise<T> {
     let response: Response;
@@ -142,6 +143,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     async start(signal, onUpdate) {
       if (!stopped) return;
       stopped = false;
+      leaseLost = false;
       controller = new AbortController();
       if (options.pollLease) {
         try {
@@ -176,25 +178,25 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         // this process continue polling after its distributed lease can expire.
         const renewDeadlineMs = Math.min(renewEvery, leaseTtlMs - (2 * renewEvery));
         leaseRenewalTimer = setInterval(() => {
-          if (leaseRenewalInFlight || stopped || !pollLeaseHandle) return;
+          if (leaseRenewalInFlight || leaseLost || stopped || !pollLeaseHandle) return;
           leaseRenewalInFlight = true;
           const lease = pollLeaseHandle;
           let deadline: ReturnType<typeof setTimeout> | undefined;
           const timedRenewal = new Promise<boolean>((resolve) => {
             deadline = setTimeout(() => resolve(false), renewDeadlineMs);
           });
-          void Promise.race([lease.renew(), timedRenewal]).then((renewed) => {
-            if (!renewed && !stopped) {
-              // Abort first. The in-flight Redis call may settle later, but it
-              // cannot restore polling; shutdown releases this owner token.
-              try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
-              controller?.abort();
-            }
+          const markLeaseLost = () => {
+            if (stopped || leaseLost) return;
+            leaseLost = true;
+            if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
+            leaseRenewalTimer = undefined;
+            try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
+            controller?.abort();
+          };
+          void Promise.race([Promise.resolve().then(() => lease.renew()), timedRenewal]).then((renewed) => {
+            if (!renewed) markLeaseLost();
           }).catch(() => {
-            if (!stopped) {
-              try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
-              controller?.abort();
-            }
+            markLeaseLost();
           }).finally(() => {
             if (deadline) clearTimeout(deadline);
             leaseRenewalInFlight = false;
