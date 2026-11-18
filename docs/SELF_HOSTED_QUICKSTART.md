@@ -60,7 +60,6 @@ Compose mounts the named volume `sofia-agent-data` at `/data` and configures:
 
 - `SOFIA_WORKSPACE=/data/workspace`
 - `SOFIA_STATE_DIR=/data/state`
-- `SOFIA_RUN_STORE_DIR=/data/state/api-runs`
 
 The API usage file is stored under the workspace's `.sofia` directory by the current entrypoint. Do not remove the volume when upgrading. The volume contains user data and should be backed up and protected as sensitive information.
 
