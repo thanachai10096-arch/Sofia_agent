@@ -28,7 +28,7 @@ export class SqliteApprovalDecisionStore implements ApprovalDecisionStore {
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
     try {
-      db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
+      db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL;");
       restrictSqlitePermissions(absolutePath);
       const store = new SqliteApprovalDecisionStore(db, absolutePath);
       store.migrate();
