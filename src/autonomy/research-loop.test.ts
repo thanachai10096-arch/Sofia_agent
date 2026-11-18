@@ -94,3 +94,31 @@ test("learning requires principal identity", async () => {
     budgetContext: validBudget,
   }), /principal identity/i);
 });
+
+test("research loop resumes after a persisted cycle without replaying earlier cycles", async () => {
+  const keys: string[] = [];
+  const saved: number[] = [];
+  const prior = {
+    cycle: 1,
+    question: "Earlier question",
+    finding: { summary: "Earlier finding", sourceIds: ["prior"], confidence: 0.9 },
+    hypothesis: { statement: "Earlier hypothesis", successMetric: "earlier metric" },
+    status: "learned" as const,
+  };
+  const report = await runIndependentResearchLoop({
+    adapters: adapters({
+      recordLearning: async (input) => { keys.push(input.idempotencyKey); },
+    }),
+    signal: new AbortController().signal,
+    principalId: "tenant-user-1",
+    sandboxAvailable: false,
+    budgetContext: () => ({}),
+    maxCycles: 2,
+    startCycle: 2,
+    previousCycles: [prior],
+    onCycle: async (cycle, nextCycle) => { saved.push(cycle.cycle, nextCycle); },
+  });
+  assert.deepEqual(report.cycles.map((cycle) => cycle.cycle), [1, 2]);
+  assert.deepEqual(keys, ["research:tenant-user-1:2"]);
+  assert.deepEqual(saved, [2, 3]);
+});
