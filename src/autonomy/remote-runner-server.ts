@@ -79,7 +79,7 @@ function validateRequest(value: unknown, options: Required<Pick<RemoteSandboxRun
       typeof value.command !== "string" || !value.command.trim() || value.command.includes("\0") ||
       !Array.isArray(value.args) || value.args.length > 128 ||
       value.args.some((arg) => typeof arg !== "string" || arg.includes("\0")) ||
-      typeof value.cwd !== "string" || typeof value.timeoutMs !== "number" ||
+      typeof value.cwd !== "string" || value.cwd.includes("\0") || typeof value.timeoutMs !== "number" ||
       !Number.isSafeInteger(value.timeoutMs) || value.timeoutMs < 1 || value.timeoutMs > options.maxTimeoutMs ||
       typeof value.maxOutputBytes !== "number" || !Number.isSafeInteger(value.maxOutputBytes) ||
       value.maxOutputBytes < 1 || value.maxOutputBytes > 10 * 1024 * 1024 ||
@@ -225,6 +225,11 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
     }
     if (activeRuns >= maxConcurrentRuns) {
       json(response, 429, { error: "runner_busy" });
+      return;
+    }
+    const contentType = request.headers["content-type"];
+    if (typeof contentType !== "string" || !contentType.toLowerCase().startsWith("application/json")) {
+      json(response, 415, { error: "unsupported_media_type" });
       return;
     }
     activeRuns += 1;
