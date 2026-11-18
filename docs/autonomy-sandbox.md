@@ -35,3 +35,18 @@ This is container isolation, not a guarantee against kernel or container-runtime
 The current Sofia Railway staging service is configured with the Railpack builder. That configuration does not provide a Docker daemon or Docker socket to the application container. Therefore, setting `SOFIA_SANDBOX_IMAGE` and `SOFIA_SANDBOX_ATTESTATION_SECRET` on that service is not sufficient to make `ContainerSandbox` operational: the `docker` CLI would have no trusted daemon to control.
 
 Keep the sandbox disabled on this Railway service until a separately provisioned, trusted sandbox host/runner is available and connected through an authenticated host-owned adapter. Do not mount the Docker socket from an untrusted/shared host or silently switch the main service to privileged Docker-in-Docker. The runner must enforce per-run isolation, resource limits, public-internet-only egress, tenant separation, cleanup, and auditable job identity. The current Railway staging service has not been changed or deployed as part of this work.
+
+## Remote runner client
+
+Sofia can use an independently hosted runner instead of requiring a Docker daemon in the Railway application service:
+
+- `SOFIA_REMOTE_SANDBOX_URL`: HTTPS base URL of the trusted runner API.
+- `SOFIA_REMOTE_SANDBOX_TOKEN`: host-only bearer token (minimum 32 characters).
+- `SOFIA_SANDBOX_ATTESTATION_SECRET`: still required for Sofia's local per-principal/per-run attestation.
+- `SOFIA_SANDBOX_ALLOW_NETWORK=false`: host-controlled network disable switch; the model cannot override it.
+
+When both remote URL and token are configured, the factory selects `RemoteSandbox` ahead of the local Docker adapter. The client sends a bounded base64 project snapshot to `POST /v1/sandbox/execute` with protocol version 1, request ID, command, arguments, working directory, timeout, output limit and the host-approved network flag. The runner must echo the protocol version and request ID and return stdout, stderr, exit code, and updated files. Returned paths must match files in the submitted snapshot; new files and deletions are not promoted through this first workflow. The client rejects path traversal, duplicate/unknown paths, oversized responses and malformed protocol replies.
+
+**The remote runner service is a separate deployment and is not included or provisioned by this client change.** It must authenticate the bearer token, enforce per-request container isolation and resource limits, validate every request independently, never mount the Railway app filesystem, and apply a host-level egress firewall that blocks loopback, private, link-local, metadata and internal service ranges. If network egress cannot be restricted to approved public destinations, it must run with networking disabled. Never expose the token to the model or store it in the project workspace.
+
+Required runtime configuration to enable the client is `SOFIA_ALLOW_SANDBOX=true`, `SOFIA_SANDBOX_ATTESTATION_SECRET`, `SOFIA_REMOTE_SANDBOX_URL`, and `SOFIA_REMOTE_SANDBOX_TOKEN`, plus an authenticated `principalId`. Do not set these on Railway until the runner service is deployed and independently security-tested.
