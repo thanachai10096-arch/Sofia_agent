@@ -6,6 +6,7 @@ import { AuditSkillEvidenceVerifier, skillPackageDigest } from "./skill-evidence
 import { actionHash } from "../security/guard.js";
 
 const runId = "brain-run-1";
+const principalId = "owner-1";
 const skill: SkillPackage = {
   source: "learned",
   version: "1.0.0",
@@ -25,8 +26,9 @@ function event(kind: string, overrides: Partial<SecurityAuditEvent> = {}): Secur
     id: "evidence-" + kind,
     at: new Date(0).toISOString(),
     runId,
+    principalId,
     toolName: "project.verify",
-    actionHash: actionHash(runId, "project.verify", { kind }),
+    actionHash: actionHash(runId, "project.verify", { kind }, principalId),
     risk: "low",
     decision: "completed",
     input: { kind },
@@ -48,8 +50,9 @@ function attestation(overrides: Partial<SecurityAuditEvent> = {}): SecurityAudit
     id: "skill-attestation-1",
     at: new Date(0).toISOString(),
     runId,
+    principalId,
     toolName,
-    actionHash: actionHash(runId, toolName, input),
+    actionHash: actionHash(runId, toolName, input, principalId),
     risk: "low",
     decision: "completed",
     input,
@@ -226,3 +229,11 @@ test("trusted evidence verifier rejects replicated records that differ in securi
   assert.equal(checks.find((check) => check.name === "required-verification:typecheck")?.passed, false);
 });
 
+test("trusted evidence verifier rejects attestations without an authenticated principal", async () => {
+  const records = [...["typecheck", "test", "build"].map((kind) => event(kind)), attestation({ principalId: undefined })];
+  const verifier = new AuditSkillEvidenceVerifier(async () => records);
+  const checks = await verifier.verify(skill, provenance);
+  assert.equal(checks[0]?.name, "trusted-evidence-principal");
+  assert.equal(checks[0]?.passed, false);
+});
+\n
