@@ -146,3 +146,30 @@ test("host kill switch cancels a claimed job before research starts", async () =
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("worker session exits cleanly when host requests shutdown", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-worker-session-"));
+  try {
+    const store = new FileAutonomyJobStore("worker-session-test", root);
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: { runResearch: async () => ({ completed: true, stoppedBy: "cycle-budget", cycles: [] }) },
+      resolveAdapters: async () => ({
+        observe: async () => ({ signal: "x", sourceIds: [] }),
+        identifyGaps: async () => [],
+        researchLocally: async () => ({ summary: "x", sourceIds: [], confidence: 1 }),
+        formulateHypothesis: async () => ({ statement: "x", successMetric: "x" }),
+        experiment: async () => ({ passed: true, summary: "x", benchmarkBefore: 0, benchmarkAfter: 1, safetyIncidents: 0, rollbackAvailable: true }),
+        recordLearning: async () => undefined,
+      }),
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const result = await supervisor.runUntilStopped("worker-1", controller.signal);
+    assert.deepEqual(result, { processed: 0, infrastructureErrors: 0, stoppedBy: "aborted" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
