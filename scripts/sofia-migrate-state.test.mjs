@@ -80,3 +80,27 @@ test("migration refuses symbolic links", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("migration can inventory a previous configured state root", async () => {
+  const root = await temporaryDirectory();
+  try {
+    const oldState = path.join(root, "old-state");
+    const newState = path.join(root, "new-state");
+    await mkdir(path.join(oldState, "sofia-agents-sessions"), { recursive: true });
+    await writeFile(path.join(oldState, "sofia-agents-sessions", "sessions.sqlite"), "sqlite-placeholder");
+    const plan = buildMigrationPlan({
+      workspace: path.join(root, "workspace"),
+      stateDir: newState,
+      tempDir: path.join(root, "unused-temp"),
+      homeDir: root,
+      platform: "linux",
+      env: { SOFIA_LEGACY_STATE_DIR: oldState },
+    });
+    const report = await inspectMigration(plan);
+    assert.equal(report.length, 1);
+    assert.equal(report[0].target, path.join(newState, "sofia-agents-sessions"));
+    assert.equal(report[0].files, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
