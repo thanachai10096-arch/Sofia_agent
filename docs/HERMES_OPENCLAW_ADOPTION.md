@@ -149,3 +149,10 @@ The verifier also recomputes the security action hash for both the candidate att
 ### Telegram poll lease renewal safety
 
 The Telegram HTTP transport requires a lease handle to expose its TTL and limits renewal cadence to at most one third of that TTL. Each renewal attempt is bounded by a deadline that aborts the active poll on timeout or unknown outcome. Invalid TTL/renewal combinations release the lease and fail startup closed. The transport remains opt-in: the Railway composition root must inject a shared Redis-backed lease and a multi-instance staging test must pass before enabling it in a deployed environment.
+
+
+## Persisted Skill lifecycle concurrency guard
+
+The file-backed Skill lifecycle now uses an exclusive sidecar lock (`skill-lifecycle.json.lock`) for each durable write. Under that lock it compares the on-disk snapshot with the exact revision loaded by the writer. If another process has committed a newer revision, the stale writer fails closed rather than overwriting it. Mutating operations restore their in-memory snapshot when persistence fails.
+
+The lock is intentionally non-stealable. If a process crashes while holding it, future writes fail with a lock-exists error until an operator confirms the owning process is gone and removes the stale sidecar. Do not automatically delete a lock based only on age or a PID check: PID reuse, host identity, and shared-volume semantics make that unsafe. This is a single-file concurrency guard, not a replacement for a transactional shared database or a distributed job store. The full test suite and CI must pass before this change is considered validated.
