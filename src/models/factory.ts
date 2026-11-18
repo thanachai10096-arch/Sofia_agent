@@ -33,6 +33,7 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
 import { EncryptedFileAudit } from "../security/persistent-audit.js";
@@ -58,7 +59,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
     ];
     return { passed: checks.every((check) => check.passed), checks };
-  }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
+  }, { file: path.join(sofiaStateDirectory("skills"), "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
@@ -119,12 +120,12 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
 }
 
 export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
-  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
+  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(sofiaStateDirectory("security"),"security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
   const tools=createToolRegistry(createBuiltinTools());
   const provider=new SofiaModelGateway(config.providers);
-  const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
+  const evolution=new EvolutionEngine(path.join(sofiaStateDirectory("evolution"), "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
     process.env.SOFIA_BROWSER_HEADLESS === "false" && process.env.SOFIA_BROWSER_PROFILE_DIR?.trim()
       ? new BrowserProfileSessionManager(new BrowserProfileStore(process.env.SOFIA_BROWSER_PROFILE_DIR), () => new PlaywrightBrowserRuntime())
