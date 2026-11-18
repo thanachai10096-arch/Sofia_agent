@@ -21,6 +21,7 @@ export interface AutonomyJob<TPayload = unknown, TResult = unknown> {
   updatedAt: string;
   availableAt: string;
   lease?: { workerId: string; expiresAt: string };
+  checkpoint?: { nextCycle: number; cycles: unknown[]; updatedAt: string };
 }
 
 export interface EnqueueAutonomyJob<TPayload = unknown> {
@@ -38,6 +39,7 @@ export interface AutonomyJobStore {
   list<TPayload = unknown>(principalId: string): Promise<AutonomyJob<TPayload>[]>;
   claimNext<TPayload = unknown>(workerId: string, leaseMs: number): Promise<AutonomyJob<TPayload> | undefined>;
   heartbeat(principalId: string, jobId: string, workerId: string, leaseMs: number): Promise<AutonomyJob>;
+  saveCheckpoint(principalId: string, jobId: string, workerId: string, checkpoint: { nextCycle: number; cycles: unknown[] }): Promise<AutonomyJob>;
   complete<TResult>(principalId: string, jobId: string, workerId: string, result: TResult): Promise<AutonomyJob<unknown, TResult>>;
   fail(principalId: string, jobId: string, workerId: string, error: string, retryable: boolean): Promise<AutonomyJob>;
   cancel(principalId: string, jobId: string): Promise<AutonomyJob>;
@@ -206,6 +208,20 @@ export class FileAutonomyJobStore implements AutonomyJobStore {
     return this.serialize(async () => {
       const job = await this.owned(principalId, jobId, workerId);
       job.lease!.expiresAt = new Date(Date.now() + leaseMs).toISOString();
+      job.updatedAt = new Date().toISOString();
+      await this.write(job);
+      return job;
+    });
+  }
+
+  async saveCheckpoint(principalId: string, jobId: string, workerId: string, checkpoint: { nextCycle: number; cycles: unknown[] }): Promise<AutonomyJob> {
+    if (!Number.isSafeInteger(checkpoint.nextCycle) || checkpoint.nextCycle < 1 ||
+        !Array.isArray(checkpoint.cycles) || checkpoint.cycles.length > 100) {
+      throw new Error("Invalid autonomy research checkpoint.");
+    }
+    return this.serialize(async () => {
+      const job = await this.owned(principalId, jobId, workerId);
+      job.checkpoint = { ...checkpoint, updatedAt: new Date().toISOString() };
       job.updatedAt = new Date().toISOString();
       await this.write(job);
       return job;
