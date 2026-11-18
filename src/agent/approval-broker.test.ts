@@ -20,10 +20,10 @@ test("approval broker exposes a pending action and accepts one exact hash-bound 
   assert.equal(record.toolName, "workspace.write_file");
   assert.equal(record.actionHash, "action-hash-1");
   assert.equal(JSON.stringify(record.input).includes("secret-value"), false);
-  assert.equal(await broker.approve(record.id, "wrong-hash", "approver-1"), false);
-  assert.equal(await broker.approve(record.id, record.actionHash, "approver-1"), true);
+  assert.equal(await broker.approve(record.id, "wrong-hash", "principal-1"), false);
+  assert.equal(await broker.approve(record.id, record.actionHash, "principal-1"), true);
   assert.equal(await pending, true);
-  assert.equal(await broker.deny(record.id, record.actionHash, "approver-1"), false, "terminal decisions cannot be replayed");
+  assert.equal(await broker.deny(record.id, record.actionHash, "principal-1"), false, "terminal decisions cannot be replayed");
 });
 
 test("approval broker denies requests without a trusted principal", async () => {
@@ -53,9 +53,9 @@ test("approval broker expires requests and denies late approvals", async () => {
   const [record] = await broker.listPending("principal-1");
   assert.ok(record);
   now = record.expiresAt + 1;
-  assert.equal(await broker.approve(record.id, record.actionHash, "approver-1"), false, "approval after expiry must be rejected even before the waiter polls");
+  assert.equal(await broker.approve(record.id, record.actionHash, "principal-1"), false, "approval after expiry must be rejected even before the waiter polls");
   assert.equal(await pending, false);
-  assert.equal(await broker.approve(record.id, record.actionHash, "approver-1"), false);
+  assert.equal(await broker.approve(record.id, record.actionHash, "principal-1"), false);
   assert.equal((await store.get(record.id))?.status, "expired");
 });
 
