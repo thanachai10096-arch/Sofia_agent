@@ -194,7 +194,7 @@ export function createTelegramMessagingRuntime(
     (railwayDomain ? "https://" + railwayDomain.replace(/^https?:\/\//i, "").replace(/\/$/, "") : "");
 
   if (!token || !rawUsers || !rawChats || !rawUserApiKeys || !rawRegisteredApiKeys || !baseUrl) {
-    onWarning("Telegram integration disabled: token, API connection, explicit allowlists, and per-user API keys are required.");
+    onWarning("Telegram integration disabled: token, API connection, explicit allowlists, and registered per-user API keys with required scopes are required.");
     return undefined;
   }
 
