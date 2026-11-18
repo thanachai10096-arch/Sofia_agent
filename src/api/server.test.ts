@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
+import { loadApiKeyScopes } from "./auth-keys.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
@@ -183,6 +184,53 @@ test("API ignores client-supplied principalId and derives identity only from bea
     assert.deepEqual(observedPrincipals, [expectedPrincipal]);
     assert.notEqual(observedPrincipals[0], "attacker-selected-victim");
     assert.notEqual(observedPrincipals[0], "another-user");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("distinct integration API keys resolve to distinct owner principals", async () => {
+  const principals: string[] = [];
+  const apiKeys = loadApiKeyScopes(
+    "primary-service-key",
+    ["agent:run"],
+    JSON.stringify({
+      "telegram-user-one-key": ["agent:run"],
+      "telegram-user-two-key": ["agent:run"],
+    }),
+  );
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: {
+      async save() {},
+      async list() { return []; },
+      async find(userId: string) { principals.push(userId); return []; },
+      async delete() { return false; },
+      async clear() {},
+    },
+  }, { apiKeys });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    for (const key of ["telegram-user-one-key", "telegram-user-two-key"]) {
+      const response = await fetch("http://127.0.0.1:" + address.port + "/v1/agent/runs", {
+        method: "POST",
+        headers: { authorization: "Bearer " + key, "content-type": "application/json" },
+        body: JSON.stringify({ task: "retrieve my preferences" }),
+      });
+      assert.equal(response.status, 200);
+    }
+    assert.equal(principals.length, 2);
+    assert.notEqual(principals[0], principals[1]);
+    assert.deepEqual(principals, [
+      createHash("sha256").update("telegram-user-one-key").digest("hex").slice(0, 32),
+      createHash("sha256").update("telegram-user-two-key").digest("hex").slice(0, 32),
+    ]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
