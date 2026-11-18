@@ -24,11 +24,16 @@ export interface AutonomyJobSupervisorOptions<TPayload = unknown> {
 /** Executes at most one durable job per call; scheduling remains host-owned. */
 export class AutonomyJobSupervisor<TPayload = unknown> {
   private readonly leaseMs;
+  private readonly killSwitchPollMs;
 
   constructor(private readonly options: AutonomyJobSupervisorOptions<TPayload>) {
     this.leaseMs = options.leaseMs ?? 30_000;
+    this.killSwitchPollMs = options.killSwitchPollMs ?? 5_000;
     if (!Number.isSafeInteger(this.leaseMs) || this.leaseMs < 3_000 || this.leaseMs > 300_000) {
       throw new Error("Autonomy worker lease must be between 3s and 5m.");
+    }
+    if (!Number.isSafeInteger(this.killSwitchPollMs) || this.killSwitchPollMs < 1_000 || this.killSwitchPollMs > 60_000) {
+      throw new Error("Kill-switch polling interval must be between 1s and 60s.");
     }
   }
 
@@ -42,11 +47,6 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
     const forwardAbort = () => controller.abort(signal.reason ?? new Error("Worker shutdown requested."));
     signal.addEventListener("abort", forwardAbort, { once: true });
     if (signal.aborted) forwardAbort();
-    const killPollMs = this.options.killSwitchPollMs ?? 5_000;
-    if (!Number.isSafeInteger(killPollMs) || killPollMs < 1_000 || killPollMs > 60_000) {
-      await this.options.store.cancel(job.principalId, job.id);
-      throw new Error("Kill-switch polling interval must be between 1s and 60s.");
-    }
     const pollKillSwitch = async () => {
       if (!this.options.isKilled || controller.signal.aborted) return;
       try {
@@ -57,7 +57,7 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
       }
     };
     await pollKillSwitch();
-    const killPoll = setInterval(() => { void pollKillSwitch(); }, killPollMs);
+    const killPoll = setInterval(() => { void pollKillSwitch(); }, this.killSwitchPollMs);
     const heartbeat = setInterval(() => {
       void this.options.store.heartbeat(job.principalId, job.id, workerId, this.leaseMs)
         .catch((error: unknown) => controller.abort(error instanceof Error ? error : new Error("Job lease heartbeat failed.")));
