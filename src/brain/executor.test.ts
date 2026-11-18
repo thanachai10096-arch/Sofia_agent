@@ -365,7 +365,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
   assert.ok(events.some((event) => event.type === "brain.subagent.proposal.accepted" && event.childTaskId && /^[a-f0-9]{64}$/.test(event.proposalFingerprint ?? "") && event.toolName === "workspace.write_file"));
   assert.ok(events.some((event) => event.type === "brain.subagent.proposal.executed" && event.childTaskId && event.proposalFingerprint));
   assert.equal(events.some((event) => event.type === "brain.replan.started"), false);
-  assert.ok(events.includes("brain.verification.completed"));
+  assert.ok(events.some((event) => event.type === "brain.verification.completed"));
 
   const trace = brain.getExecutionTrace();
   assert.ok(trace.length > 0);
