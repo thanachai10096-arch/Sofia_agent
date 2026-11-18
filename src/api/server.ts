@@ -419,29 +419,39 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }
         }
         if (req.method === "GET" && isAutonomyJobCollection) {
-          const jobs = await store.list(auth.keyId);
-          return json(res, 200, { jobs: jobs.slice(0, 100).map(publicAutonomyJob) }, origin, config);
+          try {
+            const jobs = await store.list(auth.keyId);
+            return json(res, 200, { jobs: jobs.slice(0, 100).map(publicAutonomyJob) }, origin, config);
+          } catch {
+            return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config);
+          }
         }
         if (autonomyJobIdMatch && req.method === "GET") {
           let jobId: string;
           try { jobId = decodeURIComponent(autonomyJobIdMatch[1]!); }
           catch { return json(res, 400, { error: "invalid_job_id" }, origin, config); }
-          const job = await store.get(auth.keyId, jobId);
-          return job
-            ? json(res, 200, { job: publicAutonomyJob(job) }, origin, config)
-            : json(res, 404, { error: "autonomy_job_not_found" }, origin, config);
+          try {
+            const job = await store.get(auth.keyId, jobId);
+            return job
+              ? json(res, 200, { job: publicAutonomyJob(job) }, origin, config)
+              : json(res, 404, { error: "autonomy_job_not_found" }, origin, config);
+          } catch {
+            return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config);
+          }
         }
         if (autonomyJobIdMatch && req.method === "DELETE") {
           let jobId: string;
           try { jobId = decodeURIComponent(autonomyJobIdMatch[1]!); }
           catch { return json(res, 400, { error: "invalid_job_id" }, origin, config); }
+          let existing;
+          try { existing = await store.get(auth.keyId, jobId); }
+          catch { return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config); }
+          if (!existing) return json(res, 404, { error: "autonomy_job_not_found" }, origin, config);
           try {
-            const existing = await store.get(auth.keyId, jobId);
-            if (!existing) return json(res, 404, { error: "autonomy_job_not_found" }, origin, config);
             const cancelled = await store.cancel(auth.keyId, jobId);
             return json(res, 200, { job: publicAutonomyJob(cancelled) }, origin, config);
           } catch {
-            return json(res, 404, { error: "autonomy_job_not_found" }, origin, config);
+            return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config);
           }
         }
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
