@@ -576,38 +576,55 @@ export class SofiaBrain {
 
     this.usage.modelCalls += 1;
     const role = roleForTask(task, failureCategory);
+    // Parent creates the correlation ID; a child cannot choose or spoof it.
+    const childTaskId = randomUUID();
+    this.emit({ type: "brain.subagent.assigned", childTaskId, agentRole: role });
     const rawResult = await this.wait(() =>
       runtime.run({
         role,
         task,
-        context,
+        context: { ...context, parentRunId: this.runId, childTaskId },
         availableTools: subagentToolCatalog(this.dependencies.tools),
         signal: this.signal,
       }),
     );
-    const result = validateSubagentResult(rawResult, role);
-    if (!result) {
-      this.emit({ type: "brain.subagent.rejected" });
+    const validated = validateSubagentResult(rawResult, role);
+    if (!validated) {
+      this.emit({ type: "brain.subagent.rejected", childTaskId, agentRole: role });
       return undefined;
     }
 
-    this.emit({ type: "brain.subagent.completed" });
-    return result;
+    this.emit({ type: "brain.subagent.completed", childTaskId, agentRole: role });
+    return { ...validated, childTaskId };
   }
 
-  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<boolean> {
-    // The same canonical catalog policy is used when exposing tools to the
-    // specialist and when validating its proposal. ToolGateway remains the
-    // final authority and executeStep still enforces effects/approvals.
-    if (!isSubagentToolAllowed(proposal.tool, this.dependencies.tools)) return false;
+  private async applySubagentProposal(
+    proposal: { tool: string; input: Record<string, unknown>; reason: string },
+    childTaskId: string,
+    agentRole: SubagentResult["role"],
+    principalId?: string,
+  ): Promise<boolean> {
+    // Parent fingerprints the exact proposed tool/input. ToolGateway independently
+    // binds approval to its own actionHash before executing the immutable input.
+    const proposalFingerprint = digest({
+      runId: this.runId, childTaskId, agentRole,
+      tool: proposal.tool, input: proposal.input,
+    });
+    this.emit({ type: "brain.subagent.proposal.received", childTaskId, agentRole, proposalFingerprint, toolName: proposal.tool });
+    if (!isSubagentToolAllowed(proposal.tool, this.dependencies.tools)) {
+      this.emit({ type: "brain.subagent.proposal.rejected", childTaskId, agentRole, proposalFingerprint, toolName: proposal.tool });
+      return false;
+    }
+    this.emit({ type: "brain.subagent.proposal.accepted", childTaskId, agentRole, proposalFingerprint, toolName: proposal.tool });
     this.move("replanning");
     this.move("executing");
     await this.executeStep({
-      id: "delegated-" + this.usage.steps,
+      id: "delegated-" + childTaskId,
       objective: proposal.reason,
       dependencies: [],
       call: { tool: proposal.tool, input: proposal.input },
     }, principalId);
+    this.emit({ type: "brain.subagent.proposal.executed", childTaskId, agentRole, proposalFingerprint, toolName: proposal.tool });
     this.move("observing");
     return true;
   }
@@ -1168,7 +1185,9 @@ export class SofiaBrain {
 
             // Only registered, explicitly permitted proposals enter ToolGateway.
             // Invalid proposals fall through to the primary planner's bounded replan.
-            const applied = await this.applySubagentProposal(specialist.proposedAction, input.principalId);
+            const applied = await this.applySubagentProposal(
+              specialist.proposedAction, specialist.childTaskId!, specialist.role, input.principalId,
+            );
             if (applied) {
               recoveryRounds += 1;
               recoveryFingerprints.add(diagnosis.fingerprint);
