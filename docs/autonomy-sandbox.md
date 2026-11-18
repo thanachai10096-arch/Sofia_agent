@@ -50,3 +50,19 @@ When both remote URL and token are configured, the factory selects `RemoteSandbo
 **The remote runner service is a separate deployment and is not included or provisioned by this client change.** It must authenticate the bearer token, enforce per-request container isolation and resource limits, validate every request independently, never mount the Railway app filesystem, and apply a host-level egress firewall that blocks loopback, private, link-local, metadata and internal service ranges. If network egress cannot be restricted to approved public destinations, it must run with networking disabled. Never expose the token to the model or store it in the project workspace.
 
 Required runtime configuration to enable the client is `SOFIA_ALLOW_SANDBOX=true`, `SOFIA_SANDBOX_ATTESTATION_SECRET`, `SOFIA_REMOTE_SANDBOX_URL`, and `SOFIA_REMOTE_SANDBOX_TOKEN`, plus an authenticated `principalId`. Do not set these on Railway until the runner service is deployed and independently security-tested.
+
+### Running the standalone runner service
+
+The repository now includes `createRemoteSandboxRunnerServer()` and a standalone entrypoint (`npm run build && npm run runner:start`). Run this process on a dedicated Linux VM or host with a trusted Docker daemon; do not deploy it as another ordinary Railpack service unless that service genuinely has a separately secured container runtime.
+
+Runner host variables:
+
+- `SOFIA_RUNNER_SANDBOX_IMAGE`: preloaded immutable OCI image ending in `@sha256:<64 hex>`.
+- `SOFIA_REMOTE_SANDBOX_TOKEN`: same high-entropy secret configured on Sofia's host as `SOFIA_REMOTE_SANDBOX_TOKEN`.
+- `PORT`: listener port (default 8080).
+- `SOFIA_RUNNER_MAX_CONCURRENCY`, `SOFIA_RUNNER_MAX_REQUEST_BYTES`, `SOFIA_RUNNER_MAX_SNAPSHOT_BYTES`, `SOFIA_RUNNER_MAX_TIMEOUT_MS`: host-enforced limits.
+- `SOFIA_RUNNER_ALLOW_NETWORK=true` only when the VM firewall has been configured and verified to block loopback, private, link-local, metadata and internal destinations; then also set `SOFIA_RUNNER_PUBLIC_EGRESS_ENFORCED=true` as the operator attestation.
+
+The service defaults to networking disabled and refuses to start with network mode enabled unless the egress-firewall attestation is present. That flag is an operator assertion, not an automatic firewall detector. The service itself does not install host firewall rules. Place it behind HTTPS, restrict inbound access, keep the Docker daemon private to the dedicated host, monitor disk use, and patch the host/container runtime. Do not mount a general-purpose Docker socket into the Sofia Railway application.
+
+The HTTP handler authenticates bearer tokens, bounds request and snapshot sizes, validates request IDs and paths, limits concurrent runs, creates a fresh temporary workspace, and removes it after each run. The container runner remains responsible for enforcing CPU, memory, process, timeout and output limits. Run the service's test suite and a real host-level isolation/egress audit before configuring the Sofia Railway client. No runner service has been deployed by this change.
