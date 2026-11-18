@@ -96,12 +96,35 @@ export function evaluateAutonomyRequest(
     if (!profile.sandboxExperiments) return { allowed: false, mode: "denied", reason: "Sandbox experiments are disabled." };
     if (!context.sandboxAvailable) return { allowed: false, mode: "denied", reason: "An isolated sandbox is required; no fallback to host or production is allowed." };
     const budget = profile.budget;
-    if (context.remainingCycles !== undefined && context.remainingCycles <= 0) return { allowed: false, mode: "denied", reason: "Autonomy cycle budget exhausted." };
-    if (context.remainingSteps !== undefined && context.remainingSteps > budget.maxSteps) return { allowed: false, mode: "denied", reason: "Requested steps exceed the autonomy budget." };
-    if (context.remainingToolCalls !== undefined && context.remainingToolCalls > budget.maxToolCallsPerStep) return { allowed: false, mode: "denied", reason: "Requested tool calls exceed the per-step budget." };
-    if (context.experimentSeconds !== undefined && context.experimentSeconds > budget.maxExperimentSeconds) return { allowed: false, mode: "denied", reason: "Experiment runtime exceeds the configured budget." };
-    if (context.estimatedSpendUsd !== undefined && context.estimatedSpendUsd > budget.maxSpendUsd) return { allowed: false, mode: "denied", reason: "Estimated spend exceeds the configured budget." };
-    return { allowed: true, mode: "sandbox", reason: "Experiment is isolated and bounded by resource budgets." };
+    const validLimit = (value: number, minimum: number, maximum: number): boolean =>
+      Number.isSafeInteger(value) && value >= minimum && value <= maximum;
+    if (!budget || !validLimit(budget.maxCycles, 1, 10_000) ||
+        !validLimit(budget.maxSteps, 1, 100_000) ||
+        !validLimit(budget.maxToolCallsPerStep, 1, 10_000) ||
+        !validLimit(budget.maxExperimentSeconds, 1, 86_400) ||
+        !Number.isFinite(budget.maxSpendUsd) || budget.maxSpendUsd < 0 || budget.maxSpendUsd > 1_000_000) {
+      return { allowed: false, mode: "denied", reason: "Autonomy resource budget is invalid; sandbox execution is denied." };
+    }
+    // A sandbox grant is meaningful only when every resource dimension has
+    // been measured. Missing, malformed or negative counters must never mean
+    // "unlimited".
+    if (!validLimit(context.remainingCycles ?? Number.NaN, 1, budget.maxCycles)) {
+      return { allowed: false, mode: "denied", reason: "Autonomy cycle budget is missing, exhausted or exceeds the configured limit." };
+    }
+    if (!validLimit(context.remainingSteps ?? Number.NaN, 0, budget.maxSteps)) {
+      return { allowed: false, mode: "denied", reason: "Requested steps are missing, invalid or exceed the autonomy budget." };
+    }
+    if (!validLimit(context.remainingToolCalls ?? Number.NaN, 0, budget.maxToolCallsPerStep)) {
+      return { allowed: false, mode: "denied", reason: "Requested tool calls are missing, invalid or exceed the per-step budget." };
+    }
+    if (!validLimit(context.experimentSeconds ?? Number.NaN, 0, budget.maxExperimentSeconds)) {
+      return { allowed: false, mode: "denied", reason: "Experiment runtime is missing, invalid or exceeds the configured budget." };
+    }
+    if (!Number.isFinite(context.estimatedSpendUsd) || (context.estimatedSpendUsd ?? -1) < 0 ||
+        (context.estimatedSpendUsd ?? Number.POSITIVE_INFINITY) > budget.maxSpendUsd) {
+      return { allowed: false, mode: "denied", reason: "Estimated spend is missing, invalid or exceeds the configured budget." };
+    }
+    return { allowed: true, mode: "sandbox", reason: "Experiment is isolated and every resource dimension is within its configured budget." };
   }
   return { allowed: false, mode: "denied", reason: "Unknown autonomy action; default deny." };
 }
