@@ -25,7 +25,7 @@ function record(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
 }
 
 function response(result: unknown, ok = true): Response {
-  return { ok, json: async () => ({ result }) } as Response;
+  return { ok, json: async () => ({ result }) } as unknown as Response;
 }
 
 test("Upstash approval store creates with an atomic NX script and a cluster hash tag", async () => {
