@@ -56,7 +56,7 @@ The health endpoint is a process/API liveness check; it does not prove that a mo
 
 ## Data persistence
 
-Compose mounts a named volume at `/data` and configures. The default volume is `sofia-agent-data`; set `SOFIA_DOCKER_VOLUME` before running Compose when hosting multiple Sofia installations on the same Docker host so their data volumes remain isolated:
+Compose mounts a named volume at `/data` and configures. The default volume is `sofia-agent-data`. When hosting multiple Sofia installations on the same Docker host, export a unique `SOFIA_DOCKER_VOLUME` value in the shell before running any Compose, backup, restore, upgrade, or rollback command; use the same value consistently so each installation keeps its own data volume:
 
 - `SOFIA_WORKSPACE=/data/workspace`
 - `SOFIA_STATE_DIR=/data/state`
