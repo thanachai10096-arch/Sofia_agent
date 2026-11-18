@@ -1,10 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import path from "node:path";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import path from "node:path";
+import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
@@ -299,5 +298,25 @@ test("API run records are physically partitioned by authenticated API key", asyn
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(runStoreRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("API refuses a shared persistent run store when multiple API keys are configured", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "sofia-api-shared-run-store-"));
+  try {
+    assert.throws(() => createSofiaApi({
+      provider: { generate: async () => ({ text: "unused" }) },
+      router: { select: () => route, markUnhealthy: () => undefined },
+      reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    }, {
+      apiKeys: {
+        "shared-store-owner-one": ["agent:run"],
+        "shared-store-owner-two": ["agent:run"],
+      },
+      runStore: new FileRunRecordStore(directory),
+    }), /runStoreRoot is required/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
