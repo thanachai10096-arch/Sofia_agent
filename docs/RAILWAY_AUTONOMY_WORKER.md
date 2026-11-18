@@ -15,7 +15,11 @@ claim that the worker is already deployed.
 - The worker uses bounded sessions and exits on SIGTERM/SIGINT; Railway controls
   process restart and deployment lifecycle.
 
-## Worker host implementation\n\nThe repository now exports `runRailwayAutonomyWorker()` and `runRailwayAutonomyWorkerWithProcessSignals()` from `src/autonomy/railway-worker.ts`. The worker performs a `SELECT 1` connectivity preflight before claiming jobs. The process-signal wrapper removes its signal listeners and invokes the optional host-provided `closePool` callback in `finally`. The host supplies the PostgreSQL pool and all privileged adapters. The pool must expose `query()` and `connect()` and should be created by the host from its server-side `DATABASE_URL`. Startup is disabled unless `SOFIA_AUTONOMY_WORKER_ENABLED=true`, and refuses to start without `DATABASE_URL` or the required trusted dependencies. The helper processes a bounded session and returns; it does not create a Railway service, provision a database, or invent adapter implementations.\n\n## Required host bootstrap
+## Worker host implementation
+
+The repository now exports `runRailwayAutonomyWorker()` and `runRailwayAutonomyWorkerWithProcessSignals()` from `src/autonomy/railway-worker.ts`. The worker performs a `SELECT 1` connectivity preflight before claiming jobs. The process-signal wrapper removes its signal listeners and invokes the optional host-provided `closePool` callback in `finally`. The host supplies the PostgreSQL pool and all privileged adapters. The pool must expose `query()` and `connect()` and should be created by the host from its server-side `DATABASE_URL`. Startup is disabled unless `SOFIA_AUTONOMY_WORKER_ENABLED=true`, and refuses to start without `DATABASE_URL` or the required trusted dependencies. The helper processes a bounded session and returns; it does not create a Railway service, provision a database, or invent adapter implementations.
+
+## Required host bootstrap
 
 The host must construct a real PostgreSQL pool (for example, `pg.Pool`), then:
 
