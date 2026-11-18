@@ -55,8 +55,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Validate installer shell syntax
-        run: bash -n scripts/sofia-install.sh
+      - name: Validate installer and backup/restore shell syntax
+        run: |
+          bash -n scripts/sofia-install.sh
+          bash -n scripts/sofia-backup.sh
+          bash -n scripts/sofia-restore.sh
 
       - name: Validate Compose configuration
         run: |
