@@ -253,7 +253,6 @@ export class VersionedSkillLifecycle {
     try {
       this.platform.register(clone(current.package));
       this.persist();
-      this.clearMutationJournal();
     } catch (error) {
       this.snapshot = before;
       try {
@@ -268,6 +267,9 @@ export class VersionedSkillLifecycle {
       }
       throw error;
     }
+    // Snapshot commit is authoritative. A cleanup failure leaves a recoverable
+    // journal but must never roll back an already committed platform mutation.
+    this.clearMutationJournal();
     return clone(current);
   }
 
@@ -321,6 +323,9 @@ export class VersionedSkillLifecycle {
       }
       throw error;
     }
+    // Keep the committed target if journal cleanup fails; startup recovery
+    // will verify the snapshot and finish cleanup on the next process start.
+    this.clearMutationJournal();
     return clone(previous);
   }
 
@@ -344,6 +349,9 @@ export class VersionedSkillLifecycle {
     if (target.skill.id !== journal.skillId || (previous && previous.skill.id !== journal.skillId) ||
         !journal.transactionId || !journal.targetActiveId) throw new Error("Invalid skill mutation journal");
     const journalFile = this.mutationJournalFile;
+    if (existsSync(journalFile)) {
+      throw new Error("A pending skill mutation journal requires recovery before another platform mutation");
+    }
     const temporary = journalFile + "." + process.pid + "." + randomUUID() + ".tmp";
     const contents = JSON.stringify({ ...journal, targetPackage: target, previousPackage: previous }, null, 2) + "\n";
     try {
