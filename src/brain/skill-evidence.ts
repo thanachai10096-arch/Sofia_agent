@@ -88,6 +88,7 @@ export class AuditSkillEvidenceVerifier {
         const copyResult = copy.result;
         return copy.id === event?.id &&
           copy.runId === event?.runId &&
+          copy.principalId === event?.principalId &&
           copy.toolName === event?.toolName &&
           copy.actionHash === event?.actionHash &&
           copy.decision === event?.decision &&
