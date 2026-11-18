@@ -12,8 +12,6 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 MANIFEST="$BACKUP_DIR/upgrade-$STAMP.json"
 ROLLBACK_TAG="sofia-agent:rollback-$STAMP"
 PREVIOUS_IMAGE_ID=""
-UPGRADE_STARTED=0
-
 if ! [[ "$HEALTH_TIMEOUT" =~ ^[0-9]+$ ]] || [ "$HEALTH_TIMEOUT" -lt 10 ]; then
   echo "SOFIA_HEALTH_TIMEOUT_SECONDS must be an integer >= 10." >&2
   exit 2
@@ -51,7 +49,33 @@ else
   echo "No existing image '$IMAGE' found. This is a first install; no automatic image rollback is possible." >&2
 fi
 
-UPGRADE_STARTED=1
+
+restore_previous_image() {
+  if [ -z "$PREVIOUS_IMAGE_ID" ]; then
+    echo "No previous image is available for rollback." >&2
+    return 1
+  fi
+  docker image tag "$ROLLBACK_TAG" "$IMAGE"
+  docker compose up -d --no-deps --force-recreate "$SERVICE"
+  local rollback_container
+  rollback_container="$(docker compose ps -q "$SERVICE")"
+  [ -n "$rollback_container" ] || return 1
+  local deadline=$((SECONDS + HEALTH_TIMEOUT))
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local running health
+    running="$(docker inspect --format '{{.State.Running}}' "$rollback_container" 2>/dev/null || echo false)"
+    health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$rollback_container" 2>/dev/null || echo missing)"
+    [ "$running" = "true" ] && [ "$health" = "healthy" ] && {
+      echo "Previous image is healthy again."
+      return 0
+    }
+    [ "$running" != "true" ] || [ "$health" = "unhealthy" ] || [ "$health" = "missing" ] && return 1
+    sleep 3
+  done
+  echo "Previous image was restored but did not become healthy within the timeout." >&2
+  return 1
+}
+
 if ! docker compose build "$SERVICE"; then
   echo "Build failed. The running container was not intentionally replaced." >&2
   exit 1
@@ -60,8 +84,7 @@ fi
 if ! docker compose up -d --no-deps --force-recreate "$SERVICE"; then
   echo "Container recreation failed." >&2
   if [ -n "$PREVIOUS_IMAGE_ID" ]; then
-    docker image tag "$ROLLBACK_TAG" "$IMAGE"
-    docker compose up -d --no-deps --force-recreate "$SERVICE" || true
+    restore_previous_image || echo "Automatic rollback did not become healthy; inspect Docker logs." >&2
   fi
   exit 1
 fi
@@ -69,6 +92,7 @@ fi
 CONTAINER_ID="$(docker compose ps -q "$SERVICE")"
 if [ -z "$CONTAINER_ID" ]; then
   echo "Could not identify the upgraded container." >&2
+  [ -z "$PREVIOUS_IMAGE_ID" ] || restore_previous_image
   exit 1
 fi
 
@@ -89,9 +113,8 @@ done
 if [ "$HEALTH" != "healthy" ]; then
   echo "Upgrade did not become healthy (status: $HEALTH). Initiating image rollback." >&2
   if [ -n "$PREVIOUS_IMAGE_ID" ]; then
-    docker image tag "$ROLLBACK_TAG" "$IMAGE"
-    docker compose up -d --no-deps --force-recreate "$SERVICE"
-    echo "Previous image restored. Data volume was left untouched."
+    restore_previous_image || echo "Automatic rollback did not become healthy; inspect Docker logs." >&2
+    echo "Data volume was left untouched."
   else
     echo "No previous image was available; inspect logs and restore manually if needed." >&2
   fi
