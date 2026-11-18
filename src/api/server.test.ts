@@ -229,10 +229,22 @@ test("autonomy queue API derives tenant identity from auth and supports idempote
     const list = await listed.json() as { jobs: Array<{ id: string }> };
     assert.equal(list.jobs.length, 1);
 
+    const ownedRead = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
+      headers: { authorization: "Bearer autonomy-key-one" },
+    });
+    assert.equal(ownedRead.status, 200);
+    const ownedPayload = await ownedRead.json() as { job: { id: string } };
+    assert.equal(ownedPayload.job.id, first.job.id);
+
     const crossTenant = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
       headers: { authorization: "Bearer autonomy-key-two" },
     });
     assert.equal(crossTenant.status, 404);
+    const crossTenantCancel = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
+      method: "DELETE",
+      headers: { authorization: "Bearer autonomy-key-two" },
+    });
+    assert.equal(crossTenantCancel.status, 404);
 
     const cancelled = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
       method: "DELETE",
