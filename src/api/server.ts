@@ -400,13 +400,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ? createHash("sha256").update(auth.keyId).update(":autonomy:").update(idempotencyKey).digest("hex")
             : undefined;
           try {
+            const payload = { topic: input.topic.trim(), ...(input.context !== undefined ? { context: input.context } : {}) };
             const job = await store.enqueue({
               principalId: auth.keyId,
               kind: "research",
-              payload: { topic: input.topic.trim(), ...(input.context !== undefined ? { context: input.context } : {}) },
+              payload,
               ...(stableKey ? { idempotencyKey: stableKey } : {}),
               maxAttempts: 3,
             });
+            if (stableKey && JSON.stringify(job.payload) !== JSON.stringify(payload)) {
+              return json(res, 409, { error: "idempotency_key_conflict" }, origin, config);
+            }
             return json(res, 202, { job: publicAutonomyJob(job) }, origin, config);
           } catch (error) {
             return json(res, 400, { error: "autonomy_job_rejected", message: error instanceof Error ? error.message : "Invalid job" }, origin, config);
