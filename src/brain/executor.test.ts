@@ -1008,3 +1008,44 @@ test("explicit Thai file-edit requests stay on the action path even if the model
   assert.ok(!phases.includes("respond"));
   assert.ok(report.usage.toolCalls > 0);
 });
+
+
+test("Brain halts ambiguous successful side effects when completion evidence is missing", async () => {
+  let writes = 0;
+  let reads = 0;
+  let replans = 0;
+  const base = makeTools();
+  const tools: ToolGateway = {
+    ...base,
+    async execute(call, context) {
+      if (call.tool === "workspace.write_file") {
+        writes += 1;
+        return { ok: true, data: { committed: true }, evidenceId: "" };
+      }
+      if (call.tool === "workspace.list_files") reads += 1;
+      return base.execute(call, context);
+    },
+  };
+  const reasoner = makeReasoner((request) => {
+    if ((JSON.parse(request) as { phase: string }).phase === "replan") replans += 1;
+  });
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools, allowShell: false, allowNetwork: false },
+    limits: { maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5000 },
+  });
+  const report = await brain.run({
+    task: "Create hello.txt and verify it",
+    acceptanceCriteria: [{
+      id: "file-exists", description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) { return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" }; },
+    }],
+  });
+  assert.equal(report.completed, false);
+  assert.equal(report.state, "failed");
+  assert.equal(writes, 1, "a potentially committed side effect must not be retried");
+  assert.equal(reads, 0, "verification must not proceed without completion evidence");
+  assert.equal(replans, 0, "ambiguous side effects must not enter the recovery planner");
+  assert.match(report.remainingRisks.join(" "), /completion evidence was not persisted/i);
+});
