@@ -83,21 +83,12 @@ export class AuditSkillEvidenceVerifier {
       const event = copies[0];
       const input = event?.input;
       const result = event?.result;
-      const duplicateRecordsAgree = copies.every((copy) => {
-        const copyInput = copy.input;
-        const copyResult = copy.result;
-        return copy.id === event?.id &&
-          copy.runId === event?.runId &&
-          copy.principalId === event?.principalId &&
-          copy.toolName === event?.toolName &&
-          copy.actionHash === event?.actionHash &&
-          copy.decision === event?.decision &&
-          record(copyInput) && record(input) && copyInput.kind === input.kind &&
-          record(copyResult) && record(result) &&
-          copyResult.kind === result.kind &&
-          copyResult.code === result.code &&
-          copyResult.passed === result.passed;
-      });
+      // Replicated audit sinks may contain exact copies. Any field-level
+      // disagreement (including principal, risk, timestamp, reason, or payload
+      // fields not interpreted below) makes the evidence ambiguous and invalid.
+      const duplicateRecordsAgree = copies.every((copy) =>
+        event !== undefined && canonicalJson(copy) === canonicalJson(event)
+      );
       const kind = record(input) && typeof input.kind === "string" ? input.kind : "";
       const valid = Boolean(
         event &&
@@ -105,6 +96,7 @@ export class AuditSkillEvidenceVerifier {
         duplicateRecordsAgree &&
         event.id === evidenceId &&
         event.runId === provenance.runId &&
+        event.principalId === attestation?.principalId &&
         event.toolName === "project.verify" &&
         record(input) &&
         event.actionHash === computeActionHash(event.runId, event.toolName, input, event.principalId) &&
