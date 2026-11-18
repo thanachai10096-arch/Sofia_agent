@@ -229,3 +229,40 @@ test("Telegram polling reports HTTP errors with status", async () => {
   await transport.stop();
   assert.deepEqual(events[0], { event: "poll_failed", status: 503, kind: "http" });
 });
+
+test("Telegram transport exposes safe health transitions for a polling conflict", async () => {
+  const statuses: string[] = [];
+  let conflictResolve!: () => void;
+  const conflict = new Promise<void>((resolve) => { conflictResolve = resolve; });
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    if (String(input).endsWith("/getUpdates")) {
+      return new Response(JSON.stringify({
+        ok: false,
+        description: "Conflict: terminated by other getUpdates request",
+      }), { status: 409 });
+    }
+    return waitForAbort(init?.signal);
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onStatus(health) {
+      statuses.push(health.status);
+      if (health.status === "poll_conflict") conflictResolve();
+    },
+  });
+
+  assert.deepEqual(transport.getHealth(), { status: "stopped" });
+  await transport.start(new AbortController().signal, async () => {});
+  await Promise.race([
+    conflict,
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for conflict status")), 2_000)),
+  ]);
+  assert.deepEqual(transport.getHealth(), { status: "poll_conflict", lastStatusCode: 409 });
+  await transport.stop();
+  assert.deepEqual(transport.getHealth(), { status: "stopped" });
+  assert.ok(statuses.includes("starting"));
+  assert.ok(statuses.includes("poll_conflict"));
+  assert.equal(JSON.stringify(statuses).includes(token), false);
+});
