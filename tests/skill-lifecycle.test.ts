@@ -176,7 +176,7 @@ test("skill lifecycle requires non-empty, non-blank, unique evidence identifiers
 });
 
 
-test("legacy learned skills without run-bound evidence are quarantined on reload", async () => {
+test("persisted learned skills with even a non-empty forged runId are quarantined on reload", async () => {
   const root = dir();
   try {
     const file = path.join(root, "legacy.json");
@@ -186,6 +186,7 @@ test("legacy learned skills without run-bound evidence are quarantined on reload
       source: "verified-brain-repair",
       evidenceIds: ["legacy-evidence"],
       confidence: 0.95,
+      runId: "forged-but-non-empty-run-id",
     });
     await lifecycle.evaluate(candidate.id);
     lifecycle.promote(candidate.id);
@@ -195,5 +196,7 @@ test("legacy learned skills without run-bound evidence are quarantined on reload
     const restored = new VersionedSkillLifecycle(restoredPlatform, passing, { file });
     assert.equal(restored.active("repair-skill"), undefined);
     assert.equal(restoredPlatform.get("repair-skill"), undefined);
+    assert.equal(restored.list("repair-skill")[0]?.status, "rejected");
+    assert.equal(restored.list("repair-skill")[0]?.evaluation?.checks[0]?.name, "startup-evidence-quarantine");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
