@@ -6,6 +6,9 @@ import type { AutonomyJobStore } from "../autonomy/job-store.js";
 test("autonomy queue infrastructure errors return a generic 503 without leaking internals", async () => {
   const store = {
     enqueue: async () => { throw new Error("postgres://internal-host:5432/private-db: password rejected"); },
+    list: async () => { throw new Error("postgres://internal-host:5432/private-db: password rejected"); },
+    get: async () => { throw new Error("postgres://internal-host:5432/private-db: password rejected"); },
+    cancel: async () => { throw new Error("postgres://internal-host:5432/private-db: password rejected"); },
   } as unknown as AutonomyJobStore;
   const server = createSofiaApi({
     provider: { generate: async () => ({ text: "unused" }) },
@@ -39,6 +42,19 @@ test("autonomy queue infrastructure errors return a generic 503 without leaking 
     const payload = await response.json() as Record<string, unknown>;
     assert.deepEqual(payload, { error: "autonomy_queue_unavailable" });
     assert.equal(JSON.stringify(payload).includes("private-db"), false);
+
+    for (const [method, path] of [
+      ["GET", "/v1/autonomy/jobs"],
+      ["GET", "/v1/autonomy/jobs/job-123"],
+      ["DELETE", "/v1/autonomy/jobs/job-123"],
+    ] as const) {
+      const failed = await fetch("http://127.0.0.1:" + address.port + path, {
+        method,
+        headers: { authorization: "Bearer autonomy-test-key" },
+      });
+      assert.equal(failed.status, 503, method + " " + path);
+      assert.deepEqual(await failed.json(), { error: "autonomy_queue_unavailable" });
+    }
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
