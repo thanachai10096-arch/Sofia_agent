@@ -42,7 +42,7 @@ export { BoundedSubagentCoordinator } from "./brain/subagent-coordinator.js";
 export type { SubagentTask, SubagentBatchItem, SubagentCoordinatorOptions, SubagentRuntimeFactory } from "./brain/subagent-coordinator.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
-export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
+export { ContainerSandbox, PolicySandbox, ProcessSandbox, RemoteSandbox } from "./sandbox.js";
 export { InMemorySkillsPlatform } from "./skills/platform.js";
 export { FileSkillsPlatform } from "./skills/file-platform.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
