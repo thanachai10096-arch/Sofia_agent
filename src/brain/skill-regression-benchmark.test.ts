@@ -64,3 +64,10 @@ test("benchmark rejects empty, malformed, and duplicate check identities", () =>
     candidate: [{ name: " ", passed: true }],
   }), /malformed check/);
 });
+
+test("benchmark rejects a missing input envelope with a controlled error", () => {
+  assert.throws(
+    () => compareSkillRegressionBenchmark(null as unknown as Parameters<typeof compareSkillRegressionBenchmark>[0]),
+    /Benchmark input must be an object/,
+  );
+});
