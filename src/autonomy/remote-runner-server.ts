@@ -73,7 +73,9 @@ async function readBody(request: IncomingMessage, limit: number): Promise<Buffer
 
 function validateRequest(value: unknown, options: Required<Pick<RemoteSandboxRunnerOptions,
   "maxSnapshotBytes" | "maxTimeoutMs">>): ExecuteRequest {
-  if (!isRecord(value) || value.protocolVersion !== 1 ||
+  if (!isRecord(value) ||
+      Object.keys(value).some((key) => !["protocolVersion", "requestId", "workspaceDigest", "command", "args", "cwd", "timeoutMs", "maxOutputBytes", "allowNetwork", "files"].includes(key)) ||
+      value.protocolVersion !== 1 ||
       typeof value.requestId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value.requestId) ||
       typeof value.workspaceDigest !== "string" || !/^[a-f0-9]{64}$/i.test(value.workspaceDigest) ||
       typeof value.command !== "string" || !value.command.trim() || value.command.includes("\0") ||
@@ -95,7 +97,9 @@ function validateRequest(value: unknown, options: Required<Pick<RemoteSandboxRun
   const paths = new Set<string>();
   const files: RequestFile[] = [];
   for (const item of value.files) {
-    if (!isRecord(item) || typeof item.path !== "string" || typeof item.contentBase64 !== "string" ||
+    if (!isRecord(item) ||
+        Object.keys(item).some((key) => key !== "path" && key !== "contentBase64") ||
+        typeof item.path !== "string" || typeof item.contentBase64 !== "string" ||
         item.path.includes("\0") || item.path.includes("\\")) {
       throw Object.assign(new Error("Invalid project snapshot file."), { statusCode: 400 });
     }
@@ -198,7 +202,7 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
   let activeRuns = 0;
   const tempRoot = path.resolve(options.tempRoot ?? path.join(os.tmpdir(), "sofia-remote-runner"));
 
-  return createServer(async (request, response) => {
+  const server = createServer(async (request, response) => {
     if (request.method === "GET" && request.url === "/healthz") {
       json(response, 200, { status: "ok", protocolVersion: 1 });
       return;
@@ -291,4 +295,12 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
       activeRuns -= 1;
     }
   });
+  // Bound slow headers and request bodies so unauthenticated clients cannot
+  // hold runner connections indefinitely while consuming scarce sockets.
+  server.headersTimeout = 30_000;
+  server.requestTimeout = 300_000;
+  server.keepAliveTimeout = 5_000;
+  server.maxHeadersCount = 32;
+  server.maxRequestsPerSocket = 100;
+  return server;
 }
