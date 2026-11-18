@@ -35,7 +35,7 @@ import { createManagedSkillLearningHandler } from "../brain/managed-skill-learni
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
-import { ContainerSandbox } from "../sandbox.js";
+import { ContainerSandbox, RemoteSandbox } from "../sandbox.js";
 import { SandboxSupervisor } from "../autonomy/sandbox-supervisor.js";
 import { createSandboxTools } from "../autonomy/sandbox-tools.js";
 import { createBrainAutonomyAuthorizer } from "../autonomy/brain-adapter.js";
@@ -108,13 +108,21 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         })
       : [];
     const sandboxImage = process.env.SOFIA_SANDBOX_IMAGE?.trim();
+    const remoteSandboxEndpoint = process.env.SOFIA_REMOTE_SANDBOX_URL?.trim();
+    const remoteSandboxToken = process.env.SOFIA_REMOTE_SANDBOX_TOKEN;
     const sandboxSecret = process.env.SOFIA_SANDBOX_ATTESTATION_SECRET;
-    const sandboxEnabled = dependencies.policy.allowSandbox && Boolean(principalId && sandboxImage && sandboxSecret);
+    const remoteSandboxConfigured = Boolean(remoteSandboxEndpoint && remoteSandboxToken);
+    const localSandboxConfigured = Boolean(sandboxImage);
+    const sandboxEnabled = dependencies.policy.allowSandbox &&
+      Boolean(principalId && sandboxSecret && (remoteSandboxConfigured || localSandboxConfigured));
     const sandboxNetworkAllowed = sandboxEnabled && process.env.SOFIA_SANDBOX_ALLOW_NETWORK !== "false";
-    const sandboxSupervisor = sandboxEnabled ? new SandboxSupervisor({
+    const sandboxImplementation = remoteSandboxConfigured
+      ? new RemoteSandbox({ endpoint: remoteSandboxEndpoint!, token: remoteSandboxToken! })
+      : sandboxImage ? new ContainerSandbox({ image: sandboxImage }) : undefined;
+    const sandboxSupervisor = sandboxEnabled && sandboxImplementation ? new SandboxSupervisor({
       workspaceRoot: process.env.SOFIA_SANDBOX_ROOT?.trim() || path.join(os.tmpdir(), "sofia-sandbox-supervisor"),
       attestationSecret: sandboxSecret!,
-      sandbox: new ContainerSandbox({ image: sandboxImage! }),
+      sandbox: sandboxImplementation,
       allowNetwork: sandboxNetworkAllowed,
       budget: {
         maxCycles: intEnv("SOFIA_AUTONOMY_MAX_CYCLES", 8, 1),
