@@ -9,6 +9,19 @@ import { pathToFileURL } from "node:url";
 import { CronScheduler, FileCronStore, nextCronOccurrence, type CronStore } from "./cron-scheduler.js";
 import type { JobRecord, JobRuntime } from "./job-runtime.js";
 
+
+function withOwnerScopedAccess(runtime: JobRuntime): JobRuntime {
+  return Object.assign(runtime, {
+    async getForOwner(id: string, ownerKeyId: string) {
+      const record = await runtime.get(id);
+      return record ? { ...record, ownerKeyId } : undefined;
+    },
+    async cancelForOwner(id: string, _ownerKeyId: string) {
+      return runtime.cancel(id);
+    },
+  });
+}
+
 test("stale lock is not automatically unlinked because that can delete a replacement owner lock", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-stale-lock-test-"));
   const namespace = "stale-lock-safety-test";
@@ -28,7 +41,7 @@ test("creating a schedule cannot assign it to another owner", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
   const runtime = { async submit() { throw new Error("unused"); } } as unknown as JobRuntime;
-  const scheduler = new CronScheduler(runtime, { store });
+  const scheduler = new CronScheduler(withOwnerScopedAccess(runtime), { store });
   await assert.rejects(() => scheduler.create({
     name: "spoofed", task: "task", runAt: "2026-10-18T00:00:00.000Z", timeZone: "UTC", ownerKeyId: "bob",
   }, "alice"), /owner must match/i);
