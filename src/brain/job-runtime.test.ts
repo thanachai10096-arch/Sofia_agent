@@ -997,3 +997,31 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime passes the authenticated owner to Brain factory on submit and resume", async () => {
+  const namespace = "job-runtime-principal-" + randomUUID();
+  const observedOwners: Array<string | undefined> = [];
+  let runs = 0;
+  const brain = {
+    run: async () => {
+      runs += 1;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime((options) => {
+    observedOwners.push(options.principalId);
+    return brain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({ task: "owner-scoped background task", ownerKeyId: "tenant-key-hash" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "completed");
+  assert.deepEqual(observedOwners, ["tenant-key-hash"]);
+  assert.equal(runs, 1);
+});
