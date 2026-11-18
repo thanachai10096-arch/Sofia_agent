@@ -80,6 +80,7 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
         sandboxAvailable,
         budgetContext: () => this.options.budgetContext(job),
         ...(this.options.maxCycles !== undefined ? { maxCycles: this.options.maxCycles } : {}),
+        idempotencyPrefix: `autonomy-job:${job.id}`,
         ...(job.checkpoint ? {
           startCycle: job.checkpoint.nextCycle,
           previousCycles: job.checkpoint.cycles as ResearchLoopReport["cycles"],
