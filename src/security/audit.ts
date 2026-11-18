@@ -15,10 +15,32 @@ export type SecurityAuditEvent = {
   result?: unknown;
 };
 
-export interface SecurityAuditSink { record(event: SecurityAuditEvent): void | Promise<void>; }
-export class CompositeSecurityAudit implements SecurityAuditSink { constructor(private readonly sinks:SecurityAuditSink[]){} async record(event:SecurityAuditEvent){ for(const sink of this.sinks) await sink.record(event); } }
+export interface SecurityAuditSink {
+  /** True only when records survive process restart and can be read back. */
+  readonly durable?: boolean;
+  record(event: SecurityAuditEvent): void | Promise<void>;
+  read?(id: string): SecurityAuditEvent | undefined | Promise<SecurityAuditEvent | undefined>;
+}
+export class CompositeSecurityAudit implements SecurityAuditSink {
+  constructor(private readonly sinks: SecurityAuditSink[]) {}
+  get durable(): boolean {
+    return this.sinks.some((sink) => sink.durable === true && typeof sink.read === "function");
+  }
+  async record(event: SecurityAuditEvent): Promise<void> {
+    for (const sink of this.sinks) await sink.record(event);
+  }
+  async read(id: string): Promise<SecurityAuditEvent | undefined> {
+    for (const sink of this.sinks) {
+      if (sink.durable !== true || !sink.read) continue;
+      const event = await sink.read(id);
+      if (event) return event;
+    }
+    return undefined;
+  }
+}
 
 export class MemorySecurityAudit implements SecurityAuditSink {
+  readonly durable = false;
   private readonly events: SecurityAuditEvent[] = [];
   constructor(private readonly maxEvents = 2000) {}
   record(event: SecurityAuditEvent): void {
@@ -29,6 +51,10 @@ export class MemorySecurityAudit implements SecurityAuditSink {
       result: event.result === undefined ? undefined : redactSecrets(event.result),
     });
     while (this.events.length > this.maxEvents) this.events.shift();
+  }
+  read(id: string): SecurityAuditEvent | undefined {
+    const event = this.events.find((item) => item.id === id);
+    return event ? { ...event } : undefined;
   }
   list(): SecurityAuditEvent[] {
     return this.events.map(event => ({
