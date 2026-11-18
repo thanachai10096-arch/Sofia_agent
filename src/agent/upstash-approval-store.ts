@@ -31,6 +31,8 @@ if tonumber(record.expiresAt) <= now then
   if ARGV[5] == 'expired' then return 1 else return 0 end
 end
 if ARGV[5] == 'expired' then return 0 end
+if (ARGV[5] == 'approved' or ARGV[5] == 'denied') and ARGV[6] ~= record.principalId then return 0 end
+if ARGV[5] == 'cancelled' and ARGV[6] ~= 'system:abort' then return 0 end
 record.status = ARGV[5]
 record.resolvedAt = now
 record.resolvedBy = ARGV[6]
