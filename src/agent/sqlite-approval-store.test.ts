@@ -16,8 +16,8 @@ function record(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
     actionHash: "a".repeat(64),
     risk: "high",
     status: "pending",
-    createdAt: 10_000,
-    expiresAt: 20_000,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
     ...overrides,
   };
 }
@@ -51,13 +51,14 @@ test("SQLite conditional updates permit exactly one decision across connections"
   const second = await SqliteApprovalDecisionStore.open(file);
   try {
     await first.create(record());
+    const decisionTime = Date.now() + 1;
     const results = await Promise.all([
-      first.resolve("approval-1", "a".repeat(64), "approved", "principal-1", 15_000),
-      second.resolve("approval-1", "a".repeat(64), "denied", "principal-1", 15_000),
+      first.resolve("approval-1", "a".repeat(64), "approved", "principal-1", decisionTime),
+      second.resolve("approval-1", "a".repeat(64), "denied", "principal-1", decisionTime),
     ]);
     assert.equal(results.filter(Boolean).length, 1);
     assert.ok(["approved", "denied"].includes((await first.get("approval-1"))?.status ?? ""));
-    assert.equal(await second.resolve("approval-1", "a".repeat(64), "approved", "principal-1", 15_001), false);
+    assert.equal(await second.resolve("approval-1", "a".repeat(64), "approved", "principal-1", decisionTime + 1), false);
   } finally {
     first.close();
     second.close();
@@ -69,9 +70,10 @@ test("SQLite approval store rejects wrong hashes and expires late decisions", as
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-expiry-"));
   const store = await SqliteApprovalDecisionStore.open(path.join(dir, "approvals.sqlite"));
   try {
-    await store.create(record({ id: "late", expiresAt: 12_000 }));
-    assert.equal(await store.resolve("late", "b".repeat(64), "approved", "principal-1", 11_000), false);
-    assert.equal(await store.resolve("late", "a".repeat(64), "approved", "principal-1", 12_001), false);
+    const now = Date.now();
+    await store.create(record({ id: "late", expiresAt: now + 1_000 }));
+    assert.equal(await store.resolve("late", "b".repeat(64), "approved", "principal-1", now + 500), false);
+    assert.equal(await store.resolve("late", "a".repeat(64), "approved", "principal-1", now + 1_001), false);
     assert.equal((await store.get("late"))?.status, "expired");
   } finally {
     store.close();
