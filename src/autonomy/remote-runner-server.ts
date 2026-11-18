@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createHash, timingSafeEqual } from "node:crypto";
-import { mkdtemp, mkdir, open, readdir, lstat, realpath, rm } from "node:fs/promises";
+import { timingSafeEqual } from "node:crypto";
+import { constants } from "node:fs";
+import { mkdtemp, mkdir, open, lstat, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Sandbox } from "../sandbox.js";
@@ -149,7 +150,7 @@ async function collectFiles(originals: Map<string, string>, maxBytes: number): P
     try {
       const info = await lstat(filename);
       if (!info.isFile() || info.isSymbolicLink()) continue;
-      const handle = await open(filename, 0); // O_RDONLY
+      const handle = await open(filename, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
       try {
         const current = await handle.stat();
         if (!current.isFile() || current.size > maxBytes - total) {
