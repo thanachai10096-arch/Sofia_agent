@@ -732,19 +732,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
-        const job = await deps.jobRuntime.get(jobId);
-        if (!job || job.ownerKeyId !== auth.keyId) {
-          return json(res, 404, { error: "job_not_found" }, origin, config);
+        if (!deps.jobRuntime.getForOwner || !deps.jobRuntime.resumeForOwner || !deps.jobRuntime.cancelForOwner) {
+          return json(res, 503, { error: "owner_scoped_job_access_unavailable" }, origin, config);
         }
+        const job = await deps.jobRuntime.getForOwner(jobId, auth.keyId);
+        if (!job) return json(res, 404, { error: "job_not_found" }, origin, config);
         if (req.method === "GET" && !action) {
           return json(res, 200, job, origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
+          try { return json(res, 202, await deps.jobRuntime.resumeForOwner(jobId, auth.keyId), origin, config); }
           catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
-          const cancelled = await deps.jobRuntime.cancel(jobId);
+          const cancelled = await deps.jobRuntime.cancelForOwner(jobId, auth.keyId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
         }
       }
