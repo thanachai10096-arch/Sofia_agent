@@ -6,6 +6,7 @@ import { FileUserMemoryStore } from "../brain/user-memory.js";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
+import { MapToolRegistry } from "../tools/types.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
@@ -281,6 +282,55 @@ test("ordinary API keys cannot access security-admin endpoints", async () => {
       headers: { authorization: "Bearer security-admin-key" },
     });
     assert.equal(allowed.status, 200);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("synchronous API runs expose only tools granted by the API key", async () => {
+  const exposed: Record<string, string[]> = {};
+  const writeTool = {
+    name: "workspace.write_file",
+    description: "Write a file in the user's workspace.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    effects: ["write"] as const,
+    execute: async () => ({ written: true }),
+  };
+  const server = createSofiaApi({
+    provider: {
+      generate: async (request) => {
+        const task = request.task;
+        exposed[task] = (request.tools ?? []).map((tool) => tool.function.name);
+        return { text: "Task completed." };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    tools: new MapToolRegistry([writeTool]),
+  }, {
+    apiKeys: {
+      "read-only-key": ["agent:run"],
+      "writer-key": ["agent:run", "tool:write"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+
+  try {
+    for (const [apiKey, task] of [["read-only-key", "read-only"], ["writer-key", "writer"]] as const) {
+      const response = await fetch(baseUrl + "/v1/agent/runs", {
+        method: "POST",
+        headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" },
+        body: JSON.stringify({ task }),
+      });
+      assert.equal(response.status, 200);
+    }
+    assert.deepEqual(exposed["read-only"], []);
+    assert.deepEqual(exposed.writer, ["workspace.write_file"]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
