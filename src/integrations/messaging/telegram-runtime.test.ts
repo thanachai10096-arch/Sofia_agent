@@ -6,6 +6,7 @@ import {
   reportTelegramRunCompletion,
   parseTelegramChatAllowlist,
   parseTelegramUserAllowlist,
+  parseTelegramUserApiKeys,
 } from "./telegram-runtime.js";
 
 test("Telegram allowlists accept numeric user IDs and signed chat IDs", () => {
@@ -18,6 +19,14 @@ test("Telegram allowlists reject empty, malformed and duplicate IDs", () => {
   assert.throws(() => parseTelegramUserAllowlist("123,abc"), /valid numeric IDs/);
   assert.throws(() => parseTelegramUserAllowlist("123,123"), /duplicate IDs/);
   assert.throws(() => parseTelegramChatAllowlist("-1, -1"), /duplicate IDs/);
+  const allowed = new Set(["123", "456"]);
+  assert.deepEqual([...parseTelegramUserApiKeys('{"123":"key-123","456":"key-456"}', allowed)], [
+    ["123", "key-123"], ["456", "key-456"],
+  ]);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"shared","456":"shared"}', allowed), /distinct API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"key-123"}', allowed), /every allowed user/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"key-123","456":"key-456","789":"key-789"}', allowed), /every allowed user/);
+  assert.throws(() => parseTelegramUserApiKeys("not-json", allowed), /valid JSON object/);
 });
 
 test("Telegram integration remains disabled unless explicitly enabled", () => {
@@ -26,7 +35,7 @@ test("Telegram integration remains disabled unless explicitly enabled", () => {
     TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
     TELEGRAM_ALLOWED_USER_IDS: "123",
     TELEGRAM_ALLOWED_CHAT_IDS: "123",
-    SOFIA_API_KEY: "test-key",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"telegram-user-123-key"}',
     SOFIA_API_BASE_URL: "https://sofia.example.invalid",
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.equal(runtime, undefined);
@@ -149,4 +158,19 @@ test("Telegram run completion records timeout and failed delivery separately", a
     "telegram_run_wait_failed run_id=run-timeout kind=timeout",
     "telegram_completion_delivery_failed run_id=run-timeout",
   ]);
+});
+
+
+test("Telegram integration fails closed when per-user API identities are absent", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0] ?? "", /per-user API keys are required/i);
 });
