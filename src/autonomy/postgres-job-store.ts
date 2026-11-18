@@ -44,7 +44,7 @@ const columns = `version, id, principal_id, kind, status, payload, result, error
  */
 export class PostgresAutonomyJobStore implements AutonomyJobStore {
   constructor(private readonly pool: AutonomyPgPool, private readonly table = "sofia_autonomy_jobs") {
-    if (!/^[a-z_][a-z0-9_]*$/.test(table)) throw new Error("Invalid autonomy job table identifier.");
+    if (!/^[a-z_][a-z0-9_]*$/.test(table) || table.length >  48) throw new Error("Invalid autonomy job table identifier.");
   }
 
   async ensureSchema(): Promise<void> {
@@ -80,10 +80,12 @@ export class PostgresAutonomyJobStore implements AutonomyJobStore {
     const maxAttempts = input.maxAttempts ?? 3;
     if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) throw new Error("maxAttempts must be between 1 and 10.");
     if (input.idempotencyKey !== undefined && !input.idempotencyKey.trim()) throw new Error("Idempotency key cannot be empty.");
+    const availableAt = input.availableAt ?? new Date().toISOString();
+    if (!Number.isFinite(Date.parse(availableAt))) throw new Error("Job availableAt must be a valid timestamp.");
     const payload = JSON.stringify(input.payload);
     if (payload === undefined || Buffer.byteLength(payload, "utf8") > 64 * 1024) throw new Error("Job payload must be JSON data no larger than 64 KiB.");
     const id = randomUUID();
-    const values = [id, principalId, input.kind, payload, input.idempotencyKey ?? null, maxAttempts, input.availableAt ?? new Date().toISOString()];
+    const values = [id, principalId, input.kind, payload, input.idempotencyKey ?? null, maxAttempts, availableAt];
     const inserted = await this.pool.query<JobRow>(
       `INSERT INTO ${this.table} (id, principal_id, kind, status, payload, idempotency_key, max_attempts, available_at)
        VALUES ($1,$2,$3,'queued',$4::jsonb,$5,$6,$7)
