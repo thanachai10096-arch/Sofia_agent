@@ -41,6 +41,22 @@ export interface ApprovalDecisionStore {
 
 export type ApprovalHandler = (request: ApprovalRequest) => Promise<boolean>;
 
+function waitForNextPoll(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const finish = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, milliseconds);
+    signal?.addEventListener("abort", finish, { once: true });
+  });
+}
+
 function copy(record: ApprovalRecord): ApprovalRecord {
   return structuredClone(record);
 }
@@ -136,9 +152,7 @@ export class ApprovalBroker {
         await this.options.store.resolve(current.id, current.actionHash, "expired", "system:expiry", this.now());
         return false;
       }
-      await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, Math.min(this.pollIntervalMs, Math.max(1, current.expiresAt - this.now())));
-      });
+      await waitForNextPoll(Math.min(this.pollIntervalMs, Math.max(1, current.expiresAt - this.now())), request.signal);
     }
 
     await this.options.store.resolve(record.id, record.actionHash, "cancelled", "system:abort", this.now());
