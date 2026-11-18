@@ -1,6 +1,13 @@
+import { createHash } from "node:crypto";
+import { canonicalJson } from "../security/guard.js";
 import type { SecurityAuditEvent } from "../security/audit.js";
 import type { SkillPackage } from "../skills/platform.js";
 import type { SkillEvaluationCheck, SkillProvenance } from "./skill-lifecycle.js";
+
+/** Stable SHA-256 identity for the exact learned Skill artifact. */
+export function skillPackageDigest(skill: SkillPackage): string {
+  return createHash("sha256").update(canonicalJson(skill)).digest("hex");
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -17,6 +24,9 @@ export class AuditSkillEvidenceVerifier {
     const requiredKinds = ["typecheck", "test", "build"] as const;
     if (provenance.source !== "verified-brain-repair" || !provenance.runId?.trim()) {
       return [{ name: "trusted-evidence-provenance", passed: false, detail: "Missing trusted Brain run provenance." }];
+    }
+    if (typeof provenance.skillDigest !== "string" || !/^[a-f0-9]{64}$/.test(provenance.skillDigest) || provenance.skillDigest !== skillPackageDigest(skill)) {
+      return [{ name: "skill-artifact-digest", passed: false, detail: "Trusted provenance does not match the exact Skill package being evaluated." }];
     }
     if (!Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length !== requiredKinds.length ||
         !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0) ||
