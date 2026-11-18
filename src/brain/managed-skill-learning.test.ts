@@ -6,6 +6,8 @@ import test from "node:test";
 import { VersionedSkillLifecycle } from "./skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "./managed-skill-learning.js";
+import { AuditSkillEvidenceVerifier } from "./skill-evidence.js";
+import type { SecurityAuditEvent } from "../security/audit.js";
 import type { LearnedSkillCandidate } from "./learning.js";
 
 const candidate: LearnedSkillCandidate = {
@@ -15,16 +17,31 @@ const candidate: LearnedSkillCandidate = {
   strategy: "fix-implementation",
   procedure: ["inspect trusted failure evidence", "apply the repair", "verify the result"],
   verification: ["typecheck", "test", "build"],
-  evidenceIds: ["verification-1"],
+  evidenceIds: ["verification-typecheck", "verification-test", "verification-build"],
 };
 
 function fixture() {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-managed-skill-"));
   const platform = new InMemorySkillsPlatform();
-  const lifecycle = new VersionedSkillLifecycle(platform, async (skill) => ({
-    passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length),
-    checks: [{ name: "metadata-and-verification", passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length) }],
-  }), { file: path.join(directory, "lifecycle.json") });
+  const events: SecurityAuditEvent[] = (["typecheck", "test", "build"] as const).map((kind) => ({
+    id: "verification-" + kind,
+    at: new Date(0).toISOString(),
+    runId: "run-1",
+    toolName: "project.verify",
+    actionHash: "trusted-action-hash-" + kind,
+    risk: "low",
+    decision: "completed",
+    input: { kind },
+    result: { kind, code: 0, passed: true },
+  }));
+  const verifier = new AuditSkillEvidenceVerifier(async () => events);
+  const lifecycle = new VersionedSkillLifecycle(platform, async (skill, provenance) => {
+    const checks = [
+      { name: "metadata-and-verification", passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length) },
+      ...await verifier.verify(skill, provenance),
+    ];
+    return { passed: checks.every((check) => check.passed), checks };
+  }, { file: path.join(directory, "lifecycle.json") });
   return { directory, platform, lifecycle };
 }
 
