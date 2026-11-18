@@ -713,3 +713,64 @@ test("promotion reports both the original and compensation errors", async () => 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("startup journal recovery reverts an interrupted uncommitted promotion", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "journal-recovery.json");
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
+    const candidate = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "journal-test", evidenceIds: ["journal-evidence"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(candidate.id);
+
+    // Simulate process death after the platform side effect but before the
+    // lifecycle snapshot commit. The journal records the intended transition.
+    platform.register({ ...candidate.package });
+    writeFileSync(file + ".transaction.json", JSON.stringify({
+      schemaVersion: 1,
+      transactionId: "simulated-crash",
+      operation: "promote",
+      skillId: candidate.skillId,
+      previousActiveId: null,
+      targetActiveId: candidate.id,
+      previousPackage: null,
+      targetPackage: candidate.package,
+    }));
+
+    const recovered = new VersionedSkillLifecycle(platform, passing, { file });
+    assert.equal(platform.get(candidate.skillId), undefined, "uncommitted platform side effect must be reverted");
+    assert.equal(recovered.active(candidate.skillId), undefined);
+    assert.equal(existsSync(file + ".transaction.json"), false, "recovered journal must be removed");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("startup journal recovery preserves a committed promotion after a crash before journal cleanup", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "journal-committed.json");
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
+    const candidate = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "journal-committed", evidenceIds: ["journal-committed-evidence"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(candidate.id);
+    lifecycle.promote(candidate.id);
+
+    writeFileSync(file + ".transaction.json", JSON.stringify({
+      schemaVersion: 1,
+      transactionId: "simulated-post-commit-crash",
+      operation: "promote",
+      skillId: candidate.skillId,
+      previousActiveId: null,
+      targetActiveId: candidate.id,
+      previousPackage: null,
+      targetPackage: candidate.package,
+    }));
+    const recovered = new VersionedSkillLifecycle(platform, passing, { file });
+    assert.equal(recovered.active(candidate.skillId)?.id, candidate.id);
+    assert.equal(platform.get(candidate.skillId)?.version, "1.0.0");
+    assert.equal(existsSync(file + ".transaction.json"), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
