@@ -180,20 +180,28 @@ export class SandboxSupervisor {
     run.steps += 1;
     run.toolCalls += 1;
     const started = Date.now();
-    const result = await this.options.sandbox.run(command, args, {
-      timeoutMs: request.timeoutMs,
-      maxOutputBytes,
-      allowNetwork: request.allowNetwork === true,
-      workspaceRoot: run.workspace,
-      ...(request.cwd ? { cwd: request.cwd } : {}),
-    }, signal);
-    const durationMs = Date.now() - started;
-    run.experimentSeconds += durationMs / 1000;
-    if (run.experimentSeconds > this.options.budget.maxExperimentSeconds) {
-      run.active = false;
-      throw new Error("Sandbox cumulative experiment-time budget exhausted.");
+    let result: { stdout: string; stderr: string; code: number } | undefined;
+    let executionError: unknown;
+    try {
+      result = await this.options.sandbox.run(command, args, {
+        timeoutMs: request.timeoutMs,
+        maxOutputBytes,
+        allowNetwork: request.allowNetwork === true,
+        workspaceRoot: run.workspace,
+        ...(request.cwd ? { cwd: request.cwd } : {}),
+      }, signal);
+    } catch (error) {
+      executionError = error;
+    } finally {
+      // Failed, aborted and timed-out work consumes wall-clock budget too.
+      run.experimentSeconds += (Date.now() - started) / 1000;
+      if (run.experimentSeconds > this.options.budget.maxExperimentSeconds) {
+        run.active = false;
+      }
     }
-    return { ...result, durationMs };
+    if (executionError !== undefined) throw executionError;
+    if (!run.active) throw new Error("Sandbox cumulative experiment-time budget exhausted.");
+    return { ...result!, durationMs: Date.now() - started };
   }
 
   /** Call only with cost telemetry from the trusted model/provider billing layer. */
