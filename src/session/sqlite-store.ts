@@ -229,6 +229,35 @@ export class SqliteSessionStore {
     `).all(pattern, limit, offset) as Array<{ id: string }>).map((row) => row.id);
   }
 
+  private saveImported(session: Session): void {
+    if (!Number.isSafeInteger(session.updatedAt) || session.updatedAt < 0) {
+      throw new Error("Imported session timestamp must be a non-negative safe integer.");
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "INSERT INTO sessions(id, updated_at) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
+      ).run(session.id, session.updatedAt);
+      this.db.prepare("DELETE FROM session_messages WHERE session_id = ?").run(session.id);
+      if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(session.id);
+      const insertMessage = this.db.prepare(
+        "INSERT INTO session_messages(session_id, position, content) VALUES (?, ?, ?)",
+      );
+      const insertFts = this.ftsAvailable
+        ? this.db.prepare("INSERT INTO session_messages_fts(session_id, content) VALUES (?, ?)")
+        : undefined;
+      session.messages.forEach((message, position) => {
+        insertMessage.run(session.id, position, message);
+        insertFts?.run(session.id, message);
+      });
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    restrictSqlitePermissions(this.filePath);
+  }
+
   /**
    * Copy one authenticated owner's legacy transcripts into a private database.
    * Copy-before-delete makes an interrupted migration safe to retry. A newer
@@ -250,7 +279,7 @@ export class SqliteSessionStore {
     for (const session of owned) {
       const current = destination.get(session.id);
       if (!current || session.updatedAt > current.updatedAt) {
-        destination.save({ id: session.id, messages: [...session.messages], updatedAt: session.updatedAt });
+        destination.saveImported({ id: session.id, messages: [...session.messages], updatedAt: session.updatedAt });
       }
       this.delete(session.id);
       migrated += 1;
