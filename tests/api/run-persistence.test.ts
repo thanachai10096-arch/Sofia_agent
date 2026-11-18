@@ -14,3 +14,29 @@ test("async run is not acknowledged when durable persistence fails",async()=>{co
 test("run status rehydrates from persistent storage when the in-memory cache misses",async()=>{const id="99999999-9999-9999-9999-999999999999";const owner=createHash("sha256").update(KEY).digest("hex").slice(0,32);const record:RunRecord={id,status:"completed",createdAt:10,updatedAt:20,ownerKeyId:owner,desktopCapabilities:[],result:{runId:id,output:"persisted result",kind:"general",steps:1,events:[]} as never};const store={save:async()=>{},remove:async()=>{},loadAllSync:()=>[],load:(runId:string)=>runId===id?record:undefined,loadForOwner:(runId:string,ownerKeyId:string)=>runId===id&&ownerKeyId===owner?record:undefined};const server=createSofiaApi({} as AgentDependencies,{apiKeys:{[KEY]:["agent:read"]},runStore:store});const base=await listen(server);try{const response=await fetch(base+"/v1/agent/runs/"+id,{headers:{authorization:"Bearer "+KEY}});assert.equal(response.status,200);const body=await response.json() as {status:string;result?:{output:string}};assert.equal(body.status,"completed");assert.equal(body.result?.output,"persisted result");}finally{await close(server);}});
 
 test("run record owner-scoped lookup never returns another owner's record",async()=>{const dir=await mkdtemp(path.join(os.tmpdir(),"sofia-runs-owner-"));try{const store=new FileRunRecordStore(dir),id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",owner=createHash("sha256").update("owner-a").digest("hex").slice(0,32),other=createHash("sha256").update("owner-b").digest("hex").slice(0,32);await store.save({id,status:"failed",createdAt:10,updatedAt:11,ownerKeyId:owner,desktopCapabilities:[],error:"test"});assert.equal(store.loadForOwner(id,owner)?.ownerKeyId,owner);assert.equal(store.loadForOwner(id,other),undefined);assert.equal(store.loadForOwner(id,"invalid"),undefined);}finally{await rm(dir,{recursive:true,force:true});}});
+
+
+test("API migrates legacy run records into per-owner stores and isolates status reads",async()=>{
+ const dir=await mkdtemp(path.join(os.tmpdir(),"sofia-run-tenant-partition-"));
+ const keyA="tenant-run-key-a",keyB="tenant-run-key-b";
+ const ownerA=createHash("sha256").update(keyA).digest("hex").slice(0,32),ownerB=createHash("sha256").update(keyB).digest("hex").slice(0,32);
+ const idA="abababab-abab-abab-abab-abababababab",idB="bcbcbcbc-bcbc-bcbc-bcbc-bcbcbcbcbcbc";
+ const legacy=new FileRunRecordStore(dir);
+ const record=(id:string,ownerKeyId:string):RunRecord=>({id,status:"completed",createdAt:10,updatedAt:20,ownerKeyId,desktopCapabilities:[],result:{runId:id,output:"owner result",kind:"general",steps:1,events:[]} as never});
+ await legacy.save(record(idA,ownerA));await legacy.save(record(idB,ownerB));
+ const root=path.join(dir,"tenants");
+ const server=createSofiaApi({} as AgentDependencies,{apiKeys:{[keyA]:["agent:read"],[keyB]:["agent:read"]},runStore:legacy,runStoreRoot:root});
+ const base=await listen(server);
+ try{
+  const get=(key:string,id:string)=>fetch(base+"/v1/agent/runs/"+id,{headers:{authorization:"Bearer "+key}});
+  assert.equal((await get(keyA,idA)).status,200);
+  assert.equal((await get(keyB,idB)).status,200);
+  assert.equal((await get(keyA,idB)).status,404);
+  assert.equal((await get(keyB,idA)).status,404);
+  const dirA=path.join(root,createHash("sha256").update("sofia-run-store:v1:").update(ownerA).digest("hex"));
+  const dirB=path.join(root,createHash("sha256").update("sofia-run-store:v1:").update(ownerB).digest("hex"));
+  assert.equal(new FileRunRecordStore(dirA).loadForOwner(idA,ownerA)?.id,idA);
+  assert.equal(new FileRunRecordStore(dirB).loadForOwner(idB,ownerB)?.id,idB);
+  assert.equal(legacy.loadAllSync().length,0,"legacy records should be removed only after successful migration");
+ }finally{await close(server);await rm(dir,{recursive:true,force:true});}
+});
