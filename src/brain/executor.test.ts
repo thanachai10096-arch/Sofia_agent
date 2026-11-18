@@ -277,7 +277,7 @@ test("Brain completes a coding loop only after trusted verification", async () =
 
 test("Brain feeds a failed verification into a specialist and executes its validated proposal", async () => {
   let writes = 0;
-  const events: string[] = [];
+  const events: Array<{ type: string; childTaskId?: string; agentRole?: string; proposalFingerprint?: string; toolName?: string }> = [];
 
   const tools = makeTools();
   const originalExecute = tools.execute.bind(tools);
@@ -300,6 +300,8 @@ test("Brain feeds a failed verification into a specialist and executes its valid
     async run(request) {
       assert.equal(request.role, "debugger");
       assert.equal(request.context && typeof request.context === "object", true);
+      assert.equal((request.context as Record<string, unknown>).parentRunId !== undefined, true);
+      assert.equal(typeof (request.context as Record<string, unknown>).childTaskId, "string");
       assert.deepEqual(request.availableTools?.map((tool) => tool.name), [
         "workspace.write_file",
         "workspace.list_files",
@@ -325,7 +327,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
       allowShell: false,
       allowNetwork: false,
       onEvent(event) {
-        events.push(event.type);
+        events.push(event);
       },
     },
     limits: {
@@ -358,8 +360,11 @@ test("Brain feeds a failed verification into a specialist and executes its valid
   assert.equal(report.completed, true, report.summary);
   assert.equal(report.state, "completed", report.summary);
   assert.equal(writes, 2, report.summary);
-  assert.ok(events.includes("brain.subagent.completed"));
-  assert.equal(events.includes("brain.replan.started"), false);
+  assert.ok(events.some((event) => event.type === "brain.subagent.completed"));
+  assert.ok(events.some((event) => event.type === "brain.subagent.assigned" && event.childTaskId && event.agentRole === "debugger"));
+  assert.ok(events.some((event) => event.type === "brain.subagent.proposal.accepted" && event.childTaskId && /^[a-f0-9]{64}$/.test(event.proposalFingerprint ?? "") && event.toolName === "workspace.write_file"));
+  assert.ok(events.some((event) => event.type === "brain.subagent.proposal.executed" && event.childTaskId && event.proposalFingerprint));
+  assert.equal(events.some((event) => event.type === "brain.replan.started"), false);
   assert.ok(events.includes("brain.verification.completed"));
 
   const trace = brain.getExecutionTrace();
@@ -370,6 +375,7 @@ test("Brain feeds a failed verification into a specialist and executes its valid
     trace.map((entry) => entry.sequence).slice().sort((a, b) => a - b),
   );
   assert.ok(trace.some((entry) => entry.type === "brain.subagent.completed"));
+  assert.ok(trace.some((entry) => entry.type === "brain.subagent.proposal.executed" && entry.childTaskId && entry.proposalFingerprint));
   assert.ok(trace.some((entry) => entry.type === "brain.verification.completed"));
 });
 
