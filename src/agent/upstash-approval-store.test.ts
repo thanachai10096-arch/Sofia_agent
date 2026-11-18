@@ -137,3 +137,22 @@ test("Upstash create atomically caps pending requests and prunes expired index e
   assert.match(String(command[1]), /ZCARD/u);
   assert.equal(command[command.length - 1], "50");
 });
+
+
+test("Upstash atomic resolver script binds approve and deny actors to the stored principal", async () => {
+  assert.match(APPROVAL_RESOLVE_SCRIPT, /ARGV\[6\] ~= record\.principalId/u);
+  assert.match(APPROVAL_RESOLVE_SCRIPT, /ARGV\[6\] ~= 'system:abort'/u);
+  let command: unknown[] = [];
+  const store = new UpstashApprovalDecisionStore({
+    url: "https://redis.example.com",
+    token: "test-token",
+    fetchImpl: async (_input, init) => {
+      command = JSON.parse(String(init?.body)) as unknown[];
+      if (command[0] === "GET") return response(JSON.stringify(record()));
+      if (command[0] === "EVAL") return response(0);
+      throw new Error("Unexpected Redis command");
+    },
+  });
+  assert.equal(await store.resolve("approval-redis-1", "a".repeat(64), "approved", "attacker", Date.now()), false);
+  assert.equal(command[0], "EVAL");
+});
