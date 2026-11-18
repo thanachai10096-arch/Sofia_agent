@@ -211,6 +211,17 @@ test("autonomy queue API derives tenant identity from auth and supports idempote
     const second = await repeated.json() as { job: { id: string } };
     assert.equal(second.job.id, first.job.id);
 
+    const conflict = await fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer autonomy-key-one",
+        "content-type": "application/json",
+        "idempotency-key": "same-request",
+      },
+      body: JSON.stringify({ topic: "A different research question" }),
+    });
+    assert.equal(conflict.status, 409);
+
     const listed = await fetch(base + "/v1/autonomy/jobs", {
       headers: { authorization: "Bearer autonomy-key-one" },
     });
@@ -222,6 +233,14 @@ test("autonomy queue API derives tenant identity from auth and supports idempote
       headers: { authorization: "Bearer autonomy-key-two" },
     });
     assert.equal(crossTenant.status, 404);
+
+    const cancelled = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
+      method: "DELETE",
+      headers: { authorization: "Bearer autonomy-key-one" },
+    });
+    assert.equal(cancelled.status, 200);
+    const cancelledBody = await cancelled.json() as { job: { status: string } };
+    assert.equal(cancelledBody.job.status, "cancelled");
 
     const forbidden = await fetch(base + "/v1/autonomy/jobs", {
       method: "POST",
