@@ -16,6 +16,8 @@ Sandbox network access is enabled by default when the sandbox is configured. Set
 
 The separate Browser/network tools remain governed by `SOFIA_ALLOW_NETWORK` and `SOFIA_ALLOWED_HOSTS`.
 
+The supervisor exposes a spend-meter hook, but the current command-tool composition does not yet ingest metered outbound-service charges. Model-provider spend remains separately controlled by the Brain token budget. Do not interpret `SOFIA_AUTONOMY_MAX_SPEND_USD` as a hard cap on arbitrary third-party billing until a trusted billing/egress meter is connected.
+
 ## Limits and isolation
 
 - Digest-pinned, preloaded image; no implicit image pull
