@@ -39,6 +39,6 @@ docker run --rm \
   sh -ec "tar -czf '/backup/$(basename "$ARCHIVE")' -C /data ."
 
 test -s "$ARCHIVE"
-sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+(cd "$BACKUP_DIR" && sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
 echo "Backup created: $ARCHIVE"
 echo "Checksum: $ARCHIVE.sha256"
