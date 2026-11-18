@@ -12,6 +12,7 @@ import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allow
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
 import { ApprovalBroker } from "../agent/approval-broker.js";
 import { SqliteApprovalDecisionStore } from "../agent/sqlite-approval-store.js";
+import { UpstashApprovalDecisionStore } from "../agent/upstash-approval-store.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -23,15 +24,33 @@ const runStoreDirectory = path.resolve(
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 const deps = await createSofiaAgentDependenciesWithSessions(workspace);
-let approvalStore: SqliteApprovalDecisionStore | undefined;
+let closeApprovalStore: (() => void) | undefined;
 if (process.env.SOFIA_APPROVAL_ENABLED?.trim().toLowerCase() === "true") {
   if (!scopes.includes("approval:manage")) throw new Error("SOFIA_APPROVAL_ENABLED requires approval:manage in SOFIA_API_SCOPES.");
-  approvalStore = await SqliteApprovalDecisionStore.open(
-    process.env.SOFIA_APPROVAL_STORE_PATH?.trim() || path.join(workspace, ".sofia", "approvals.sqlite"),
-  );
-  const broker = new ApprovalBroker({ store: approvalStore });
-  deps.approvalBroker = broker;
-  deps.approval = broker.handle;
+  const storeKind = (process.env.SOFIA_APPROVAL_STORE ?? "sqlite").trim().toLowerCase();
+  if (storeKind === "redis") {
+    const url = process.env.UPSTASH_REDIS_REST_URL?.trim() || process.env.REDIS_REST_URL?.trim();
+    const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim() || process.env.REDIS_REST_TOKEN?.trim();
+    if (!url || !token) throw new Error("Redis approval storage requires UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.");
+    const store = new UpstashApprovalDecisionStore({
+      url,
+      token,
+      prefix: process.env.SOFIA_APPROVAL_REDIS_PREFIX?.trim() || "sofia",
+    });
+    const broker = new ApprovalBroker({ store });
+    deps.approvalBroker = broker;
+    deps.approval = broker.handle;
+  } else if (storeKind === "sqlite") {
+    const store = await SqliteApprovalDecisionStore.open(
+      process.env.SOFIA_APPROVAL_STORE_PATH?.trim() || path.join(workspace, ".sofia", "approvals.sqlite"),
+    );
+    closeApprovalStore = () => store.close();
+    const broker = new ApprovalBroker({ store });
+    deps.approvalBroker = broker;
+    deps.approval = broker.handle;
+  } else {
+    throw new Error("SOFIA_APPROVAL_STORE must be sqlite or redis.");
+  }
 }
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
@@ -227,7 +246,7 @@ const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
   deps.closeSessionStore();
-  approvalStore?.close();
+  closeApprovalStore?.();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
 server.listen(port, "0.0.0.0", () => {
