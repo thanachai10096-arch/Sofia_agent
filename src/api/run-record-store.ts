@@ -67,6 +67,17 @@ export class FileRunRecordStore implements RunRecordStore {
   const record=this.load(id);
   return record?.ownerKeyId===ownerKeyId?record:undefined;
  }
+
+ /** Copy one owner's records into this store before removing them from the legacy store. */
+ async migrateOwnerFrom(source: RunRecordStore, ownerKeyId: string): Promise<number> {
+  if (!/^[a-f0-9]{32}$/.test(ownerKeyId)) throw new Error("Invalid run-record migration owner.");
+  if (source === this) return 0;
+  const owned = source.loadAllSync().filter(record => record.ownerKeyId === ownerKeyId);
+  for (const record of owned) await this.save(record);
+  // Remove only after every destination write has completed successfully.
+  for (const record of owned) await source.remove(record.id);
+  return owned.length;
+ }
  loadAllSync():RunRecord[]{
   const out:RunRecord[]=[];let names:string[];try{names=readdirSync(this.directory);}catch{return out;}
   for(const name of names){const full=path.join(this.directory,name);if(!name.endsWith(".json")){if(name.endsWith(".tmp"))try{if(Date.now()-statSync(full).mtimeMs>24*60*60*1000)unlinkSync(full);}catch{};continue;}
