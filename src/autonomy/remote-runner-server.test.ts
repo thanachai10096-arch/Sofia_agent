@@ -142,3 +142,30 @@ test("remote runner refuses to return files through a symlinked parent directory
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("remote runner readiness reflects Docker daemon and preloaded image health", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-runner-ready-test-"));
+  let ready = false;
+  const sandbox: Sandbox = {
+    isolation: "container",
+    async run() { return { stdout: "", stderr: "", code: 0 }; },
+    async healthCheck() {
+      if (!ready) throw new Error("Docker daemon or image unavailable.");
+    },
+  };
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, tempRoot: root });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const base = "http://127.0.0.1:" + address.port;
+  try {
+    assert.equal((await fetch(base + "/healthz")).status, 200);
+    assert.equal((await fetch(base + "/readyz")).status, 503);
+    ready = true;
+    assert.equal((await fetch(base + "/readyz")).status, 200);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
