@@ -187,7 +187,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         const renewEvery = options.pollLeaseRenewIntervalMs ?? Math.min(10_000, maxRenewEveryMs);
         if (!Number.isSafeInteger(leaseTtlMs) || leaseTtlMs < 5_000 || leaseTtlMs > 300_000
           || !Number.isSafeInteger(renewEvery) || renewEvery < 1_000 || renewEvery > maxRenewEveryMs) {
-          await pollLeaseHandle.release().catch(() => undefined);
+          await withLeaseOperationTimeout(pollLeaseHandle.release(), leaseOperationTimeoutMs, "release").catch(() => undefined);
           pollLeaseHandle = undefined;
           stopped = true;
           controller.abort();
@@ -251,7 +251,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         leaseRenewalTimer = undefined;
         const lease = pollLeaseHandle;
         pollLeaseHandle = undefined;
-        if (lease) await lease.release().catch(() => undefined);
+        if (lease) await withLeaseOperationTimeout(lease.release(), leaseOperationTimeoutMs, "release").catch(() => undefined);
       });
       // Return after launching the loop; the polling promise is joined by stop().
     },
