@@ -1,5 +1,6 @@
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import type { ToolEffect } from "../security/policy.js";
+
 export interface ToolContext { runtime: WorkspaceRuntime; signal?: AbortSignal; }
 export interface SofiaTool {
   name: string;
@@ -10,9 +11,57 @@ export interface SofiaTool {
   execute(input: Record<string, unknown>, context: ToolContext): Promise<unknown>;
 }
 export interface ToolRegistry { get(name: string): SofiaTool | undefined; list(): SofiaTool[]; }
+
+const validEffects = new Set<ToolEffect>(["read", "write", "shell", "network", "destructive", "browser"]);
+
+function freezeTree<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value as Record<string, unknown>)) freezeTree(child);
+  }
+  return value;
+}
+
+function snapshotTool(tool: SofiaTool): SofiaTool {
+  if (!tool.name || !/^[a-zA-Z][a-zA-Z0-9_.:-]{0,127}$/.test(tool.name)) {
+    throw new Error("Tool name must be a valid non-empty identifier of at most 128 characters.");
+  }
+  if (!tool.description.trim()) throw new Error("Tool " + tool.name + " must have a description.");
+  if (!tool.inputSchema || typeof tool.inputSchema !== "object" || Array.isArray(tool.inputSchema)) {
+    throw new Error("Tool " + tool.name + " must provide an object input schema.");
+  }
+  if (typeof tool.execute !== "function") throw new Error("Tool " + tool.name + " must provide an execute function.");
+  if (tool.effects?.some((effect) => !validEffects.has(effect))) {
+    throw new Error("Tool " + tool.name + " declares an unsupported security effect.");
+  }
+
+  // Copy and freeze metadata so registration-time callers cannot rewrite schemas
+  // or downgrade effects after the gateway has made its permission decision.
+  const inputSchema = freezeTree(structuredClone(tool.inputSchema));
+  const effects = tool.effects ? Object.freeze([...new Set(tool.effects)]) : undefined;
+  return Object.freeze({
+    name: tool.name,
+    description: tool.description,
+    inputSchema,
+    ...(effects ? { effects } : {}),
+    execute: tool.execute.bind(tool),
+  });
+}
+
 export class MapToolRegistry implements ToolRegistry {
-  constructor(private readonly tools: SofiaTool[]) {}
-  get(name: string): SofiaTool | undefined { return this.tools.find(tool => tool.name === name); }
+  private readonly tools: readonly SofiaTool[];
+
+  constructor(tools: SofiaTool[]) {
+    const names = new Set<string>();
+    const snapshots = tools.map(snapshotTool);
+    for (const tool of snapshots) {
+      if (names.has(tool.name)) throw new Error("Duplicate tool name: " + tool.name);
+      names.add(tool.name);
+    }
+    this.tools = Object.freeze(snapshots);
+  }
+
+  get(name: string): SofiaTool | undefined { return this.tools.find((tool) => tool.name === name); }
   list(): SofiaTool[] { return [...this.tools]; }
 }
 
@@ -70,4 +119,3 @@ function validateValue(schema: Record<string, unknown>, value: unknown, path: st
     }
   }
 }
-
