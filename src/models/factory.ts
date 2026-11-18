@@ -34,6 +34,7 @@ import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
 import os from "node:os";
+import { randomUUID } from "node:crypto";
 import { ContainerSandbox } from "../sandbox.js";
 import { SandboxSupervisor } from "../autonomy/sandbox-supervisor.js";
 import { createSandboxTools } from "../autonomy/sandbox-tools.js";
@@ -155,7 +156,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const autonomyAuthorizer = sandboxSupervisor && sandboxIdentity
       ? createBrainAutonomyAuthorizer({
           profile: { ...defaultAutonomyProfile, networkResearch: sandboxNetworkAllowed },
-          classifyTool: (request) => request.toolCall.tool === "sandbox.exec" ? "run_experiment" : undefined,
+          classifyTool: (request) => request.toolCall.tool === "sandbox.exec" ? "run_experiment" : "think",
           getTrustedContext: async (request, action) => {
             if (action !== "run_experiment" || request.toolCall.tool !== "sandbox.exec") return {};
             const attestation = await getSandboxAttestation();
