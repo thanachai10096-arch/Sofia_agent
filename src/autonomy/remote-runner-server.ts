@@ -203,6 +203,16 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
       json(response, 200, { status: "ok", protocolVersion: 1 });
       return;
     }
+    if (request.method === "GET" && request.url === "/readyz") {
+      try {
+        if (!options.sandbox.healthCheck) throw new Error("Runner readiness probe is unavailable.");
+        await options.sandbox.healthCheck();
+        json(response, 200, { status: "ready", protocolVersion: 1 });
+      } catch {
+        json(response, 503, { status: "not_ready", protocolVersion: 1 });
+      }
+      return;
+    }
     if (request.method !== "POST" || request.url !== "/v1/sandbox/execute") {
       json(response, 404, { error: "not_found" });
       return;
