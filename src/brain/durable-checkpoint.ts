@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
@@ -20,14 +20,25 @@ class FileCheckpointStore implements CheckpointStore {
   }
 
   async save(checkpoint: Checkpoint): Promise<void> {
-    await fs.mkdir(this.directory, { recursive: true });
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(checkpoint.id)) {
+      throw new Error("Invalid checkpoint ID");
+    }
+    await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
+    await fs.chmod(this.directory, 0o700);
     const target = path.join(this.directory, checkpoint.id + ".json");
-    const temporary = target + ".tmp";
-    await fs.writeFile(temporary, JSON.stringify(checkpoint), "utf8");
-    await fs.rename(temporary, target);
+    const temporary = target + "." + randomUUID() + ".tmp";
+    try {
+      await fs.writeFile(temporary, JSON.stringify(checkpoint), { encoding: "utf8", mode: 0o600 });
+      await fs.rename(temporary, target);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
   }
 
   async load(id: string): Promise<Checkpoint | undefined> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+      return undefined;
+    }
     try {
       return JSON.parse(
         await fs.readFile(path.join(this.directory, id + ".json"), "utf8"),
@@ -44,9 +55,9 @@ export class DurableCheckpointManager implements CheckpointManager {
   private readonly local: RuntimeCheckpointManager;
   private readonly store: CheckpointStore;
 
-  constructor(runtime: WorkspaceRuntime, namespace: string) {
+  constructor(runtime: WorkspaceRuntime, namespace: string, root = sofiaStateDirectory("checkpoints")) {
     this.local = new RuntimeCheckpointManager(runtime);
-    this.store = new FileCheckpointStore(namespace);
+    this.store = new FileCheckpointStore(namespace, root);
   }
 
   async create(signal: AbortSignal): Promise<Checkpoint> {
