@@ -30,6 +30,7 @@ import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
 import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
+import { compareSkillRegressionBenchmark } from "../brain/skill-regression-benchmark.js";
 import { AuditSkillEvidenceVerifier } from "../brain/skill-evidence.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
@@ -52,13 +53,47 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
-  const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate, provenance) => {
+  let skillLifecycle!: VersionedSkillLifecycle;
+  skillLifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate, provenance) => {
     const checks = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
       { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
       { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
       ...await dependencies.evidenceVerifier.verify(candidate, provenance),
     ];
+    const previous = skillLifecycle.active(candidate.skill.id);
+    if (previous) {
+      const baselineChecks = previous.evaluation?.checks;
+      if (!baselineChecks?.length) {
+        checks.push({ name: "skill-regression-benchmark", passed: false, detail: "Previous active Skill has no persisted evaluation baseline." });
+      } else {
+        try {
+          const benchmark = compareSkillRegressionBenchmark({
+            baseline: baselineChecks.map((check) => ({ name: check.name, passed: check.passed })),
+            candidate: checks.map((check) => ({ name: check.name, passed: check.passed })),
+          });
+          checks.push({
+            name: "skill-regression-benchmark",
+            passed: benchmark.passed,
+            detail: benchmark.passed
+              ? "Candidate preserves all prior benchmark checks and introduces no failing checks."
+              : "Regression benchmark blocked promotion: " + benchmark.regressions.join(", "),
+          });
+        } catch (error) {
+          checks.push({
+            name: "skill-regression-benchmark",
+            passed: false,
+            detail: error instanceof Error ? error.message : "Regression benchmark failed unexpectedly.",
+          });
+        }
+      }
+    } else {
+      checks.push({
+        name: "skill-regression-benchmark",
+        passed: true,
+        detail: "First managed version: its verified checks become the baseline for future upgrades.",
+      });
+    }
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval, dependencies.audit);
