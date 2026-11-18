@@ -35,6 +35,7 @@ test("Redis Telegram poll lease is exclusive and owner-scoped", async () => {
   const lease = new RedisTelegramPollLease({ client, botIdentity: "bot-123", ttlMs: 15_000 });
   const first = await lease.acquire();
   assert.ok(first);
+  assert.equal(first.ttlMs, 15_000);
   assert.equal(ttl, 15_000);
   assert.equal(await lease.acquire(), undefined);
   assert.equal(await first.renew(), true);
