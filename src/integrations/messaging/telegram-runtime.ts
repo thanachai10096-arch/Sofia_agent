@@ -4,13 +4,14 @@ import { FileChatMessageDeduplicator } from "../file-chat-deduplicator.js";
 import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createTelegramAdapter } from "./telegram.js";
-import { createTelegramHttpTransport } from "./telegram-http-transport.js";
+import { createTelegramHttpTransport, type TelegramTransportHealth } from "./telegram-http-transport.js";
 import type { OutboundMessage } from "./types.js";
 import { redactSecrets } from "../../security/guard.js";
 
 export interface TelegramMessagingRuntime {
   start(): Promise<void>;
   stop(): Promise<void>;
+  getHealth(): TelegramTransportHealth;
 }
 
 interface TelegramRunResult {
@@ -186,14 +187,15 @@ export function createTelegramMessagingRuntime(
         });
       },
     });
-    const adapter = createTelegramAdapter(createTelegramHttpTransport({
+    const transport = createTelegramHttpTransport({
       token,
       onError: (event, status, failureKind) => onWarning(
         "Telegram transport " + event +
         (failureKind ? " [" + failureKind + "]" : "") +
         (typeof status === "number" ? " (HTTP " + status + ")" : "") + ".",
       ),
-    }));
+    });
+    const adapter = createTelegramAdapter(transport);
     gateway = createMessagingGateway({
       enabled: true,
       adapters: [adapter],
@@ -210,6 +212,7 @@ export function createTelegramMessagingRuntime(
     return {
       start: () => gateway.start(),
       stop: () => gateway.stop(),
+      getHealth: () => transport.getHealth(),
     };
   } catch (error) {
     // Report only the static validation message from our own constructors. Never log
