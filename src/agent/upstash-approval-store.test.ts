@@ -123,3 +123,17 @@ test("Upstash approval store rejects insecure endpoints and invalid settings", (
   assert.throws(() => new UpstashApprovalDecisionStore({ ...base, url: "https://redis.example.com", timeoutMs: 10 }), /timeout/u);
 });
 
+
+
+test("Upstash create atomically caps pending requests and prunes expired index entries", async () => {
+  let command: unknown[] = [];
+  const store = new UpstashApprovalDecisionStore({
+    url: "https://redis.example.com", token: "test-token",
+    fetchImpl: async (_input, init) => { command = JSON.parse(String(init?.body)) as unknown[]; return response(-1); },
+  });
+  await assert.rejects(store.create(record()), /Too many pending approval requests/);
+  assert.equal(command[0], "EVAL");
+  assert.match(String(command[1]), /ZREMRANGEBYSCORE/u);
+  assert.match(String(command[1]), /ZCARD/u);
+  assert.equal(command[command.length - 1], "50");
+});
