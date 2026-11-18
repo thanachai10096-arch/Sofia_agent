@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
+import { FileAutonomyJobStore } from "../autonomy/job-store.js";
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -145,5 +149,88 @@ test("API rejects unknown model routes before starting a run", async () => {
     assert.deepEqual(await response.json(), { error: "invalid_model_route" });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("autonomy queue API derives tenant identity from auth and supports idempotent enqueue", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-api-autonomy-"));
+  const queue = new FileAutonomyJobStore("api-test", root);
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {
+      "autonomy-key-one": ["autonomy:run", "autonomy:read"],
+      "autonomy-key-two": ["autonomy:run", "autonomy:read"],
+      "read-only": ["autonomy:read"],
+    },
+    autonomyJobStore: queue,
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  try {
+    const enqueue = () => fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer autonomy-key-one",
+        "content-type": "application/json",
+        "idempotency-key": "same-request",
+      },
+      body: JSON.stringify({ topic: "Improve worker reliability", principalId: "attacker-controlled" }),
+    });
+    const rejected = await enqueue();
+    assert.equal(rejected.status, 400);
+    const created = await fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer autonomy-key-one",
+        "content-type": "application/json",
+        "idempotency-key": "same-request",
+      },
+      body: JSON.stringify({ topic: "Improve worker reliability", context: "Focus on retries" }),
+    });
+    assert.equal(created.status, 202);
+    const first = await created.json() as { job: { id: string; payload: { topic: string }; principalId?: string } };
+    assert.equal(first.job.payload.topic, "Improve worker reliability");
+    assert.equal(first.job.principalId, undefined);
+
+    const repeated = await fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer autonomy-key-one",
+        "content-type": "application/json",
+        "idempotency-key": "same-request",
+      },
+      body: JSON.stringify({ topic: "Improve worker reliability", context: "Focus on retries" }),
+    });
+    assert.equal(repeated.status, 202);
+    const second = await repeated.json() as { job: { id: string } };
+    assert.equal(second.job.id, first.job.id);
+
+    const listed = await fetch(base + "/v1/autonomy/jobs", {
+      headers: { authorization: "Bearer autonomy-key-one" },
+    });
+    assert.equal(listed.status, 200);
+    const list = await listed.json() as { jobs: Array<{ id: string }> };
+    assert.equal(list.jobs.length, 1);
+
+    const crossTenant = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
+      headers: { authorization: "Bearer autonomy-key-two" },
+    });
+    assert.equal(crossTenant.status, 404);
+
+    const forbidden = await fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: { authorization: "Bearer read-only", "content-type": "application/json" },
+      body: JSON.stringify({ topic: "This must not enqueue" }),
+    });
+    assert.equal(forbidden.status, 403);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(root, { recursive: true, force: true });
   }
 });
