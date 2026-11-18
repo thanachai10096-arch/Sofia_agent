@@ -316,7 +316,6 @@ export class VersionedSkillLifecycle {
     try {
       this.platform.register(clone(previous.package));
       this.persist();
-      this.clearMutationJournal();
     } catch (error) {
       this.snapshot = before;
       try {
