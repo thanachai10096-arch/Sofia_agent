@@ -58,7 +58,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
   let health: TelegramTransportHealth = { status: "stopped" };
   function setHealth(status: TelegramTransportStatus, statusCode?: number) {
     health = { status, ...(statusCode !== undefined ? { lastStatusCode: statusCode } : {}) };
-    try { options.onStatus?.(health); } catch { /* status observers must not affect transport */ }
+    try { options.onStatus?.({ ...health }); } catch { /* status observers must not affect transport */ }
   }
 
   async function request<T>(method: string, body: Record<string, unknown> | undefined, signal: AbortSignal): Promise<T> {
