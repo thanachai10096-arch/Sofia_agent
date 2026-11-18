@@ -1,6 +1,6 @@
 # Sofia autonomous sandbox
 
-The Brain exposes `sandbox.exec` only when a digest-pinned container image and a host-only attestation secret are configured. Commands run in a per-principal/per-run disposable project snapshot; they never execute against the host WorkspaceRuntime. Sandbox changes are not copied back to the host project.
+The Brain exposes `sandbox.exec` only when a digest-pinned container image and a host-only attestation secret are configured. Commands run in a per-principal/per-run disposable project snapshot; they never execute against the host WorkspaceRuntime. Sandbox changes are not copied back to the host project. Use `sandbox.propose_changes` to generate hash-guarded edits; then pass those operations to `workspace.apply_patch`, which retains the existing host approval and conflict-checking flow. New files and deletions are not auto-promoted by this initial proposal path.
 
 ## Required host configuration
 
