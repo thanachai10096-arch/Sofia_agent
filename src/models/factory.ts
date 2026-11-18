@@ -33,7 +33,7 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
-import { mkdir } from "node:fs/promises";
+import { mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
@@ -64,7 +64,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(sofiaStateDirectory("skills"), "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
-  return async ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
+  return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
     const principalNamespace = createHash("sha256")
       .update(principalId?.trim() || "local-instance")
       .digest("hex");
@@ -75,7 +75,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     );
     if (!path.isAbsolute(workspaceRoot)) throw new Error("SOFIA_USER_WORKSPACES_DIR must be absolute.");
     const principalWorkspace = path.join(workspaceRoot, principalNamespace);
-    await mkdir(principalWorkspace, { recursive: true, mode: 0o700 });
+    mkdirSync(principalWorkspace, { recursive: true, mode: 0o700 });
     const principalRuntime = createNodeWorkspaceRuntime(principalWorkspace);
     const projectMemory = new FileProjectMemoryStore(
       "principal:" + principalNamespace + ":workspace:" + principalWorkspace,
