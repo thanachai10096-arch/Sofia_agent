@@ -98,7 +98,22 @@ export class VersionedSkillLifecycle {
         activeRecords.push({ skillId, record });
       }
       // Validate the entire restore set before mutating the supplied platform.
-      for (const { record } of activeRecords) this.platform.register(clone(record.package));
+      const installedDuringRestore: string[] = [];
+      try {
+        for (const { skillId, record } of activeRecords) {
+          const existed = this.platform.get(skillId) !== undefined;
+          if (!existed) installedDuringRestore.push(skillId);
+          this.platform.register(clone(record.package));
+        }
+      } catch (error) {
+        // Undo only entries introduced by this restore attempt; never remove
+        // packages that were already present and validated as identical.
+        for (const skillId of installedDuringRestore.reverse()) {
+          try { this.platform.remove(skillId); }
+          catch { /* Preserve the original restore failure for operator recovery. */ }
+        }
+        throw error;
+      }
     });
   }
 
