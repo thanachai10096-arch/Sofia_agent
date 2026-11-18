@@ -259,7 +259,14 @@ export class VersionedSkillLifecycle {
   private load(): void {
     if (!existsSync(this.file)) return;
     if (lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
-    const parsed: unknown = JSON.parse(readFileSync(this.file, "utf8"));
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(this.file, "utf8")) as unknown;
+    } catch {
+      // Never replace or silently reset a damaged lifecycle store: it may
+      // contain the only durable record of an approved skill transition.
+      throw new Error("Unsupported or corrupt skill lifecycle store");
+    }
     if (!isRecord(parsed) || parsed.schemaVersion !== 1 || !Array.isArray(parsed.records) || !isRecord(parsed.activeBySkill)) {
       throw new Error("Unsupported or corrupt skill lifecycle store");
     }
