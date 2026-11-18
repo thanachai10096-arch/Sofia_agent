@@ -7,6 +7,21 @@ export interface ExecutionPolicy {
   allowDestructive:boolean; maxRisk:RiskLevel; maxSteps:number; maxToolCallsPerStep:number;
   blockedPaths:string[]; allowedHosts:string[]; capabilitySecret?:string; permissions:Record<string,ToolPermission>;
 }
+/** Intersect host policy with capabilities granted to one authenticated API key. */
+export function policyForToolScopes(base: ExecutionPolicy, scopes: readonly string[] = []): ExecutionPolicy {
+  const granted = new Set(scopes);
+  return {
+    ...base,
+    // Read-only tools remain available when tools are enabled. Every elevated
+    // effect requires both host enablement and an explicit per-key scope.
+    allowFileWrite: base.allowFileWrite && granted.has("tool:write"),
+    allowShell: base.allowShell && granted.has("tool:shell"),
+    allowNetwork: base.allowNetwork && granted.has("tool:network"),
+    allowBrowser: base.allowBrowser && granted.has("tool:browser"),
+    allowDestructive: base.allowDestructive && granted.has("tool:destructive"),
+  };
+}
+
 export const defaultPolicy:ExecutionPolicy={
   allowTools:true,allowNetwork:false,allowShell:false,allowFileWrite:true,allowBrowser:false,
   allowDestructive:false,maxRisk:"high",maxSteps:12,maxToolCallsPerStep:4,
