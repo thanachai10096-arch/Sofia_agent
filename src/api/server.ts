@@ -22,6 +22,7 @@ interface ActiveRun {
   updatedAt: number;
   ownerKeyId: string;
   desktopCapabilities: DesktopCapability[];
+  toolScopes: string[];
   /** Hashed owner-scoped idempotency key; raw client key is never persisted. */
   idempotencyId?: string;
   requestFingerprint?: string;
@@ -151,7 +152,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       id: run.id, status: run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
-      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities], toolScopes: [...run.toolScopes],
       ...(run.idempotencyId ? { idempotencyId: run.idempotencyId } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
@@ -161,7 +162,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
-        !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string")) {
+        !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string") || (record.toolScopes !== undefined && (!Array.isArray(record.toolScopes) || !record.toolScopes.every((x) => typeof x === "string")))) {
       void runStore.remove(record.id); continue;
     }
     const run: ActiveRun = {
@@ -170,7 +171,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(interrupted ? { error: "Run interrupted by server restart." } : record.error ? { error: record.error } : {}),
       controller: new AbortController(), createdAt: record.createdAt,
       updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
-      desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+      desktopCapabilities: record.desktopCapabilities as DesktopCapability[], toolScopes: Array.isArray(record.toolScopes) ? record.toolScopes : [],
       ...(record.idempotencyId ? { idempotencyId: record.idempotencyId } : {}),
       ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
     };
@@ -442,7 +443,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             createdAt: stored.createdAt,
             updatedAt: stored.updatedAt,
             ownerKeyId: stored.ownerKeyId,
-            desktopCapabilities: stored.desktopCapabilities as DesktopCapability[],
+            desktopCapabilities: stored.desktopCapabilities as DesktopCapability[], toolScopes: Array.isArray(stored.toolScopes) ? stored.toolScopes : [],
             ...(stored.idempotencyId ? { idempotencyId: stored.idempotencyId } : {}),
             ...(stored.requestFingerprint ? { requestFingerprint: stored.requestFingerprint } : {}),
           };
