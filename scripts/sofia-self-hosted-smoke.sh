@@ -8,7 +8,7 @@ docker compose version >/dev/null
 RUN_SUFFIX="${GITHUB_RUN_ID:-local}-$$"
 export SOFIA_DOCKER_VOLUME="sofia-acceptance-${RUN_SUFFIX}"
 export SOFIA_IMAGE="sofia-agent:acceptance-${RUN_SUFFIX}"
-export SOFIA_HOST_PORT="$((20000 + $ % 20000))"
+export SOFIA_HOST_PORT="$((20000 + BASHPID % 20000))"
 PROJECT="sofia-acceptance-${RUN_SUFFIX}"
 COMPOSE=(docker compose --project-name "$PROJECT" -f compose.yaml)
 cleanup() {
