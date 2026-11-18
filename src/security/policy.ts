@@ -1,14 +1,14 @@
 import type { RiskLevel } from "./guard.js";
 
-export type ToolEffect = "read" | "write" | "shell" | "network" | "destructive" | "browser";
+export type ToolEffect = "read" | "write" | "shell" | "network" | "destructive" | "browser" | "sandbox";
 export interface ToolPermission { allow?: boolean; requireApproval?: boolean; maxRisk?: RiskLevel; }
 export interface ExecutionPolicy {
-  allowTools:boolean; allowNetwork:boolean; allowShell:boolean; allowFileWrite:boolean; allowBrowser:boolean;
+  allowTools:boolean; allowNetwork:boolean; allowShell:boolean; allowFileWrite:boolean; allowBrowser:boolean; allowSandbox:boolean;
   allowDestructive:boolean; maxRisk:RiskLevel; maxSteps:number; maxToolCallsPerStep:number;
   blockedPaths:string[]; allowedHosts:string[]; capabilitySecret?:string; permissions:Record<string,ToolPermission>;
 }
 export const defaultPolicy:ExecutionPolicy={
-  allowTools:true,allowNetwork:false,allowShell:false,allowFileWrite:true,allowBrowser:false,
+  allowTools:true,allowNetwork:false,allowShell:false,allowFileWrite:true,allowBrowser:false,allowSandbox:false,
   allowDestructive:false,maxRisk:"high",maxSteps:12,maxToolCallsPerStep:4,
   blockedPaths:[".env",".git","node_modules",".sofia/secrets"],allowedHosts:[],capabilitySecret:undefined,permissions:{},
 };
@@ -21,7 +21,7 @@ export function loadExecutionPolicyFromEnv():ExecutionPolicy{
   const capabilitySecret=process.env.SOFIA_CAPABILITY_SECRET;
   const allowedHosts=process.env.SOFIA_ALLOWED_HOSTS?process.env.SOFIA_ALLOWED_HOSTS.split(",").map(x=>x.trim().toLowerCase()).filter(Boolean):defaultPolicy.allowedHosts;
   const blockedPaths=process.env.SOFIA_BLOCKED_PATHS?process.env.SOFIA_BLOCKED_PATHS.split(",").map(x=>x.trim()).filter(Boolean):defaultPolicy.blockedPaths;
-  return {...defaultPolicy,allowTools:bool("SOFIA_ALLOW_TOOLS",defaultPolicy.allowTools),allowNetwork:bool("SOFIA_ALLOW_NETWORK",defaultPolicy.allowNetwork),allowShell:bool("SOFIA_ALLOW_SHELL",defaultPolicy.allowShell),allowFileWrite:bool("SOFIA_ALLOW_FILE_WRITE",defaultPolicy.allowFileWrite),allowBrowser:bool("SOFIA_ALLOW_BROWSER",defaultPolicy.allowBrowser),allowDestructive:bool("SOFIA_ALLOW_DESTRUCTIVE",defaultPolicy.allowDestructive),maxRisk,blockedPaths,maxSteps:Math.min(num("SOFIA_MAX_STEPS",defaultPolicy.maxSteps),50),maxToolCallsPerStep:Math.min(num("SOFIA_MAX_TOOL_CALLS_PER_STEP",defaultPolicy.maxToolCallsPerStep),16),allowedHosts,capabilitySecret,permissions:defaultPolicy.permissions};
+  return {...defaultPolicy,allowTools:bool("SOFIA_ALLOW_TOOLS",defaultPolicy.allowTools),allowNetwork:bool("SOFIA_ALLOW_NETWORK",defaultPolicy.allowNetwork),allowShell:bool("SOFIA_ALLOW_SHELL",defaultPolicy.allowShell),allowFileWrite:bool("SOFIA_ALLOW_FILE_WRITE",defaultPolicy.allowFileWrite),allowBrowser:bool("SOFIA_ALLOW_BROWSER",defaultPolicy.allowBrowser),allowSandbox:bool("SOFIA_ALLOW_SANDBOX",defaultPolicy.allowSandbox),allowDestructive:bool("SOFIA_ALLOW_DESTRUCTIVE",defaultPolicy.allowDestructive),maxRisk,blockedPaths,maxSteps:Math.min(num("SOFIA_MAX_STEPS",defaultPolicy.maxSteps),50),maxToolCallsPerStep:Math.min(num("SOFIA_MAX_TOOL_CALLS_PER_STEP",defaultPolicy.maxToolCallsPerStep),16),allowedHosts,capabilitySecret,permissions:defaultPolicy.permissions};
 }
 export function assertSecurityConfiguration(policy:ExecutionPolicy):void{
  const production=process.env.NODE_ENV==="production"||process.env.SOFIA_ENV==="production";
@@ -38,6 +38,7 @@ export function toolPermission(policy:ExecutionPolicy,name:string,effects:readon
   if(effects.includes("write")&&!policy.allowFileWrite)return{allow:false};
   if(effects.includes("network")&&!policy.allowNetwork)return{allow:false};
   if(effects.includes("browser")&&!policy.allowBrowser)return{allow:false};
+  if(effects.includes("sandbox")&&!policy.allowSandbox)return{allow:false};
   return override;
 }
 export function assertToolAllowed(policy:ExecutionPolicy,name:string,effects:readonly ToolEffect[]=[]):void{
@@ -51,6 +52,7 @@ export { riskRank };
 export function classifyToolEffects(name: string): ToolEffect[] {
   // Browser reads are network access, not browser-control actions. They remain
   // gated by allowNetwork + allowedHosts, while page interaction stays privileged.
+  if (name === "sandbox.exec") return ["sandbox"];
   if (name === "browser.goto") return ["network", "read"];
   if (["browser.open", "browser.observe", "browser.screenshot", "browser.close"].includes(name)) return ["read"];
   if (name.startsWith("browser.")) return ["browser", "network"];
@@ -78,7 +80,7 @@ export function classifyToolEffects(name: string): ToolEffect[] {
 export function effectiveToolEffects(name: string, declared?: readonly ToolEffect[]): ToolEffect[] {
   const inferred = classifyToolEffects(name);
   if (!declared) return inferred;
-  const reserved = name.startsWith("browser.") || name.startsWith("desktop.") ||
+  const reserved = name.startsWith("sandbox.") || name.startsWith("browser.") || name.startsWith("desktop.") ||
     name.startsWith("workspace.") || name.startsWith("git.") ||
     name === "terminal.run" || name === "project.verify";
   return reserved ? [...new Set<ToolEffect>([...inferred, ...declared])] : [...declared];
