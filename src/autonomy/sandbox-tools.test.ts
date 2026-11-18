@@ -139,7 +139,8 @@ test("sandbox.propose_changes returns conflict-checked edits without modifying t
       getAttestation: async () => attestation ??= await supervisor.beginRun(identity),
     });
     assert.ok(propose);
-    const workspace = supervisor.getWorkspacePath(identity, await (async () => attestation ??= await supervisor.beginRun(identity))());
+    attestation = await supervisor.beginRun(identity);
+    const workspace = supervisor.getWorkspacePath(identity, attestation);
     // Stage the original snapshot first, then simulate an experiment changing it.
     await propose.execute({}, { runtime: {} as never });
     await writeFile(path.join(workspace, "src", "value.ts"), "export const value = 2;");
