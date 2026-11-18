@@ -366,7 +366,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       const isAutonomyJobCollection = requestUrl.pathname === "/v1/autonomy/jobs";
-      const autonomyJobIdMatch = requestUrl.pathname.match(/^\\/v1\\/autonomy\\/jobs\\/([^/]+)$/);
+      const autonomyJobIdMatch = requestUrl.pathname.match(/^\/v1\/autonomy\/jobs\/([^/]+)$/);
       const isAutonomyJobRead = req.method === "GET" && (isAutonomyJobCollection || autonomyJobIdMatch !== null);
       const isAutonomyJobWrite = (req.method === "POST" && isAutonomyJobCollection) ||
         (req.method === "DELETE" && autonomyJobIdMatch !== null);
