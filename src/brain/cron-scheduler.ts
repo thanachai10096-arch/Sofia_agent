@@ -427,8 +427,13 @@ export class CronScheduler {
 
       let job: JobRecord | undefined;
       try {
-        job = await this.runtime.get(execution.jobId);
+        if (!this.runtime.getForOwner) {
+          throw new Error("Owner-scoped job lookup is unavailable; refusing unscoped cron recovery.");
+        }
+        job = await this.runtime.getForOwner(execution.jobId, schedule.ownerKeyId);
       } catch {
+        // Never reconcile a persisted schedule against a runtime job without
+        // proving that the job belongs to the schedule's immutable owner.
         job = undefined;
       }
       if (!job) {
@@ -545,7 +550,9 @@ export class CronScheduler {
           const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
           job = submitted;
           if (controller.signal.aborted) {
-            await this.runtime.cancel(submitted.id).catch(() => false);
+            if (this.runtime.cancelForOwner) {
+              await this.runtime.cancelForOwner(submitted.id, schedule.ownerKeyId).catch(() => false);
+            }
             status = "cancelled";
             errorText = String(controller.signal.reason ?? "Scheduled execution cancelled");
             break;
