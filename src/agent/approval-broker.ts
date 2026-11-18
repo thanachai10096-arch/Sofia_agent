@@ -68,6 +68,12 @@ export class InMemoryApprovalDecisionStore implements ApprovalDecisionStore {
   async resolve(id: string, actionHash: string, decision: ApprovalDecision, resolvedBy: string, now: number): Promise<boolean> {
     const record = this.records.get(id);
     if (!record || record.status !== "pending" || record.actionHash !== actionHash) return false;
+    if (now >= record.expiresAt) {
+      record.status = "expired";
+      record.resolvedAt = now;
+      record.resolvedBy = "system:expiry";
+      return false;
+    }
     record.status = decision;
     record.resolvedAt = now;
     record.resolvedBy = resolvedBy;
