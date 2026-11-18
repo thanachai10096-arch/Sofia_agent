@@ -172,3 +172,28 @@ test("Telegram transport does not hang shutdown when lease release stalls", asyn
   await started;
   await transport.stop();
 });
+
+test("Telegram transport releases a lease granted after acquisition timeout", async () => {
+  let released = 0;
+  let fetchCalls = 0;
+  const transport = createTelegramHttpTransport({
+    token,
+    pollLeaseOperationTimeoutMs: 250,
+    pollLease: {
+      async acquire() {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return {
+          ttlMs: 30_000,
+          async renew() { return true; },
+          async release() { released++; },
+        };
+      },
+    },
+    fetchImpl: async () => { fetchCalls++; return ok(true); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(released, 1);
+  assert.equal(fetchCalls, 0);
+  await transport.stop();
+});
