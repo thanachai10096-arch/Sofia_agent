@@ -9,7 +9,7 @@ import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
-import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
+import { CronScheduler, FileCronStore, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 
 interface ActiveRun {
@@ -140,7 +140,23 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try { usage.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
-  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  // Cron state is physically partitioned by the server-derived API-key owner ID.
+  // Migrate each owner's records from the legacy shared file before serving cron
+  // requests or recovering jobs; never accept a client-supplied namespace.
+  const cronSchedulers = new Map<string, CronScheduler>();
+  const legacyCronStore = deps.jobRuntime ? new FileCronStore() : undefined;
+  const cronInitialization = (async () => {
+    if (!deps.jobRuntime || !legacyCronStore) return;
+    for (const token of Object.keys(config.apiKeys)) {
+      const ownerKeyId = createHash("sha256").update(token).digest("hex").slice(0, 32);
+      const store = new FileCronStore(ownerKeyId);
+      await store.migrateOwnerFrom(legacyCronStore, ownerKeyId);
+      cronSchedulers.set(ownerKeyId, new CronScheduler(deps.jobRuntime, { store, maxConcurrent: 1 }));
+    }
+  })();
+  const tickCronSchedulers = async (): Promise<void> => {
+    for (const scheduler of cronSchedulers.values()) await scheduler.tick();
+  };
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
@@ -349,6 +365,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
       if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
+      if (isCronRequest) {
+        try { await cronInitialization; }
+        catch { return json(res, 503, { error: "cron_store_initialization_failed" }, origin, config); }
+      }
+      const cronScheduler = isCronRequest ? cronSchedulers.get(auth.keyId) : undefined;
+      if (isCronRequest && !cronScheduler) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
         return json(res, 403, { error: "forbidden", requiredScope: "cron:read" }, origin, config);
       }
@@ -793,17 +815,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       return json(res, 500, { error: "internal_error" }, origin, config);
     }
   });
-  if (cronScheduler) {
+  if (deps.jobRuntime) {
     server.on("listening", () => {
       void (async () => {
         try {
-          await cronScheduler.recover();
+          await cronInitialization;
+          for (const scheduler of cronSchedulers.values()) await scheduler.recover();
           if (cronClosed) return;
-          await cronScheduler.tick();
+          await tickCronSchedulers();
           if (cronClosed) return;
-          cronTimer = setInterval(() => { void cronScheduler.tick().catch(() => undefined); }, 1_000);
+          cronTimer = setInterval(() => { void tickCronSchedulers().catch(() => undefined); }, 1_000);
         } catch {
-          // Fail closed: do not dispatch scheduled work if recovery could not complete.
+          // Fail closed: do not dispatch scheduled work if migration or recovery could not complete.
         }
       })();
     });
