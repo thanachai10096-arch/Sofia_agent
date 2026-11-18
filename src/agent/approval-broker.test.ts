@@ -35,7 +35,7 @@ test("approval broker denies requests without a trusted principal", async () => 
     actionHash: "hash",
     risk: "high",
   }), false);
-  assert.deepEqual(await broker.listPending(), []);
+  assert.deepEqual(await broker.listPending("principal-1"), []);
 });
 
 test("approval broker expires requests and denies late approvals", async () => {
@@ -50,7 +50,7 @@ test("approval broker expires requests and denies late approvals", async () => {
     actionHash: "hash-expire",
     risk: "critical",
   });
-  const [record] = await broker.listPending();
+  const [record] = await broker.listPending("principal-1");
   assert.ok(record);
   now = record.expiresAt + 1;
   assert.equal(await broker.approve(record.id, record.actionHash, "approver-1"), false, "approval after expiry must be rejected even before the waiter polls");
