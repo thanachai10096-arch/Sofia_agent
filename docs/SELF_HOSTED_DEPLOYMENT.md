@@ -88,6 +88,7 @@ A self-hosted release is not ready until all of the following pass:
 9. Backup and restore reproduce the expected state on a clean volume.
 10. Upgrade and rollback procedures are tested against a prior release.
 11. Container runs non-root and does not expose secrets in logs or image layers.
+13. Upgrade creates a verified pre-upgrade backup, preserves the previous image, and passes a health-check rollback drill without mutating user state.
 12. Existing CI, typecheck, tests and build pass; Railway Staging/Production are not modified as part of this branch.
 
 ## Implementation sequence
@@ -95,11 +96,11 @@ A self-hosted release is not ready until all of the following pass:
 - P0: unify persistent state-root configuration (implemented on this branch; automated and clean-host verification still pending).
 - P1: add Dockerfile, production Compose, ignore rules and container health endpoint.
 - P2: add secure installer and environment validation.
-- P3: add backup/restore and upgrade/rollback tooling.
+- P3: add backup/restore and upgrade/rollback tooling (scripts implemented on this branch; end-to-end validation pending).
 - P4: run clean-host acceptance tests and publish versioned installation documentation.
 - P5: only then evaluate shared PostgreSQL/Redis adapters and multi-replica support.
 
-## References
+## Upgrade and rollback\n\nUse `bash scripts/sofia-upgrade.sh` to create a volume backup, preserve the current image under a timestamped rollback tag, build/recreate the service, and wait for the container health check. A successful run writes a private JSON manifest under `backups/`. If the upgraded service does not become healthy, the script attempts to restore the previous image automatically.\n\nFor a deliberate manual image rollback, run `bash scripts/sofia-rollback.sh backups/upgrade-<timestamp>.json --yes`. The rollback command verifies the manifest and local rollback image ID before recreating the service. Both automatic and manual rollback restore the container image only; they do not restore, rewrite, or delete the data volume. Database/schema migrations that are not backward-compatible require a separately designed recovery procedure and are not supported by this initial release. Keep upgrade manifests and their matching Docker image tags until the rollback window has passed.\n\n## References
 
 - Docker Compose production guidance: https://docs.docker.com/compose/how-tos/production/
 - Docker Compose secrets: https://docs.docker.com/compose/how-tos/use-secrets/
