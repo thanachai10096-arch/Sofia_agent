@@ -481,7 +481,27 @@ export class RemoteSandbox implements Sandbox {
       signal?.removeEventListener("abort", onAbort);
     }
     if (!response.ok) throw new Error("Remote sandbox runner rejected the request (HTTP " + response.status + ").");
-    const result = await response.json() as {
+    const responseLimit = Math.min(Number.MAX_SAFE_INTEGER, this.maxSnapshotBytes * 2 + maxOutputBytes * 4 + 1_048_576);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("Remote sandbox runner returned an empty response body.");
+    const responseChunks: Uint8Array[] = [];
+    let responseBytes = 0;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        responseBytes += chunk.value.byteLength;
+        if (responseBytes > responseLimit) {
+          await reader.cancel().catch(() => undefined);
+          throw new Error("Remote sandbox response exceeded the configured byte limit.");
+        }
+        responseChunks.push(chunk.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const responseText = new TextDecoder().decode(Buffer.concat(responseChunks.map((chunk) => Buffer.from(chunk))));
+    const result = JSON.parse(responseText) as {
       protocolVersion?: number;
       requestId?: string;
       stdout?: unknown;
@@ -531,7 +551,15 @@ export class RemoteSandbox implements Sandbox {
       if (!current.isFile() || current.isSymbolicLink()) throw new Error("Remote sandbox update target is no longer a regular file.");
     }
     for (const update of updates) {
-      await writeFile(update.target, update.data, { flag: "w", mode: 0o600 });
+      const handle = await open(update.target, constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const current = await handle.stat();
+        if (!current.isFile()) throw new Error("Remote sandbox update target is no longer a regular file.");
+        await handle.truncate(0);
+        await handle.writeFile(update.data);
+      } finally {
+        await handle.close();
+      }
     }
     return { stdout: result.stdout, stderr: result.stderr, code: result.code as number };
   }
