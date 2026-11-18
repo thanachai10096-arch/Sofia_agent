@@ -26,9 +26,11 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 - `TELEGRAM_BOT_TOKEN` — BotFather token, stored only as a server-side secret.
 - `TELEGRAM_ALLOWED_USER_IDS` — comma-separated immutable Telegram user IDs.
 - `TELEGRAM_ALLOWED_CHAT_IDS` — comma-separated chat IDs. Private chats usually use the same numeric ID as the user; group IDs may be negative.
+- `TELEGRAM_USER_API_KEYS_JSON` — JSON object mapping every allowlisted Telegram user ID to a distinct Sofia API key, for example `{"123456":"telegram-user-123-key","789012":"telegram-user-789-key"}`. Missing, extra, or duplicate keys disable Telegram. Never reuse one key for multiple senders.
+- `SOFIA_API_KEYS_JSON` — server-side JSON object mapping those additional API keys to scopes, for example `{"telegram-user-123-key":["agent:run","agent:read"],"telegram-user-789-key":["agent:run","agent:read"]}`. The primary `SOFIA_API_KEY` remains available for trusted service callers.
 - `SOFIA_API_BASE_URL` — optional HTTPS base URL for the existing Sofia API. Railway can fall back to `https://${RAILWAY_PUBLIC_DOMAIN}`; on Ubuntu, set the public HTTPS API URL explicitly.
 
-Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Ordinary text messages are dispatched as natural-language tasks without requiring `/run`; `/run <task>` remains supported, while other slash commands are ignored. This behavior uses the shared handler default (`naturalLanguageEnabled: true`). The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
+Both allowlists are required and checked together. Every allowlisted Telegram user must have a distinct API key, and the API entrypoint must register each key through `SOFIA_API_KEYS_JSON` with only the scopes that user needs. The Telegram runtime resolves the API client from the verified sender ID; the API then derives the principal from that sender-specific bearer key. This prevents multiple Telegram users from sharing one memory namespace, run ownership identity, or quota bucket. Missing, malformed, duplicate, or incomplete user-key mappings disable Telegram without stopping the API. Ordinary text messages are dispatched as natural-language tasks without requiring `/run`; `/run <task>` remains supported, while other slash commands are ignored. This behavior uses the shared handler default (`naturalLanguageEnabled: true`). Do not expose bot tokens or API keys in chat, source control, or logs.
 
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
@@ -41,15 +43,15 @@ The existing `createChatCommandHandler` remains the shared command dispatcher fo
 ## Configuration outline
 
 At the application composition root:
-1. Construct the existing Sofia SDK client with a server-side API key that has the required `agent:run` scope.
+1. Construct the existing Sofia SDK client with a server-side API key that has the required `agent:run` scope. For Telegram, register one distinct key per allowed sender in `SOFIA_API_KEYS_JSON` and map sender IDs to those keys with `TELEGRAM_USER_API_KEYS_JSON`.
 2. Reuse the existing `ChatAccessPolicy` and atomic `ChatMessageDeduplicator`.
 3. Construct the Telegram adapter with `createTelegramAdapter(createTelegramHttpTransport({ token: process.env.TELEGRAM_BOT_TOKEN! }))`.
 4. Construct the Discord transport with `createDiscordInteractionTransport({ publicKeyHex, botToken: process.env.DISCORD_BOT_TOKEN! })`; wrap it with `createDiscordAdapter` and pass the transport to `createSofiaApi` as `discordInteractionRoute: { transport }` (default path `/v1/integrations/discord/interactions`). Expose that route only over HTTPS. For the standalone entrypoint, configure `DISCORD_ALLOWED_USER_IDS=123...,456...` and `DISCORD_ALLOWED_CHANNEL_IDS=789...`; both lists are mandatory and validated before the transport starts.
-5. Create the gateway with `enabled: process.env.SOFIA_MESSAGING_ENABLED === "true"`, `allowUser: createMessagingAccessCheck(policy)`, and `onMessage: createSofiaMessagingHandler({ client, accessPolicy: policy, deduplicator })`.
+5. For Telegram, use `clientForMessage` to resolve a distinct SDK client from the verified sender ID and the complete `TELEGRAM_USER_API_KEYS_JSON` map. Register those keys with `SOFIA_API_KEYS_JSON`. Keep the primary API key for trusted service callers only. Create the gateway with `enabled: process.env.SOFIA_MESSAGING_ENABLED === "true"`, `allowUser: createMessagingAccessCheck(policy)`, and the sender-scoped `createSofiaMessagingHandler`.
 6. Ensure the command prefix configured for the handler matches the prefix configured for Discord's interaction transport.
 7. Keep lifecycle ownership at the existing application composition root: call `start()` after server readiness and `stop()` during graceful shutdown. Do not instantiate a second Sofia runtime.
 
-The code outline above is not a claim that the repository's API server is already wired to these transports. Keep secrets out of checked-in config, client builds, test fixtures, and logs.
+The standalone API entrypoint supports `SOFIA_API_KEYS_JSON` as an additional key-to-scopes map. The Telegram runtime requires a distinct key for each allowlisted sender and fails closed if that map is incomplete. The code outline above is not a claim that the repository's API server is already wired to these transports. Keep secrets out of checked-in config, client builds, test fixtures, and logs.
 
 
 - The shared Sofia SDK supports an optional `idempotencyKey` for async runs. Reuse a key only for the same logical request; the API returns `409 idempotency_key_reused` if the same key is presented with a different request payload. This protection is currently process-local and is not persisted across server restarts.

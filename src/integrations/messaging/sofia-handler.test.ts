@@ -111,3 +111,39 @@ test("invalid command prefixes are rejected at configuration time", () => {
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
 });
 
+
+
+test("per-message API client resolver isolates each verified sender", async () => {
+  const calls: Array<{ sender: string; task: string }> = [];
+  const h = harness();
+  const handle = createSofiaMessagingHandler({
+    accessPolicy: h.accessPolicy,
+    deduplicator: h.deduplicator,
+    clientForMessage(message) {
+      const sender = message.identity.userId;
+      return {
+        async start(input) {
+          calls.push({ sender, task: input.task });
+          return { id: "run-" + sender, status: "queued" };
+        },
+      };
+    },
+  });
+  await handle(inbound("first task"));
+  await handle(inbound("second task", {
+    messageId: "message-2",
+    identity: { platform: "telegram", userId: "user-2", channelId: "chat-1", conversationId: "chat-1" },
+  }));
+  assert.deepEqual(calls, [
+    { sender: "user-1", task: "first task" },
+    { sender: "user-2", task: "second task" },
+  ]);
+});
+
+test("messaging handler requires a client or per-message resolver", () => {
+  const h = harness();
+  assert.throws(() => createSofiaMessagingHandler({
+    accessPolicy: h.accessPolicy,
+    deduplicator: h.deduplicator,
+  }), /API client or per-message client resolver/);
+});
