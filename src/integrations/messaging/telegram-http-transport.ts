@@ -47,6 +47,14 @@ async function withLeaseOperationTimeout<T>(operation: Promise<T>, timeoutMs: nu
   }
 }
 
+async function releaseLeaseSafely(lease: TelegramPollLeaseHandle, timeoutMs: number): Promise<void> {
+  try {
+    await withLeaseOperationTimeout(lease.release(), timeoutMs, "release");
+  } catch {
+    // The lease TTL is the final recovery mechanism if Redis cannot release it.
+  }
+}
+
 export function createTelegramHttpTransport(options: TelegramHttpTransportOptions): TelegramTransport {
   const token = options.token;
   if (!/^[A-Za-z0-9:_-]{20,256}$/.test(token)) {
@@ -242,7 +250,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         leaseRenewalTimer = undefined;
         const lease = pollLeaseHandle;
         pollLeaseHandle = undefined;
-        if (lease) await withLeaseOperationTimeout(lease.release(), leaseOperationTimeoutMs, "release").catch(() => undefined);
+        if (lease) await releaseLeaseSafely(lease, leaseOperationTimeoutMs);
         return;
       }
       loop = poll(controller.signal, onUpdate).finally(async () => {
@@ -283,7 +291,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       await loop?.catch(() => undefined);
       const lease = pollLeaseHandle;
       pollLeaseHandle = undefined;
-      if (lease) await lease.release().catch(() => undefined);
+      if (lease) await releaseLeaseSafely(lease, leaseOperationTimeoutMs);
       controller = undefined;
       loop = undefined;
     },
