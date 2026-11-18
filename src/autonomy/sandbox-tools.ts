@@ -108,6 +108,16 @@ export interface SandboxToolOptions {
 export function createSandboxTools(options: SandboxToolOptions): SofiaTool[] {
   let baseline: Map<string, string> | undefined;
   let staging: Promise<void> | undefined;
+  // Serialize execution and proposal collection so concurrent Brain tool calls
+  // cannot race over one per-run remote workspace snapshot.
+  let operationTail: Promise<void> = Promise.resolve();
+  const withOperationLock = async <T>(operation: () => Promise<T>): Promise<T> => {
+    const previous = operationTail;
+    let release!: () => void;
+    operationTail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await operation(); } finally { release(); }
+  };
   const ensureStaged = async () => {
     const attestation = await options.getAttestation();
     const workspace = options.supervisor.getWorkspacePath(options.identity, attestation);
@@ -133,22 +143,24 @@ export function createSandboxTools(options: SandboxToolOptions): SofiaTool[] {
       additionalProperties: false,
     },
     async execute(input, context) {
-      const { attestation } = await ensureStaged();
-      const command = input.command;
-      if (typeof command !== "string" || !command.trim()) throw new Error("Sandbox command is required.");
-      const args = Array.isArray(input.args) && input.args.every((value) => typeof value === "string")
-        ? input.args as string[]
-        : [];
-      const timeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 120000;
-      const cwd = typeof input.cwd === "string" ? input.cwd : undefined;
-      return options.supervisor.run(
-        options.identity,
-        attestation,
-        command,
-        args,
-        { timeoutMs, allowNetwork: options.networkAllowed, ...(cwd ? { cwd } : {}) },
-        context.signal,
-      );
+      return withOperationLock(async () => {
+        const { attestation } = await ensureStaged();
+        const command = input.command;
+        if (typeof command !== "string" || !command.trim()) throw new Error("Sandbox command is required.");
+        const args = Array.isArray(input.args) && input.args.every((value) => typeof value === "string")
+          ? input.args as string[]
+          : [];
+        const timeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 120000;
+        const cwd = typeof input.cwd === "string" ? input.cwd : undefined;
+        return options.supervisor.run(
+          options.identity,
+          attestation,
+          command,
+          args,
+          { timeoutMs, allowNetwork: options.networkAllowed, ...(cwd ? { cwd } : {}) },
+          context.signal,
+        );
+      });
     },
   };
   const proposeTool: SofiaTool = {
@@ -157,8 +169,10 @@ export function createSandboxTools(options: SandboxToolOptions): SofiaTool[] {
     effects: ["sandbox"],
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     async execute() {
-      const { workspace, baseline } = await ensureStaged();
-      return { operations: await collectSandboxChanges(workspace, baseline), approvalRequiredForApply: true };
+      return withOperationLock(async () => {
+        const { workspace, baseline } = await ensureStaged();
+        return { operations: await collectSandboxChanges(workspace, baseline), approvalRequiredForApply: true };
+      });
     },
   };
   return [executeTool, proposeTool];
