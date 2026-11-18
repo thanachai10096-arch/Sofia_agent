@@ -77,8 +77,8 @@ if (discordConfigured) {
           );
           return;
         }
-        const job = await deps.jobRuntime.get(argument);
-        if (!job || job.ownerKeyId !== principalId) {
+        const job = await deps.jobRuntime.getForOwner?.(argument, principalId);
+        if (!job) {
           await discordTransport?.sendMessage(message.channelId, "Job not found or not accessible to this Discord user.", undefined, message.id);
           return;
         }
@@ -102,7 +102,7 @@ if (discordConfigured) {
             return;
           }
           await discordTransport?.sendMessage(message.channelId, "Resume requested for job " + job.id + ".", undefined, message.id);
-          void deps.jobRuntime.resume(job.id).then(async (resumed) => {
+          void deps.jobRuntime.resumeForOwner!(job.id, principalId).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
             await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
@@ -114,7 +114,7 @@ if (discordConfigured) {
           });
           return;
         }
-        const cancelled = await deps.jobRuntime.cancel(job.id);
+        const cancelled = await deps.jobRuntime.cancelForOwner?.(job.id, principalId) ?? false;
         await discordTransport?.sendMessage(
           message.channelId,
           cancelled ? "Cancellation requested for job " + job.id + "." : "Job " + job.id + " is already terminal or cannot be cancelled.",
