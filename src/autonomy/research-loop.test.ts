@@ -114,11 +114,12 @@ test("research loop resumes after a persisted cycle without replaying earlier cy
     sandboxAvailable: false,
     budgetContext: () => ({}),
     maxCycles: 2,
+    idempotencyPrefix: "autonomy-job:job-123",
     startCycle: 2,
     previousCycles: [prior],
     onCycle: async (cycle, nextCycle) => { saved.push(cycle.cycle, nextCycle); },
   });
   assert.deepEqual(report.cycles.map((cycle) => cycle.cycle), [1, 2]);
-  assert.deepEqual(keys, ["research:tenant-user-1:2"]);
+  assert.deepEqual(keys, ["autonomy-job:job-123:2"]);
   assert.deepEqual(saved, [2, 3]);
 });
