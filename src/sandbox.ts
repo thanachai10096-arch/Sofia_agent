@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 
 export interface SandboxLimits {
@@ -346,5 +346,192 @@ export class ContainerSandbox implements Sandbox {
       await this.runner(["rm", "--force", containerName], { timeoutMs: 5_000, maxOutputBytes: 4_096 }).catch(() => undefined);
       throw error;
     }
+  }
+}
+
+
+export interface RemoteSandboxOptions {
+  /** HTTPS base URL of a trusted, separately operated sandbox runner. */
+  endpoint: string;
+  /** Host-only bearer token. Never expose it to model tools or project files. */
+  token: string;
+  /** Optional fetch implementation for deterministic tests. */
+  fetcher?: typeof fetch;
+  /** Maximum project snapshot size in bytes. Defaults to 100 MiB. */
+  maxSnapshotBytes?: number;
+}
+
+/**
+ * Sends a bounded project snapshot to a trusted remote runner over TLS.
+ * The remote service MUST create a fresh container for every request, enforce
+ * CPU/memory/PID/time/output limits, and apply its own egress firewall.
+ * Only already-present regular files are accepted back; paths are validated
+ * against the original snapshot before any local file is overwritten.
+ */
+export class RemoteSandbox implements Sandbox {
+  readonly isolation = "container" as const;
+  private readonly endpoint: string;
+  private readonly fetcher: typeof fetch;
+  private readonly maxSnapshotBytes: number;
+
+  constructor(private readonly options: RemoteSandboxOptions) {
+    let parsed: URL;
+    try { parsed = new URL(options.endpoint); } catch { throw new Error("Remote sandbox endpoint must be a valid URL."); }
+    if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
+      throw new Error("Remote sandbox endpoint must use HTTPS.");
+    }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) {
+      throw new Error("Remote sandbox endpoint cannot contain credentials, query parameters, or fragments.");
+    }
+    if (typeof options.token !== "string" || options.token.length < 32 || /[\\r\\n]/.test(options.token)) {
+      throw new Error("Remote sandbox token must contain at least 32 characters.");
+    }
+    this.endpoint = parsed.toString().replace(/\\/$/, "");
+    this.fetcher = options.fetcher ?? fetch;
+    this.maxSnapshotBytes = options.maxSnapshotBytes ?? 100 * 1024 * 1024;
+    if (!Number.isSafeInteger(this.maxSnapshotBytes) || this.maxSnapshotBytes < 1) {
+      throw new Error("Remote sandbox snapshot limit must be a positive safe integer.");
+    }
+  }
+
+  async run(
+    command: string,
+    args: string[],
+    limits: SandboxLimits,
+    signal?: AbortSignal,
+  ): Promise<{ stdout: string; stderr: string; code: number }> {
+    if (!command.trim() || command.includes("\\0")) throw new Error("A valid remote sandbox command is required.");
+    if (!Array.isArray(args) || args.length > 128 || args.some((arg) => typeof arg !== "string" || arg.includes("\\0"))) {
+      throw new Error("Remote sandbox arguments are invalid.");
+    }
+    const timeoutMs = positiveFinite(limits.timeoutMs, "timeoutMs");
+    const maxOutputBytes = positiveFinite(limits.maxOutputBytes, "maxOutputBytes");
+    if (signal?.aborted) throw new Error("Remote sandbox execution was aborted.");
+
+    const { lstat, readdir, open: openFile, realpath, stat, mkdir, writeFile } = await import("node:fs/promises");
+    const root = await realpath(limits.workspaceRoot);
+    if (!(await stat(root)).isDirectory()) throw new Error("Remote sandbox workspace must be a directory.");
+    const files: Array<{ path: string; contentBase64: string }> = [];
+    const known = new Map<string, string>();
+    let totalBytes = 0;
+    async function collect(directory: string, relative: string): Promise<void> {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const full = path.join(directory, entry.name);
+        const rel = relative ? path.join(relative, entry.name) : entry.name;
+        const info = await lstat(full);
+        if (info.isSymbolicLink() || (!info.isDirectory() && !info.isFile())) continue;
+        if (info.isDirectory()) { await collect(full, rel); continue; }
+        if (files.length >= 10_000) throw new Error("Remote sandbox snapshot exceeds the file-count limit.");
+        const handle = await openFile(full, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+        try {
+          const opened = await handle.stat();
+          if (!opened.isFile() || opened.size > this.maxSnapshotBytes - totalBytes) {
+            throw new Error("Remote sandbox snapshot exceeds its size limit.");
+          }
+          const data = await handle.readFile();
+          if (data.length > this.maxSnapshotBytes - totalBytes) throw new Error("Remote sandbox snapshot exceeds its size limit.");
+          totalBytes += data.length;
+          const normalized = rel.split(path.sep).join("/");
+          files.push({ path: normalized, contentBase64: data.toString("base64") });
+          known.set(normalized, full);
+        } finally { await handle.close(); }
+      }
+    }
+    await collect(root, "");
+
+    const relativeCwd = limits.cwd ? path.posix.normalize(limits.cwd.split(path.sep).join("/")) : ".";
+    if (relativeCwd === ".." || relativeCwd.startsWith("../") || path.posix.isAbsolute(relativeCwd)) {
+      throw new Error("Remote sandbox working directory escapes its workspace.");
+    }
+    const requestId = randomUUID();
+    const payload = {
+      protocolVersion: 1,
+      requestId,
+      workspaceDigest: createHash("sha256").update(root).digest("hex"),
+      command,
+      args,
+      cwd: relativeCwd,
+      timeoutMs,
+      maxOutputBytes,
+      allowNetwork: limits.allowNetwork === true,
+      files,
+    };
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => controller.abort(), timeoutMs + 10_000);
+    timer.unref?.();
+    let response: Response;
+    try {
+      response = await this.fetcher(this.endpoint + "/v1/sandbox/execute", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer " + this.options.token,
+          "content-type": "application/json",
+          "x-sofia-request-id": requestId,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw new Error(controller.signal.aborted ? "Remote sandbox request was aborted or timed out." : "Remote sandbox runner is unreachable.", { cause: error });
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+    if (!response.ok) throw new Error("Remote sandbox runner rejected the request (HTTP " + response.status + ").");
+    const result = await response.json() as {
+      protocolVersion?: number;
+      requestId?: string;
+      stdout?: unknown;
+      stderr?: unknown;
+      code?: unknown;
+      files?: unknown;
+    };
+    if (result.protocolVersion !== 1 || result.requestId !== requestId ||
+        typeof result.stdout !== "string" || typeof result.stderr !== "string" ||
+        !Number.isInteger(result.code) || (result.code as number) < 0 ||
+        !Array.isArray(result.files)) {
+      throw new Error("Remote sandbox runner returned an invalid protocol response.");
+    }
+    const outputBytes = Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr);
+    if (outputBytes > maxOutputBytes) throw new Error("Remote sandbox output exceeded the configured byte limit.");
+
+    let returnedBytes = 0;
+    const updates: Array<{ target: string; data: Buffer }> = [];
+    for (const item of result.files) {
+      if (!item || typeof item !== "object") throw new Error("Remote sandbox returned an invalid file entry.");
+      const file = item as { path?: unknown; contentBase64?: unknown };
+      if (typeof file.path !== "string" || typeof file.contentBase64 !== "string" ||
+          file.path.includes("\\0") || file.path.includes("\\\\")) {
+        throw new Error("Remote sandbox returned an invalid file path.");
+      }
+      const normalized = path.posix.normalize(file.path);
+      if (normalized !== file.path || normalized === "." || normalized.startsWith("../") || path.posix.isAbsolute(normalized)) {
+        throw new Error("Remote sandbox returned a path outside the project snapshot.");
+      }
+      const target = known.get(normalized);
+      if (!target) throw new Error("Remote sandbox attempted to return a file outside the original snapshot.");
+      const data = Buffer.from(file.contentBase64, "base64");
+      if (data.toString("base64") !== file.contentBase64 || data.length > this.maxSnapshotBytes - returnedBytes) {
+        throw new Error("Remote sandbox returned invalid or oversized file content.");
+      }
+      returnedBytes += data.length;
+      updates.push({ target, data });
+    }
+    // Validate the entire response before applying any returned content.
+    for (const update of updates) {
+      const parent = await realpath(path.dirname(update.target));
+      const relative = path.relative(root, parent);
+      if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
+        throw new Error("Remote sandbox update escaped its workspace.");
+      }
+      const current = await lstat(update.target);
+      if (!current.isFile() || current.isSymbolicLink()) throw new Error("Remote sandbox update target is no longer a regular file.");
+    }
+    for (const update of updates) {
+      await writeFile(update.target, update.data, { flag: "w", mode: 0o600 });
+    }
+    return { stdout: result.stdout, stderr: result.stderr, code: result.code as number };
   }
 }
