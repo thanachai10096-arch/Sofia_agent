@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { SecurityAuditEvent, SecurityAuditSink } from "./audit.js";
 
@@ -12,12 +12,30 @@ export class EncryptedFileAudit implements SecurityAuditSink {
  }
  async record(event:SecurityAuditEvent):Promise<void>{
   const key=this.key();
-  await mkdir(path.dirname(this.file),{recursive:true});
+  const directory = path.dirname(this.file);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
   const iv=randomBytes(12); const cipher=createCipheriv("aes-256-gcm",key,iv);
   const plaintext=Buffer.from(JSON.stringify(event));
   const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
   const tag=cipher.getAuthTag();
-  await appendFile(this.file,Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n","utf8");
+  const line = Buffer.from(Buffer.concat([iv,tag,ciphertext]).toString("base64")+"\n", "utf8");
+  const handle = await open(this.file, "a", 0o600);
+  try {
+   await handle.writeFile(line);
+   // Do not report durable completion until the encrypted record has been
+   // flushed through the OS file handle. The gateway only issues evidence
+   // after it can read this exact event back.
+   await handle.sync();
+  } finally {
+   await handle.close();
+  }
+  // Persist the directory entry too (important when this append creates the file).
+  // Windows does not support opening directories this way; file sync still applies.
+  if (process.platform !== "win32") {
+   const directoryHandle = await open(directory, "r");
+   try { await directoryHandle.sync(); }
+   finally { await directoryHandle.close(); }
+  }
  }
  async read(id:string):Promise<SecurityAuditEvent|undefined>{
   return (await this.list()).find((event)=>event.id===id);
