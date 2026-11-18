@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { SecurityAuditEvent } from "../src/security/audit.js";
@@ -26,6 +26,10 @@ describe("encrypted persistent audit", () => {
       const events = await restartedProcess.list();
       assert.deepEqual(events.map((item) => item.id), ["event-1", "event-2"]);
       assert.deepEqual(events[1]?.input, { command: "echo safe" });
+      assert.equal((await restartedProcess.read("event-1"))?.runId, "run-1", "durable evidence must be readable by ID after restart");
+      if (process.platform !== "win32") {
+        assert.equal((await stat(file)).mode & 0o077, 0, "encrypted audit file must not be accessible to group/other users");
+      }
       const onDisk = await readFile(file, "utf8");
       assert.equal(onDisk.includes("echo safe"), false);
       assert.equal(onDisk.trim().split("\n").length, 2);
