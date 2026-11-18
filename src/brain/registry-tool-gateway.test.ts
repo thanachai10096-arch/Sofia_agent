@@ -473,6 +473,7 @@ test("completion audit failure does not turn a successful side effect into a ret
 
   assert.equal(executions, 1);
   assert.equal(result.ok, true, "the completed side effect must not be reported as failed");
+  assert.equal(result.evidenceId, "", "an unpersisted completion audit must not be presented as evidence");
   assert.deepEqual(result.data, { committed: true });
   assert.match(result.warnings?.[0] ?? "", /completion audit event could not be persisted/i);
 });
@@ -614,3 +615,84 @@ test("an approval arriving after capability expiry cannot execute the tool", asy
   }
 });
 
+
+
+test("production effectful tools fail closed when no audit sink is configured", async () => {
+  let executions = 0;
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Write action requiring durable audit configuration",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; return { committed: true }; },
+    }]);
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "production-audit-required-test-secret" },
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: {} },
+      { runId: "production-audit-required", principalId: "test-principal", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.category, "permission_error");
+    assert.match(result.error?.message ?? "", /security audit sink/i);
+    assert.equal(executions, 0);
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
+
+test("tool evidence ID is the exact completion event confirmed by durable readback", async () => {
+  const persisted = new Map<string, SecurityAuditEvent>();
+  const audit: SecurityAuditSink = {
+    durable: true,
+    record(event) { persisted.set(event.id, event); },
+    read(id) { return persisted.get(id); },
+  };
+  const registry = new MapToolRegistry([{
+    name: "custom.read",
+    description: "Read action with durable completion evidence",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() { return { value: "verified" }; },
+  }]);
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, defaultPolicy, undefined, undefined, undefined, audit);
+  const result = await gateway.execute(
+    { tool: "custom.read", input: {} },
+    { runId: "durable-evidence-readback", principalId: "test-principal", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(result.ok, true);
+  assert.ok(result.evidenceId);
+  const event = persisted.get(result.evidenceId);
+  assert.equal(event?.decision, "completed");
+  assert.equal(event?.runId, "durable-evidence-readback");
+});
+
+test("tool evidence ID is empty when durable audit readback is missing", async () => {
+  const audit: SecurityAuditSink = {
+    durable: true,
+    record() {},
+    read() { return undefined; },
+  };
+  const registry = new MapToolRegistry([{
+    name: "custom.read",
+    description: "Read action with missing audit readback",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() { return { value: "executed" }; },
+  }]);
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, defaultPolicy, undefined, undefined, undefined, audit);
+  const result = await gateway.execute(
+    { tool: "custom.read", input: {} },
+    { runId: "missing-durable-readback", principalId: "test-principal", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.evidenceId, "");
+  assert.match(result.warnings?.[0] ?? "", /persisted and read back/i);
+});
