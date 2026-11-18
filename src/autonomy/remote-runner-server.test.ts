@@ -216,3 +216,42 @@ test("remote runner rejects unknown protocol fields and bounds HTTP connection l
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("remote runner rejects a snapshot whose content does not match its digest", async () => {
+  const sandbox: Sandbox = {
+    isolation: "container",
+    async run() { throw new Error("must not execute"); },
+  };
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const requestId = "123e4567-e89b-42d3-a456-426614174000";
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/sandbox/execute", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + TOKEN,
+        "content-type": "application/json",
+        "x-sofia-request-id": requestId,
+      },
+      body: JSON.stringify({
+        protocolVersion: 1,
+        requestId,
+        workspaceDigest: "a".repeat(64),
+        command: "true",
+        args: [],
+        cwd: ".",
+        timeoutMs: 1000,
+        maxOutputBytes: 1024,
+        allowNetwork: false,
+        files: [],
+      }),
+    });
+    assert.equal(response.status, 400);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
