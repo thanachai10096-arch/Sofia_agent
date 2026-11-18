@@ -17,19 +17,21 @@ git clone https://github.com/thanachai10096-arch/Sofia_agent.git
 cd Sofia_agent
 ```
 
-Create a private environment file:
+Run the bootstrap installer:
 
 ```bash
-cp .env.example .env
-chmod 600 .env
+bash scripts/sofia-install.sh
 ```
 
-Set at least:
+The installer creates a private `.env`, generates a unique `SOFIA_API_KEY`, and checks for Docker Engine and the Compose plugin. It does not overwrite an existing `.env`.
 
-- `SOFIA_API_KEY`: a unique, high-entropy key for this installation. Generate one with `openssl rand -hex 32`.
+Edit `.env` and set at least:
+
 - `SOFIA_MODEL_PROVIDER`: the provider configured for this installation, where required.
 - The matching provider credential, such as `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY`.
 - A model name if the selected provider requires one.
+
+The generated `SOFIA_API_KEY` is the credential clients use to authenticate to this Sofia installation. Keep it private.
 
 Do not commit `.env`, share it with users, or place provider credentials in a browser/mobile application.
 
