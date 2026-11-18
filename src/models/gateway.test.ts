@@ -181,6 +181,7 @@ test("OpenAI-compatible structured Brain requests explicitly instruct JSON-only 
       choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
       usage: { prompt_tokens: 5, completion_tokens: 3 },
     }), { status: 200, headers: { "content-type": "application/json" } });
+  };
   try {
     const gateway = new SofiaModelGateway({
       coding: { baseUrl: "https://api.deepseek.com", apiKey: "test-secret", model: "deepseek-chat" },
@@ -207,6 +208,7 @@ test("Anthropic thinking mode is explicitly controlled in the request body", asy
       stop_reason: "end_turn",
       usage: { input_tokens: 5, output_tokens: 3 },
     }), { status: 200, headers: { "content-type": "application/json" } });
+  };
   try {
     const gateway = new SofiaModelGateway({ coding: { baseUrl: "https://api.anthropic.com/v1", apiKey: "test", model: "deepseek-flash", protocol: "anthropic-messages", thinkingMode: "disabled" } });
     await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route, { maxOutputTokens: 256 });
@@ -236,6 +238,7 @@ for (const protocol of ["openai-compatible", "anthropic-messages"] as const) {
         ? JSON.stringify({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } })
         : JSON.stringify({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
         { status: 200, headers: { "content-type": "application/json" } });
+    };
     try {
       const gateway = new SofiaModelGateway({ coding: {
         baseUrl: protocol === "anthropic-messages" ? "https://api.deepseek.com/anthropic" : "https://api.deepseek.com",
@@ -272,8 +275,9 @@ for (const protocol of ["openai-compatible", "anthropic-messages"] as const) {
     globalThis.fetch = async (_input, init) => {
       requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response(protocol === "anthropic-messages"
-    content: [{ type: "text", text: '{"partial":true}' }],
-    choices: [{ message: { content: '{"partial":true}' }, finish_reason: "content_filter" }],
+        ? JSON.stringify({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } })
+        : JSON.stringify({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
+        { status: 200, headers: { "content-type": "application/json" } });
     };
     try {
       const gateway = new SofiaModelGateway({ coding: {
@@ -325,7 +329,7 @@ test("Anthropic thinking-only recovery explicitly disables provider-default thin
     requestedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
     const response = requestedBodies.length === 1
       ? { content: [{ type: "thinking", thinking: "private reasoning" }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 20 } }
-    content: [{ type: "text", text: '{"partial":true}' }],
+      : { content: [{ type: "text", text: JSON.stringify({ ok: true }) }], stop_reason: "end_turn", usage: { input_tokens: 5, output_tokens: 3 } };
     return new Response(JSON.stringify(response), { status: 200, headers: { "content-type": "application/json" } });
   };
   try {
