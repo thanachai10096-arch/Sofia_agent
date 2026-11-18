@@ -74,3 +74,16 @@ test("trusted evidence verifier requires run-bound provenance and all verificati
   const missingEvidence = await verifier.verify(skill, { ...provenance, evidenceIds: ["evidence-typecheck"] });
   assert.equal(missingEvidence[0]?.passed, false);
 });
+
+
+test("trusted evidence verifier rejects a result whose verification kind differs from its request", async () => {
+  const records = [
+    event("typecheck"),
+    event("test"),
+    event("build", { result: { kind: "test", code: 0, passed: true } }),
+  ];
+  const verifier = new AuditSkillEvidenceVerifier(async () => records);
+  const checks = await verifier.verify(skill, provenance);
+  assert.equal(checks.find((check) => check.name === "evidence:evidence-build")?.passed, false);
+  assert.equal(checks.find((check) => check.name === "required-verification:build")?.passed, false);
+});
