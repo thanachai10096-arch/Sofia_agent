@@ -210,3 +210,78 @@ test("API user memory is isolated by authenticated API-key identity", async () =
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("API run records are private to their owning API key", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Private result." }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: {
+      "run-owner": ["agent:run", "agent:read"],
+      "other-user": ["agent:run", "agent:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+
+  try {
+    const started = await fetch(baseUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer run-owner", "content-type": "application/json" },
+      body: JSON.stringify({ task: "owner-only task", async: true }),
+    });
+    assert.ok(started.status === 200 || started.status === 202);
+    const payload = await started.json() as { id: string };
+
+    const ownerRead = await fetch(baseUrl + "/v1/agent/runs/" + payload.id, {
+      headers: { authorization: "Bearer run-owner" },
+    });
+    assert.equal(ownerRead.status, 200);
+
+    const foreignRead = await fetch(baseUrl + "/v1/agent/runs/" + payload.id, {
+      headers: { authorization: "Bearer other-user" },
+    });
+    assert.equal(foreignRead.status, 404);
+    assert.deepEqual(await foreignRead.json(), { error: "run_not_found" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("ordinary API keys cannot access security-admin endpoints", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {
+      "ordinary-key": ["agent:run", "agent:read", "memory:read"],
+      "security-admin-key": ["security:admin"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+
+  try {
+    for (const endpoint of ["/v1/security/status", "/v1/security/audit"]) {
+      const denied = await fetch(baseUrl + endpoint, {
+        headers: { authorization: "Bearer ordinary-key" },
+      });
+      assert.equal(denied.status, 403, endpoint + " must require security:admin");
+    }
+
+    const allowed = await fetch(baseUrl + "/v1/security/status", {
+      headers: { authorization: "Bearer security-admin-key" },
+    });
+    assert.equal(allowed.status, 200);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
