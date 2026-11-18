@@ -126,9 +126,22 @@ test("job API enforces owner isolation for reads, resume, cancel, and list", asy
       return { ...job.current };
     },
     async get(id: string) { return job.current && id === job.current.id ? { ...job.current } : undefined; },
+    async getForOwner(id: string, ownerKeyId: string) {
+      return job.current && id === job.current.id && job.current.ownerKeyId === ownerKeyId ? { ...job.current } : undefined;
+    },
     async list() { return job.current ? [{ ...job.current }] : []; },
     async resume() { job.resumeCalls += 1; return { ...job.current! }; },
+    async resumeForOwner(id: string, ownerKeyId: string) {
+      if (!job.current || id !== job.current.id || job.current.ownerKeyId !== ownerKeyId) throw new Error("Unknown job");
+      job.resumeCalls += 1;
+      return { ...job.current };
+    },
     async cancel() { job.cancelCalls += 1; return true; },
+    async cancelForOwner(id: string, ownerKeyId: string) {
+      if (!job.current || id !== job.current.id || job.current.ownerKeyId !== ownerKeyId) return false;
+      job.cancelCalls += 1;
+      return true;
+    },
   };
   const server = createSofiaApi(
     { ...dependencies(provider), jobRuntime: jobRuntime as unknown as import("../../src/brain/job-runtime.js").JobRuntime },
