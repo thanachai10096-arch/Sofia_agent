@@ -304,6 +304,51 @@ test("production approval fails closed when the approval audit event cannot be r
   }
 });
 
+test("production blocks an approved write when approval audit readback cannot be verified", async () => {
+  let executions = 0;
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Write action whose approval evidence cannot be read back",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; return { committed: true }; },
+    }]);
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record() {},
+      read() { return undefined; },
+    };
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "production-approval-audit-test-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { path: "safe.txt", content: "must-not-run" } },
+      {
+        runId: "production-approval-audit-readback",
+        principalId: "authenticated-principal",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.category, "permission_error");
+    assert.match(result.error?.message ?? "", /approval audit evidence/i);
+    assert.equal(executions, 0, "a missing approval audit readback must block the side effect");
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
 test("tool catalog exposes only registered tools with accurate desktop effects", () => {
   const desktopTools = [
     {
