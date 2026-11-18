@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdtemp, mkdir, open, lstat, realpath, rm } from "node:fs/promises";
 import os from "node:os";
@@ -115,6 +115,13 @@ function validateRequest(value: unknown, options: Required<Pick<RemoteSandboxRun
     total += data.length;
     paths.add(normalized);
     files.push({ path: normalized, contentBase64: item.contentBase64 });
+  }
+  const snapshotHash = createHash("sha256");
+  for (const file of [...files].sort((left, right) => left.path.localeCompare(right.path))) {
+    snapshotHash.update(file.path).update("\0").update(file.contentBase64).update("\0");
+  }
+  if (snapshotHash.digest("hex") !== value.workspaceDigest) {
+    throw Object.assign(new Error("Project snapshot digest mismatch."), { statusCode: 400 });
   }
   return {
     protocolVersion: 1,
