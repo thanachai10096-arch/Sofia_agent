@@ -156,3 +156,8 @@ The Telegram HTTP transport requires a lease handle to expose its TTL and limits
 The file-backed Skill lifecycle now uses an exclusive sidecar lock (`skill-lifecycle.json.lock`) for each durable write. Under that lock it compares the on-disk snapshot with the exact revision loaded by the writer. If another process has committed a newer revision, the stale writer fails closed rather than overwriting it. Mutating operations restore their in-memory snapshot when persistence fails.
 
 The lock is intentionally non-stealable. If a process crashes while holding it, future writes fail with a lock-exists error until an operator confirms the owning process is gone and removes the stale sidecar. Do not automatically delete a lock based only on age or a PID check: PID reuse, host identity, and shared-volume semantics make that unsafe. This is a single-file concurrency guard, not a replacement for a transactional shared database or a distributed job store. The full test suite and CI must pass before this change is considered validated.
+
+
+### Telegram distributed-polling safety gate
+
+Set `SOFIA_TELEGRAM_REQUIRE_POLL_LEASE=true` only after the runtime composition root injects a working `TelegramPollLease` backed by a shared Redis instance. When the flag is enabled without an injected lease, the Telegram bridge disables itself rather than silently starting an uncoordinated long poller. The flag does not create a Redis connection and does not prove that a lease is live; staging validation must still exercise concurrent workers and TTL-based failover.
