@@ -3,6 +3,7 @@ import test from "node:test";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { ContainerSandbox } from "../sandbox.js";
 import { SandboxSupervisor } from "./sandbox-supervisor.js";
 import { createSandboxTools } from "./sandbox-tools.js";
@@ -154,6 +155,52 @@ test("sandbox.propose_changes returns conflict-checked edits without modifying t
     assert.equal(proposal.operations[0]?.content, "export const value = 2;");
     assert.equal(proposal.operations[0]?.expectedHash.length, 64);
     assert.equal(await readFile(path.join(source, "src", "value.ts"), "utf8"), original);
+  } finally {
+    await supervisor.disposeRun(identity).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("sandbox tool calls are serialized within one Brain run", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-sandbox-serial-"));
+  const source = path.join(root, "source");
+  await mkdir(source);
+  let active = 0;
+  let maxActive = 0;
+  const supervisor = new SandboxSupervisor({
+    workspaceRoot: path.join(root, "runs"),
+    attestationSecret: "test-only-secret-with-at-least-thirty-two-characters",
+    sandbox: new ContainerSandbox({
+      image: "registry.example/runner@sha256:" + "9".repeat(64),
+      runner: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await delay(20);
+        active -= 1;
+        return { stdout: "ok", stderr: "", code: 0 };
+      },
+    }),
+    allowNetwork: false,
+    budget: {
+      maxCycles: 2, maxSteps: 2, maxToolCallsPerStep: 2,
+      maxExperimentSeconds: 30, maxSpendUsd: 0, maxOutputBytes: 1024,
+    },
+  });
+  const identity = { principalId: "tenant-serial", runId: "serial-run" };
+  let attestation: Awaited<ReturnType<typeof supervisor.beginRun>> | undefined;
+  try {
+    const [tool] = createSandboxTools({
+      supervisor, identity, sourceWorkspace: source, networkAllowed: false,
+      getAttestation: async () => attestation ??= await supervisor.beginRun(identity),
+    });
+    assert.ok(tool);
+    const context = { runtime: {} as never, signal: new AbortController().signal };
+    const results = await Promise.all([
+      tool.execute({ command: "first" }, context),
+      tool.execute({ command: "second" }, context),
+    ]);
+    assert.equal(results.length, 2);
+    assert.equal(maxActive, 1);
   } finally {
     await supervisor.disposeRun(identity).catch(() => undefined);
     await rm(root, { recursive: true, force: true });
