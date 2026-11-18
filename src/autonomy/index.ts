@@ -6,3 +6,6 @@ export * from "./job-supervisor.js";
 export * from "./postgres-job-store.js";
 
 export { createProjectMemoryLearningRecorder } from "./project-memory-adapter.js";
+
+export { AutonomyJobSupervisor } from "./job-supervisor.js";
+export type { AutonomyJobSupervisorOptions, AutonomyResearchExecutor, AutonomyWorkerSessionOptions, AutonomyWorkerSessionResult } from "./job-supervisor.js";
