@@ -127,3 +127,18 @@ test("ending a run immediately invalidates its attestation", async () => {
     await rm(f.root, { recursive: true, force: true });
   }
 });
+
+
+test("disposing a run revokes its attestation and removes its workspace", async () => {
+  const f = await fixture();
+  try {
+    const identity = { principalId: "tenant-a", runId: "run-dispose" };
+    const attestation = await f.supervisor.beginRun(identity);
+    await f.supervisor.run(identity, attestation, "node", [], { timeoutMs: 1000 });
+    await f.supervisor.disposeRun(identity);
+    assert.equal(f.supervisor.verifyAttestation(identity, attestation), false);
+    assert.equal(f.supervisor.getAutonomyContext(identity, attestation).sandboxAvailable, false);
+  } finally {
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
