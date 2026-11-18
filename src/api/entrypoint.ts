@@ -92,6 +92,17 @@ if (discordConfigured) {
           return;
         }
         if (command === "/resume") {
+          // Custom JobRuntime implementations may not expose owner-scoped resume.
+          // Fail closed instead of relying on a non-null assertion at runtime.
+          if (!deps.jobRuntime.resumeForOwner) {
+            await discordTransport?.sendMessage(
+              message.channelId,
+              "Owner-scoped job resume is unavailable on this server.",
+              undefined,
+              message.id,
+            );
+            return;
+          }
           if (!job.snapshot || job.status === "completed" || job.status === "cancelled" || job.status === "running") {
             await discordTransport?.sendMessage(
               message.channelId,
@@ -102,7 +113,7 @@ if (discordConfigured) {
             return;
           }
           await discordTransport?.sendMessage(message.channelId, "Resume requested for job " + job.id + ".", undefined, message.id);
-          void deps.jobRuntime.resumeForOwner!(job.id, principalId).then(async (resumed) => {
+          void deps.jobRuntime.resumeForOwner(job.id, principalId).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
             await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
