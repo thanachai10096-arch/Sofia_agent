@@ -41,6 +41,30 @@ export class AuditSkillEvidenceVerifier {
       return [{ name: "trusted-evidence-store", passed: false, detail: "Trusted audit evidence could not be read." }];
     }
 
+    const attestations = events.filter((event) => event.runId === provenance.runId && event.toolName === "skill.candidate.attest");
+    const attestation = attestations[0];
+    const attestationInput = attestation?.input;
+    const attestationResult = attestation?.result;
+    const attestationMatches = Boolean(
+      attestations.length === 1 &&
+      attestation &&
+      attestation.decision === "completed" &&
+      typeof attestation.actionHash === "string" && attestation.actionHash.length > 0 &&
+      record(attestationInput) &&
+      attestationInput.skillDigest === provenance.skillDigest &&
+      Array.isArray(attestationInput.evidenceIds) &&
+      attestationInput.evidenceIds.length === provenance.evidenceIds.length &&
+      provenance.evidenceIds.every((id, index) => attestationInput.evidenceIds[index] === id) &&
+      record(attestationResult) &&
+      attestationResult.passed === true &&
+      attestationResult.skillDigest === provenance.skillDigest
+    );
+    // The exact artifact digest and its evidence IDs must be bound by a durable
+    // app-generated audit attestation in the same Brain run.
+    if (!attestationMatches) {
+      return [{ name: "skill-artifact-attestation", passed: false, detail: "No unique trusted audit attestation binds this exact Skill digest to its verification evidence." }];
+    }
+
     // The composite audit sink intentionally stores the same event in memory and
     // encrypted persistence. Accept identical copies, but reject conflicting records
     // that reuse an evidence ID so storage ordering can never choose the trusted event.
