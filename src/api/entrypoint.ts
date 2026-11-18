@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
+import { loadApiKeyScopes } from "./auth-keys.js";
 import { FileRunRecordStore } from "./run-record-store.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
@@ -205,7 +206,7 @@ if (discordConfigured) {
 }
 
 const server = createSofiaApi(deps, {
-  apiKeys: { [apiKey]: scopes },
+  apiKeys: loadApiKeyScopes(apiKey, scopes, process.env.SOFIA_API_KEYS_JSON),
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
