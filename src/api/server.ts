@@ -217,6 +217,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const result = await agent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
+          toolScopes: run.toolScopes,
           task: input.task,
           ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
@@ -476,7 +477,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
+        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes), toolScopes: [...auth.scopes] };
         runs.set(runId, run);
         void persist(run).catch(() => undefined);
         res.writeHead(200, {
@@ -496,6 +497,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const result = await agent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            toolScopes: auth.scopes,
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
@@ -585,6 +587,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            toolScopes: [...auth.scopes],
             ...(idempotencyId ? { idempotencyId, requestFingerprint } : {}),
           };
           runs.set(runId, run);
@@ -769,6 +772,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
+            toolScopes: auth.scopes,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
           return json(res, 202, job, origin, config);
