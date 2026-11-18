@@ -462,7 +462,13 @@ export class RemoteSandbox implements Sandbox {
     const payload = {
       protocolVersion: 1,
       requestId,
-      workspaceDigest: createHash("sha256").update(root).digest("hex"),
+      workspaceDigest: (() => {
+        const hash = createHash("sha256");
+        for (const file of [...files].sort((left, right) => left.path.localeCompare(right.path))) {
+          hash.update(file.path).update("\0").update(file.contentBase64).update("\0");
+        }
+        return hash.digest("hex");
+      })(),
       command,
       args,
       cwd: relativeCwd,
