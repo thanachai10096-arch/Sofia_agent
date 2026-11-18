@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
-import { mkdir, open, readFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { SecurityAuditEvent, SecurityAuditSink } from "./audit.js";
 
@@ -14,6 +14,12 @@ export class EncryptedFileAudit implements SecurityAuditSink {
   const key=this.key();
   const directory = path.dirname(this.file);
   await mkdir(directory, { recursive: true, mode: 0o700 });
+  let fileExisted = true;
+  try { await stat(this.file); }
+  catch (error) {
+   if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") fileExisted = false;
+   else throw error;
+  }
   const iv=randomBytes(12); const cipher=createCipheriv("aes-256-gcm",key,iv);
   const plaintext=Buffer.from(JSON.stringify(event));
   const ciphertext=Buffer.concat([cipher.update(plaintext),cipher.final()]);
@@ -27,8 +33,8 @@ export class EncryptedFileAudit implements SecurityAuditSink {
   } finally {
    await handle.close();
   }
-  // Persist the directory entry when the audit file is created (POSIX).
-  if (process.platform !== "win32") {
+  // Persist the directory entry only when the audit file is first created (POSIX).
+  if (!fileExisted && process.platform !== "win32") {
    const directoryHandle = await open(directory, "r");
    try { await directoryHandle.sync(); }
    finally { await directoryHandle.close(); }
