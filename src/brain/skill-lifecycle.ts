@@ -1,4 +1,5 @@
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
@@ -21,6 +22,12 @@ export interface SkillLifecycleRecord {
 export interface SkillLifecycleOptions { file: string; minimumConfidence?: number; }
 export type SkillCandidateEvaluator = (candidate: SkillPackage, provenance: SkillProvenance) => Promise<SkillEvaluationResult>;
 interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[]; activeBySkill: Record<string, string>; }
+export interface SkillMutationLockInfo {
+  locked: boolean;
+  owner?: { pid: number; hostname: string; startedAt: string; nonce: string };
+  malformed?: boolean;
+}
+interface SkillMutationLockOwner { schemaVersion: 1; pid: number; hostname: string; startedAt: string; nonce: string; }
 interface SkillMutationJournal {
   schemaVersion: 1;
   transactionId: string;
@@ -341,6 +348,27 @@ export class VersionedSkillLifecycle {
     return id ? this.get(id) : undefined;
   }
 
+  inspectMutationLock(): SkillMutationLockInfo {
+    const lockFile = this.file + ".mutation.lock";
+    if (!existsSync(lockFile)) return { locked: false };
+    if (lstatSync(lockFile).isSymbolicLink()) return { locked: true, malformed: true };
+    try {
+      const parsed = JSON.parse(readFileSync(lockFile, "utf8")) as unknown;
+      if (!isRecord(parsed) || parsed.schemaVersion !== 1 ||
+          typeof parsed.pid !== "number" || !Number.isSafeInteger(parsed.pid) || parsed.pid <= 0 ||
+          typeof parsed.hostname !== "string" || !parsed.hostname ||
+          typeof parsed.startedAt !== "string" || !Number.isFinite(Date.parse(parsed.startedAt)) ||
+          typeof parsed.nonce !== "string" || !parsed.nonce) {
+        return { locked: true, malformed: true };
+      }
+      return { locked: true, owner: {
+        pid: parsed.pid, hostname: parsed.hostname, startedAt: parsed.startedAt, nonce: parsed.nonce,
+      } };
+    } catch {
+      return { locked: true, malformed: true };
+    }
+  }
+
   private get mutationJournalFile(): string { return this.file + ".transaction.json"; }
 
   private writeMutationJournal(journal: SkillMutationJournal): void {
@@ -444,6 +472,12 @@ export class VersionedSkillLifecycle {
       // snapshot comparison must happen while holding this lock, before
       // register/remove can mutate the shared platform.
       lockFd = openSync(lockFile, "wx", 0o600);
+      const lockOwner: SkillMutationLockOwner = {
+        schemaVersion: 1, pid: process.pid, hostname: hostname(),
+        startedAt: new Date().toISOString(), nonce: randomUUID(),
+      };
+      writeFileSync(lockFd, JSON.stringify(lockOwner), "utf8");
+      fsyncSync(lockFd);
       if (existsSync(this.file)) {
         if (lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
         const current = JSON.parse(readFileSync(this.file, "utf8")) as unknown;
@@ -456,8 +490,16 @@ export class VersionedSkillLifecycle {
       }
       return operation();
     } finally {
-      if (lockFd !== undefined) closeSync(lockFd);
-      if (lockFd !== undefined) rmSync(lockFile, { force: true });
+      if (lockFd !== undefined) {
+        const owned = fstatSync(lockFd);
+        closeSync(lockFd);
+        try {
+          const current = lstatSync(lockFile);
+          if (current.dev === owned.dev && current.ino === owned.ino) rmSync(lockFile);
+        } catch (error) {
+          if (!isRecord(error) || error.code !== "ENOENT") throw error;
+        }
+      }
     }
   }
 
