@@ -28,8 +28,8 @@ The feature branch now routes the durable file-backed runtime stores through the
 | API usage quotas | `sofia-agents-api/usage.json` |
 | Background jobs | `sofia-agents-jobs/` |
 | Brain run snapshots | `sofia-agents-runs/` |
-| Checkpoints | `sofia-agents-checkpoints/` |
-| Project memory | `sofia-agents-memory/` |
+| Checkpoints | `sofia-agents-checkpoints/` (principal namespace) |
+| Project memory | `sofia-agents-memory/` (principal namespace) |
 | User memory | `sofia-agents-user-memory/` |
 | SQLite transcripts | `sofia-agents-sessions/sessions.sqlite` |
 | Skill lifecycle | `sofia-agents-skills/skill-lifecycle.json` |
@@ -37,11 +37,13 @@ The feature branch now routes the durable file-backed runtime stores through the
 | Security audit | `sofia-agents-security/security-audit.log` |
 | Chat deduplication | `sofia-agents-chat-dedupe/` |
 
-`SOFIA_RUN_STORE_DIR` and `SOFIA_CHAT_DEDUPE_DIR` remain explicit optional overrides for compatibility. Browser profile storage remains separately configured by `SOFIA_BROWSER_PROFILE_DIR`, because it may intentionally point to an operator-managed browser profile volume. Workspace files and workspace-local artifacts remain under `SOFIA_WORKSPACE`; in Compose that directory is also on the persistent `/data` volume.
+`SOFIA_RUN_STORE_DIR` and `SOFIA_CHAT_DEDUPE_DIR` remain explicit optional overrides for compatibility. Browser profile storage remains separately configured by `SOFIA_BROWSER_PROFILE_DIR`, because it may intentionally point to an operator-managed browser profile volume. Authenticated API principals now receive separate workspace roots under `SOFIA_USER_WORKSPACES_DIR` (default: `SOFIA_STATE_DIR/sofia-agents-user-workspaces/<sha256-principal-id>/`). Each run's workspace tools, project-context discovery, repository map, desktop runtime, project memory and rollback checkpoints use that principal-specific root. Raw API keys are not used as directory names. The root must be an absolute path and must be on persistent storage.
+
+These per-principal workspaces start empty; Sofia does not automatically copy the installation's `SOFIA_WORKSPACE` into every user's directory. Operators must provision/import each user's project into the correct workspace through a trusted workflow before running project tasks. The legacy `SOFIA_WORKSPACE` remains the installation/template workspace and must not be treated as a shared user workspace. Local runs without an authenticated principal use the stable `local-instance` namespace.
 
 This change does not automatically migrate files from previous workspace-relative or OS-temp locations. Existing operators must back up their current data and perform a deliberate migration before switching roots. Never delete the old paths automatically. Add migration tooling only with a verified source/destination inventory and backup-first tests.
 
-## Distribution architecture
+## Principal workspace isolation\n\nThe feature branch isolates API workspaces by hashing the authenticated principal identity and resolving a separate filesystem root for each principal. Runtime file access is rooted at that directory; project context, repository indexing, desktop tools and checkpoints receive the same principal-scoped runtime/root. Project memory uses the same principal namespace. This is filesystem namespace isolation within a single-host deployment, not an OS account/container boundary: all work still runs under the Sofia service account. Do not expose untrusted shell execution or arbitrary host mounts, and keep the service account and container filesystem locked down. Browser profile data remains separately governed by its explicit owner ID and profile-store configuration.\n\n## Distribution architecture
 
 ### First supported deployment: single-host Docker Compose
 
