@@ -44,3 +44,49 @@ test("project memory recorder rejects missing project scope", async () => {
     hypothesis: { statement: "h", successMetric: "m" },
   }, new AbortController().signal), /project scope/i);
 });
+
+
+test("project memory idempotency is isolated by authenticated principal", async () => {
+  const entries = new Map<string, ProjectMemoryEntry>();
+  const store: ProjectMemoryStore = {
+    save: async (entry) => { entries.set(entry.id, entry); },
+    list: async () => [...entries.values()],
+    find: async () => [],
+  };
+  const recorder = createProjectMemoryLearningRecorder(store, (principalId) => "shared-project");
+  const base = {
+    idempotencyKey: "same-job-cycle",
+    question: "What changed?",
+    finding: { summary: "A verified finding.", sourceIds: ["source-1"], confidence: 0.8 },
+    hypothesis: { statement: "A hypothesis.", successMetric: "metric" },
+  };
+  const signal = new AbortController().signal;
+  await recorder({ ...base, principalId: "tenant-a" }, signal);
+  await recorder({ ...base, principalId: "tenant-b" }, signal);
+  assert.equal(entries.size, 2);
+  assert.notEqual([...entries.keys()][0], [...entries.keys()][1]);
+});
+
+test("project memory recorder rejects malformed confidence and identity", async () => {
+  const store: ProjectMemoryStore = {
+    save: async () => undefined,
+    list: async () => [],
+    find: async () => [],
+  };
+  const recorder = createProjectMemoryLearningRecorder(store, () => "project");
+  const signal = new AbortController().signal;
+  await assert.rejects(() => recorder({
+    principalId: "tenant-a",
+    idempotencyKey: "cycle-1",
+    question: "q",
+    finding: { summary: "finding", sourceIds: [], confidence: Number.NaN },
+    hypothesis: { statement: "h", successMetric: "m" },
+  }, signal), /malformed/i);
+  await assert.rejects(() => recorder({
+    principalId: " ",
+    idempotencyKey: "cycle-1",
+    question: "q",
+    finding: { summary: "finding", sourceIds: [], confidence: 0.5 },
+    hypothesis: { statement: "h", successMetric: "m" },
+  }, signal), /principal/i);
+});
