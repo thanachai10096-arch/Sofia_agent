@@ -74,3 +74,22 @@ test("sandbox work rejects invalid configured resource budgets", () => {
     { ...defaultAutonomyProfile.budget, maxSpendUsd: -1 },
   ]) assert.equal(evaluateAutonomyRequest("run_experiment", { ...defaultAutonomyProfile, budget }, valid).allowed, false);
 });
+
+test("malformed autonomy profiles and runtime action values fail closed", () => {
+  assert.equal(evaluateAutonomyRequest("think", null as never).allowed, false);
+  assert.equal(evaluateAutonomyRequest("think", { ...defaultAutonomyProfile, continuousLearning: "yes" } as never).allowed, false);
+  assert.equal(evaluateAutonomyRequest(null as never).allowed, false);
+});
+
+test("malformed skill promotion evidence fails closed without throwing", () => {
+  assert.equal(evaluateSkillPromotion(null as never).allowed, false);
+  const valid = { testsPassed: true, adversarialTestsPassed: true, benchmarkScore: 0.95, safetyIncidents: 0, versionedArtifact: true, rollbackAvailable: true };
+  for (const evidence of [
+    { ...valid, testsPassed: "true" },
+    { ...valid, adversarialTestsPassed: undefined },
+    { ...valid, safetyIncidents: -1 },
+    { ...valid, safetyIncidents: Number.NaN },
+    { ...valid, benchmarkScore: Number.POSITIVE_INFINITY },
+    { ...valid, versionedArtifact: 1 },
+  ]) assert.equal(evaluateSkillPromotion(evidence as never).allowed, false);
+});
