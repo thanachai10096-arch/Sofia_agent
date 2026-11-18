@@ -24,7 +24,7 @@ else
 fi
 
 docker volume create "$VOLUME_NAME" >/dev/null
-docker compose stop -t 30 sofia >/dev/null 2>&1 || true
+docker compose stop -t 30 sofia >/dev/null
 
 # Validate archive paths before extracting to prevent absolute/path-traversal entries.
 if tar -tzf "$ARCHIVE" | awk '
