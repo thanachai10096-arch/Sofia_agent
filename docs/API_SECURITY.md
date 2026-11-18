@@ -57,15 +57,16 @@ The `InMemoryApprovalDecisionStore` is for tests and local development only. The
 
 ## Enabling the SQLite approval API
 
-The API entrypoint can enable the built-in broker with SOFIA_APPROVAL_ENABLED=true. The built-in SQLite adapter requires a Node.js runtime that provides node:sqlite (Node.js 22.5 or newer). It stores decisions in SOFIA_APPROVAL_STORE_PATH or .sofia/approvals.sqlite under the workspace. API keys that review their own pending requests must include the explicit approval:manage scope in SOFIA_API_SCOPES.
+The API entrypoint can enable the built-in broker with SOFIA_APPROVAL_ENABLED=true. Set SOFIA_APPROVAL_STORE=sqlite (default) for a single-host SQLite store, or SOFIA_APPROVAL_STORE=redis for a shared Upstash Redis REST store. API keys that review their own pending requests must include the explicit approval:manage scope in SOFIA_API_SCOPES.
 
 - GET /v1/approvals lists only pending requests owned by the authenticated principal.
 - POST /v1/approvals/:id/approve and POST /v1/approvals/:id/deny require the exact 64-character action hash in the request body.
 - Requests owned by another principal return 404. The route does not offer cross-principal admin approval.
-- SQLite uses WAL and transactional conditional updates to ensure only one decision wins. It is suitable only where all processes share a filesystem with SQLite-compatible locking and WAL semantics. Do not mount the same SQLite WAL database across unrelated hosts or network filesystems without validating those guarantees; use a transactional network database adapter for multi-host deployments.
+- SQLite requires Node.js 22.5+ (node:sqlite), stores data at SOFIA_APPROVAL_STORE_PATH or .sofia/approvals.sqlite, and uses WAL plus transactional conditional updates. It is suitable only where processes share a filesystem with verified SQLite locking/WAL semantics.
+- Redis mode uses UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN (or REDIS_REST_URL and REDIS_REST_TOKEN), with atomic Lua scripts for create/resolve and a principal-hashed inbox index. SOFIA_APPROVAL_REDIS_PREFIX optionally namespaces keys. All Redis script keys share a cluster hash tag.
 - The SQLite database and sidecars are restricted to owner-only POSIX permissions where supported. Back up and persist the database directory.
 
-The feature remains disabled unless explicitly enabled. Do not grant approval:manage to browser/mobile clients that should not approve actions.
+The feature remains disabled unless explicitly enabled. Redis mode is the preferred shared store for multi-replica Railway deployments. Do not grant approval:manage to browser/mobile clients that should not approve actions.
 
 ## Current limitations
 
