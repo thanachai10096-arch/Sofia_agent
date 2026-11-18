@@ -46,7 +46,7 @@ function safeGitEnv(): NodeJS.ProcessEnv {
     GIT_SSH_COMMAND: safeSshCommand,
     // Environment config has higher precedence than repository config. Disable
     // credential helpers and pin pager/editor/SSH behavior for untrusted repos.
-    GIT_CONFIG_COUNT: "4",
+    GIT_CONFIG_COUNT: "6",
     GIT_CONFIG_KEY_0: "credential.helper",
     GIT_CONFIG_VALUE_0: "",
     GIT_CONFIG_KEY_1: "core.pager",
@@ -55,6 +55,10 @@ function safeGitEnv(): NodeJS.ProcessEnv {
     GIT_CONFIG_VALUE_2: "false",
     GIT_CONFIG_KEY_3: "core.sshCommand",
     GIT_CONFIG_VALUE_3: safeSshCommand,
+    GIT_CONFIG_KEY_4: "diff.external",
+    GIT_CONFIG_VALUE_4: "",
+    GIT_CONFIG_KEY_5: "core.hooksPath",
+    GIT_CONFIG_VALUE_5: process.platform === "win32" ? "NUL" : "/dev/null",
   };
 }
 
