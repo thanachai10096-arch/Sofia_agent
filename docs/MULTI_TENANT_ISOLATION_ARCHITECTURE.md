@@ -1,10 +1,10 @@
 # Multi-Tenant Isolation Architecture (RFC)
 
-Status: proposed architecture; **not implemented**. The current API must not be marketed or exposed as an isolated multi-tenant workspace service.
+Status: partially implemented foundations; **not production-ready multi-tenant isolation**. The current API must not be marketed or exposed as an isolated multi-tenant workspace service.
 
 ## 1. Current boundary
 
-The API derives an opaque principal ID from each bearer API key and scopes API run/job records, user memory, cron schedules, usage counters, and session IDs to that principal in their respective code paths. This is useful authorization, but it is not complete tenant isolation.
+The API derives an opaque principal ID from each bearer API key and scopes API run/job records, user memory, cron schedules, usage counters, and session IDs to that principal in their respective code paths. The single-key API entrypoint now stores transcripts in a separate SQLite database named by the server-derived owner ID and migrates that owner’s legacy transcripts on startup. This is useful defense in depth, but it is not complete tenant isolation.
 
 The current process constructs a single `AgentDependencies` instance from one operator-configured `SOFIA_WORKSPACE`. Brain runs currently share workspace-backed project memory, run snapshots, skill lifecycle/ledger, evolution state, local runtime, and desktop workspace root. Some of these stores are created inside the Brain factory but rooted at the same workspace. A principal ID passed to the Agent does not automatically partition those resources.
 
@@ -16,7 +16,7 @@ The following observations were verified against the current `main` implementati
 
 | Component | Current implementation | Isolation consequence |
 |---|---|---|
-| API authentication | `src/api/server.ts` hashes the bearer token into `keyId` and attaches configured scopes | Distinct API keys receive distinct opaque principals; this does not itself partition runtime resources |
+| API authentication | `src/api/server.ts` hashes the bearer token into `keyId` and attaches configured scopes | Distinct API keys receive distinct opaque principals; this does not itself partition runtime resources |\n| API transcripts | `createSofiaAgentDependenciesWithOwnerSessions` opens `.sofia/sessions/<keyId>.sqlite` for the single-key API entrypoint and migrates only `<keyId>:` records from the legacy shared SQLite database | Physical per-owner database files for the entrypoint; direct multi-key `createSofiaApi` hosts must still inject a correctly routed per-owner session store |
 | User memory | `FileUserMemoryStore` receives `auth.keyId` for API CRUD and hashes the user ID for its filename | API user-memory files are principal-scoped; this does not isolate project memory |
 | Project memory | `createBrainFactory` constructs one `FileProjectMemoryStore(workspace)`; store hashes only the project namespace | Runs using the same workspace share project memory and the persistent skill ledger |
 | Brain run snapshots | One `FileRunStore(workspace)` is captured by the Brain factory | Brain snapshots are namespaced by workspace, not by authenticated principal |
