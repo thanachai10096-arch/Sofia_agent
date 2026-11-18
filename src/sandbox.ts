@@ -408,7 +408,8 @@ export class RemoteSandbox implements Sandbox {
     const maxOutputBytes = positiveFinite(limits.maxOutputBytes, "maxOutputBytes");
     if (signal?.aborted) throw new Error("Remote sandbox execution was aborted.");
 
-    const { lstat, readdir, open: openFile, realpath, stat, mkdir, writeFile } = await import("node:fs/promises");
+    const { lstat, readdir, open: openFile, realpath, stat, writeFile } = await import("node:fs/promises");
+    const maxSnapshotBytes = this.maxSnapshotBytes;
     const root = await realpath(limits.workspaceRoot);
     if (!(await stat(root)).isDirectory()) throw new Error("Remote sandbox workspace must be a directory.");
     const files: Array<{ path: string; contentBase64: string }> = [];
@@ -429,7 +430,7 @@ export class RemoteSandbox implements Sandbox {
             throw new Error("Remote sandbox snapshot exceeds its size limit.");
           }
           const data = await handle.readFile();
-          if (data.length > this.maxSnapshotBytes - totalBytes) throw new Error("Remote sandbox snapshot exceeds its size limit.");
+          if (data.length > maxSnapshotBytes - totalBytes) throw new Error("Remote sandbox snapshot exceeds its size limit.");
           totalBytes += data.length;
           const normalized = rel.split(path.sep).join("/");
           files.push({ path: normalized, contentBase64: data.toString("base64") });
@@ -513,7 +514,7 @@ export class RemoteSandbox implements Sandbox {
       const target = known.get(normalized);
       if (!target) throw new Error("Remote sandbox attempted to return a file outside the original snapshot.");
       const data = Buffer.from(file.contentBase64, "base64");
-      if (data.toString("base64") !== file.contentBase64 || data.length > this.maxSnapshotBytes - returnedBytes) {
+      if (data.toString("base64") !== file.contentBase64 || data.length > maxSnapshotBytes - returnedBytes) {
         throw new Error("Remote sandbox returned invalid or oversized file content.");
       }
       returnedBytes += data.length;
