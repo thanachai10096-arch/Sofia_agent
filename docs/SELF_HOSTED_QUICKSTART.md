@@ -61,7 +61,9 @@ Compose mounts a named volume at `/data` and configures. The default volume is `
 - `SOFIA_WORKSPACE=/data/workspace`
 - `SOFIA_STATE_DIR=/data/state`
 
-All durable file-backed stores resolve beneath this root, including API run records and usage quotas, background jobs, Brain run snapshots, checkpoints, project and user memory, SQLite sessions, skill/evolution data, security audit data, and chat deduplication. The workspace itself remains at `/data/workspace`; project files and workspace-local artifacts are persisted on the same named volume. `SOFIA_RUN_STORE_DIR` and `SOFIA_CHAT_DEDUPE_DIR` remain optional explicit path overrides; leave them unset for the unified default. Do not remove the volume when upgrading. The volume contains user data and should be backed up and protected as sensitive information.
+All durable file-backed stores resolve beneath this root, including API run records and usage quotas, background jobs, Brain run snapshots, checkpoints, project and user memory, SQLite sessions, skill/evolution data, security audit data, and chat deduplication.
+
+For authenticated API requests, Sofia creates a separate workspace directory per API-key identity under `/data/state/sofia-agents-user-workspaces/<sha256-principal-id>/`. The directory name is a one-way hash, not the API key. Each agent run's file tools, project discovery, repository indexing, desktop runtime, project memory, and checkpoints are scoped to that user's workspace. These workspaces start empty: Sofia does not automatically copy `/data/workspace` into each user's private directory. A trusted project-import/provisioning flow is required before users can work on their own project files. `SOFIA_USER_WORKSPACES_DIR` can override the workspace root but must be an absolute persistent path. Local non-API runs use a stable `local-instance` workspace namespace. `SOFIA_RUN_STORE_DIR` and `SOFIA_CHAT_DEDUPE_DIR` remain optional explicit path overrides; leave them unset for the unified default. Do not remove the volume when upgrading. The volume contains user data and should be backed up and protected as sensitive information.
 
 ## Upgrade and lifecycle management
 
