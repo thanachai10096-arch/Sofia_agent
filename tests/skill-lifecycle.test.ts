@@ -58,6 +58,48 @@ test("stale lifecycle instance cannot mutate the platform after a newer promotio
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("stale lifecycle instance cannot append a candidate after another writer commits", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "stale-proposal.json");
+    const first = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    const stale = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    first.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "first-writer", evidenceIds: ["first"], confidence: 0.9,
+    });
+    assert.throws(
+      () => stale.propose({ ...pkg("2.0.0"), source: "custom" }, {
+        source: "stale-writer", evidenceIds: ["stale"], confidence: 0.9,
+      }),
+      /Skill lifecycle store changed in another process; reload before platform mutation/,
+    );
+    assert.equal(stale.list().length, 0);
+    assert.equal(existsSync(file + ".mutation.lock"), false);
+    assert.equal(new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }).list().length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("stale lifecycle evaluation cannot overwrite a concurrent promotion", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "stale-evaluation.json");
+    const platform = new InMemorySkillsPlatform();
+    const first = new VersionedSkillLifecycle(platform, passing, { file });
+    const candidate = first.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "first-writer", evidenceIds: ["evaluation-evidence"], confidence: 0.9,
+    });
+    const stale = new VersionedSkillLifecycle(platform, passing, { file });
+    await first.evaluate(candidate.id);
+    first.promote(candidate.id);
+    await assert.rejects(
+      () => stale.evaluate(candidate.id),
+      /Skill lifecycle store changed in another process; reload before platform mutation/,
+    );
+    assert.equal(platform.get("repair-skill")?.version, "1.0.0");
+    assert.equal(existsSync(file + ".mutation.lock"), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle rejects failed evaluations and low-confidence promotion", async () => {
   const root = dir();
   try {
