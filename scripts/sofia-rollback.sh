@@ -80,7 +80,7 @@ const file = process.argv[2];
 const data = JSON.parse(await readFile(file, "utf8"));
 data.status = "rolled-back";
 data.rolledBackAt = new Date().toISOString();
-await writeFile(file, JSON.stringify(data, null, 2) + "\\n", { mode: 0o600 });
+await writeFile(file, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
 NODE
     echo "Previous image restored and healthy. Data volume was not modified."
     exit 0
