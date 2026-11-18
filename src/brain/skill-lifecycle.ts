@@ -21,6 +21,16 @@ export interface SkillLifecycleRecord {
 export interface SkillLifecycleOptions { file: string; minimumConfidence?: number; }
 export type SkillCandidateEvaluator = (candidate: SkillPackage, provenance: SkillProvenance) => Promise<SkillEvaluationResult>;
 interface LifecycleSnapshot { schemaVersion: 1; records: SkillLifecycleRecord[]; activeBySkill: Record<string, string>; }
+interface SkillMutationJournal {
+  schemaVersion: 1;
+  transactionId: string;
+  operation: "promote" | "rollback";
+  skillId: string;
+  previousActiveId: string | null;
+  targetActiveId: string;
+  previousPackage: SkillPackage | null;
+  targetPackage: SkillPackage;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === "object" && !Array.isArray(value); }
 function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; }
@@ -67,6 +77,7 @@ export class VersionedSkillLifecycle {
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
     this.withPlatformMutationLock(() => {
+      this.recoverPendingMutation();
       // Persisted learned skills in verified, active, or rollback-eligible superseded
       // state must not be promoted/restored using a cached evaluation. Re-evaluation
       // must resolve the durable audit evidence again after restart.
@@ -233,9 +244,16 @@ export class VersionedSkillLifecycle {
     current.status = "active";
     current.updatedAt = now;
     this.snapshot.activeBySkill[current.skillId] = current.id;
+    this.writeMutationJournal({
+      schemaVersion: 1, transactionId: randomUUID(), operation: "promote",
+      skillId: current.skillId, previousActiveId: previousId ?? null,
+      targetActiveId: current.id, previousPackage: previousPackage ? clone(previousPackage) : null,
+      targetPackage: clone(current.package),
+    });
     try {
       this.platform.register(clone(current.package));
       this.persist();
+      this.clearMutationJournal();
     } catch (error) {
       this.snapshot = before;
       try {
@@ -279,9 +297,16 @@ export class VersionedSkillLifecycle {
     previous.status = "active";
     previous.updatedAt = now;
     this.snapshot.activeBySkill[skillId] = previous.id;
+    this.writeMutationJournal({
+      schemaVersion: 1, transactionId: randomUUID(), operation: "rollback",
+      skillId, previousActiveId: active.id, targetActiveId: previous.id,
+      previousPackage: platformCurrent ? clone(platformCurrent) : null,
+      targetPackage: clone(previous.package),
+    });
     try {
       this.platform.register(clone(previous.package));
       this.persist();
+      this.clearMutationJournal();
     } catch (error) {
       this.snapshot = before;
       try {
@@ -309,6 +334,67 @@ export class VersionedSkillLifecycle {
   active(skillId: string): SkillLifecycleRecord | undefined {
     const id = this.snapshot.activeBySkill[skillId];
     return id ? this.get(id) : undefined;
+  }
+
+  private get mutationJournalFile(): string { return this.file + ".transaction.json"; }
+
+  private writeMutationJournal(journal: SkillMutationJournal): void {
+    const target = validatePackage(journal.targetPackage);
+    const previous = journal.previousPackage ? validatePackage(journal.previousPackage) : null;
+    if (target.skill.id !== journal.skillId || (previous && previous.skill.id !== journal.skillId) ||
+        !journal.transactionId || !journal.targetActiveId) throw new Error("Invalid skill mutation journal");
+    const journalFile = this.mutationJournalFile;
+    const temporary = journalFile + "." + process.pid + "." + randomUUID() + ".tmp";
+    const contents = JSON.stringify({ ...journal, targetPackage: target, previousPackage: previous }, null, 2) + "\n";
+    try {
+      writeFileSync(temporary, contents, { encoding: "utf8", flag: "wx", mode: 0o600 });
+      const fd = openSync(temporary, "r");
+      try { fsyncSync(fd); } finally { closeSync(fd); }
+      renameSync(temporary, journalFile);
+      const directoryFd = openSync(path.dirname(journalFile), "r");
+      try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
+    } catch (error) {
+      rmSync(temporary, { force: true });
+      throw error;
+    }
+  }
+
+  private clearMutationJournal(): void {
+    rmSync(this.mutationJournalFile, { force: true });
+    const directoryFd = openSync(path.dirname(this.mutationJournalFile), "r");
+    try { fsyncSync(directoryFd); } finally { closeSync(directoryFd); }
+  }
+
+  private recoverPendingMutation(): void {
+    const journalFile = this.mutationJournalFile;
+    if (!existsSync(journalFile)) return;
+    if (lstatSync(journalFile).isSymbolicLink()) throw new Error("Skill mutation journal must not be a symbolic link");
+    let parsed: unknown;
+    try { parsed = JSON.parse(readFileSync(journalFile, "utf8")) as unknown; }
+    catch { throw new Error("Skill mutation journal is corrupt; operator reconciliation is required"); }
+    if (!isRecord(parsed) || parsed.schemaVersion !== 1 ||
+        !["promote", "rollback"].includes(String(parsed.operation)) ||
+        typeof parsed.transactionId !== "string" || !parsed.transactionId ||
+        typeof parsed.skillId !== "string" || !parsed.skillId ||
+        (parsed.previousActiveId !== null && typeof parsed.previousActiveId !== "string") ||
+        typeof parsed.targetActiveId !== "string" || !parsed.targetActiveId) {
+      throw new Error("Skill mutation journal is invalid; operator reconciliation is required");
+    }
+    const targetPackage = validatePackage(parsed.targetPackage as SkillPackage);
+    const previousPackage = parsed.previousPackage === null ? null : validatePackage(parsed.previousPackage as SkillPackage);
+    if (targetPackage.skill.id !== parsed.skillId || (previousPackage && previousPackage.skill.id !== parsed.skillId)) {
+      throw new Error("Skill mutation journal package identity mismatch; operator reconciliation is required");
+    }
+    const committed = this.snapshot.activeBySkill[parsed.skillId] === parsed.targetActiveId;
+    const expected = committed ? targetPackage : previousPackage;
+    const current = this.platform.get(parsed.skillId);
+    if (current && JSON.stringify(current) !== JSON.stringify(targetPackage) &&
+        (!previousPackage || JSON.stringify(current) !== JSON.stringify(previousPackage))) {
+      throw new Error("Cannot recover skill mutation over an externally changed platform package: " + parsed.skillId);
+    }
+    if (expected) this.platform.register(clone(expected));
+    else if (current) this.platform.remove(parsed.skillId);
+    this.clearMutationJournal();
   }
 
   private withPlatformMutationLock<T>(operation: () => T): T {
