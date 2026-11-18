@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
@@ -110,11 +110,14 @@ test("remote runner refuses network mode without a confirmed egress firewall", (
 
 test("remote runner refuses to return files through a symlinked parent directory", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-runner-symlink-test-"));
+  const outside = path.join(root, "outside");
+  await mkdir(outside);
+  await writeFile(path.join(outside, "passwd"), "must-not-be-returned");
   const sandbox: Sandbox = {
     isolation: "container",
     async run(_command, _args, limits) {
       await rm(path.join(limits.workspaceRoot, "src"), { recursive: true, force: true });
-      await symlink("/etc", path.join(limits.workspaceRoot, "src"));
+      await symlink(outside, path.join(limits.workspaceRoot, "src"), process.platform === "win32" ? "junction" : "dir");
       return { stdout: "", stderr: "", code: 0 };
     },
   };
