@@ -621,3 +621,54 @@ test("startup quarantine fails closed when another process holds the lifecycle l
     assert.equal(readFileSync(file, "utf8"), before, "failed startup quarantine must not partially rewrite the store");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("startup restore reports incomplete compensation instead of hiding platform inconsistency", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "partial-startup-compensation-failure.json");
+    const seedPlatform = new InMemorySkillsPlatform();
+    const seed = new VersionedSkillLifecycle(seedPlatform, passing, { file });
+    const first = seed.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "startup-first", evidenceIds: ["startup-first"], confidence: 0.95,
+    });
+    await seed.evaluate(first.id);
+    seed.promote(first.id);
+    const secondPackage = {
+      ...pkg("2.0.0"),
+      source: "custom" as const,
+      skill: { ...pkg("2.0.0").skill, id: "second-skill", name: "Second skill" },
+    };
+    const second = seed.propose(secondPackage, {
+      source: "startup-second", evidenceIds: ["startup-second"], confidence: 0.95,
+    });
+    await seed.evaluate(second.id);
+    seed.promote(second.id);
+
+    const target = new InMemorySkillsPlatform();
+    let registrations = 0;
+    const brokenPlatform = {
+      get: (id: string) => target.get(id),
+      list: (source?: "builtin" | "learned" | "project" | "custom" | "marketplace") => target.list(source),
+      register: (skill: SkillPackage) => {
+        registrations += 1;
+        if (registrations === 2) throw new Error("restore registration failed");
+        target.register(skill);
+      },
+      remove: (_id: string) => { throw new Error("compensation removal failed"); },
+    };
+
+    assert.throws(
+      () => new VersionedSkillLifecycle(brokenPlatform, passing, { file }),
+      (error: unknown) => {
+        assert.ok(error instanceof AggregateError);
+        assert.match(error.message, /compensation was incomplete/);
+        assert.equal(error.errors.length, 2);
+        assert.match(String(error.errors[0]), /restore registration failed/);
+        assert.match(String(error.errors[1]), /compensation removal failed/);
+        return true;
+      },
+    );
+    assert.equal(target.get("repair-skill")?.version, "1.0.0", "test documents the partial platform state requiring reconciliation");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
