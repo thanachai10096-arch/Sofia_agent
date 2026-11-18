@@ -243,6 +243,13 @@ test("approval API lists and resolves only requests owned by the authenticated p
     const forbidden = await fetch(base + "/v1/approvals", { headers: auth("approval-viewer-key") });
     assert.equal(forbidden.status, 403);
 
+    const wrongHash = await fetch(base + "/v1/approvals/" + record.id + "/approve", {
+      method: "POST",
+      headers: { ...auth(ownerKey), "content-type": "application/json" },
+      body: JSON.stringify({ actionHash: "b".repeat(64) }),
+    });
+    assert.equal(wrongHash.status, 409);
+
     const approved = await fetch(base + "/v1/approvals/" + record.id + "/approve", {
       method: "POST",
       headers: { ...auth(ownerKey), "content-type": "application/json" },
@@ -258,6 +265,26 @@ test("approval API lists and resolves only requests owned by the authenticated p
       body: JSON.stringify({ actionHash: "a".repeat(64) }),
     });
     assert.equal(replay.status, 409);
+
+    const denialPending = broker.handle({
+      runId: "api-approval-denial-run",
+      principalId: ownerId,
+      toolName: "workspace.write_file",
+      input: { path: "blocked.txt", content: "must not execute" },
+      actionHash: "c".repeat(64),
+      risk: "high",
+      signal: controller.signal,
+    });
+    const [denialRecord] = await broker.listPending(ownerId);
+    assert.ok(denialRecord);
+    const denied = await fetch(base + "/v1/approvals/" + denialRecord.id + "/deny", {
+      method: "POST",
+      headers: { ...auth(ownerKey), "content-type": "application/json" },
+      body: JSON.stringify({ actionHash: "c".repeat(64) }),
+    });
+    assert.equal(denied.status, 200);
+    assert.deepEqual(await denied.json(), { id: denialRecord.id, status: "denied" });
+    assert.equal(await denialPending, false);
   } finally {
     controller.abort(new Error("test cleanup"));
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
