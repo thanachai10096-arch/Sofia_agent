@@ -441,6 +441,21 @@ test("OpenAI-compatible gateway marks filtered structured output as incomplete",
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("OpenAI-compatible aborted output is marked incomplete", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: '{"partial":true}' }, finish_reason: "aborted" }],
+    usage: { prompt_tokens: 10, completion_tokens: 5 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const gateway = new SofiaModelGateway({ coding: {
+      baseUrl: "https://api.example.com/v1", apiKey: "test", model: "test-model",
+    } });
+    const result = await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route);
+    assert.equal(result.finishReason, "incomplete");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("Anthropic unknown stop reasons are not treated as complete output", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({
