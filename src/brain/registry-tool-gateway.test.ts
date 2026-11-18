@@ -523,3 +523,94 @@ test("production gateway rejects missing or malformed authenticated principals",
     if (previousSofia === undefined) delete process.env.SOFIA_ENV; else process.env.SOFIA_ENV = previousSofia;
   }
 });
+
+test("rejected approval is audited and never executes the tool", async () => {
+  let executions = 0;
+  const events: SecurityAuditEvent[] = [];
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Write action requiring approval",
+    inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+    effects: ["write"] as const,
+    async execute() { executions += 1; return { committed: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, capabilitySecret: "approval-lifecycle-test-secret" },
+    async (request) => {
+      assert.equal(request.runId, "approval-rejected");
+      assert.equal(request.principalId, "test-principal");
+      assert.equal(request.toolName, "custom.write");
+      assert.match(request.actionHash, /^[a-f0-9]{64}$/);
+      return false;
+    },
+    undefined,
+    undefined,
+    { record(event) { events.push(event); } },
+  );
+
+  const result = await gateway.execute(
+    { tool: "custom.write", input: { value: "approved-only-if-accepted" } },
+    {
+      runId: "approval-rejected",
+      principalId: "test-principal",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.match(result.error?.message ?? "", /not approved/i);
+  assert.equal(executions, 0);
+  assert.ok(events.some((event) => event.decision === "approval_required"));
+  assert.ok(events.some((event) => event.decision === "approval_denied"));
+});
+
+test("an approval arriving after capability expiry cannot execute the tool", async () => {
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Write action requiring approval",
+    inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+    effects: ["write"] as const,
+    async execute() { executions += 1; return { committed: true }; },
+  }]);
+  const previousSofia = process.env.SOFIA_ENV;
+  const originalNow = Date.now;
+  let fakeNow = originalNow();
+  process.env.SOFIA_ENV = "production";
+  Date.now = () => fakeNow;
+  try {
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "approval-expiry-test-secret" },
+      async () => {
+        fakeNow += 60_001;
+        return true;
+      },
+    );
+
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { value: "must-not-run-after-expiry" } },
+      {
+        runId: "approval-expired",
+        principalId: "test-principal",
+        signal: new AbortController().signal,
+        requireApproval: false,
+        notifyApproval() {},
+      },
+    );
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.category, "permission_error");
+    assert.match(result.error?.message ?? "", /capability validation failed/i);
+    assert.equal(executions, 0);
+  } finally {
+    Date.now = originalNow;
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
