@@ -259,7 +259,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         leaseRenewalTimer = undefined;
         const lease = pollLeaseHandle;
         pollLeaseHandle = undefined;
-        if (lease) await withLeaseOperationTimeout(lease.release(), leaseOperationTimeoutMs, "release").catch(() => undefined);
+        if (lease) await releaseLeaseSafely(lease, leaseOperationTimeoutMs);
       });
       // Return after launching the loop; the polling promise is joined by stop().
     },
