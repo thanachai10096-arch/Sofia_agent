@@ -6,8 +6,9 @@ services:
     image: ${SOFIA_IMAGE:-sofia-agent:local}
     init: true
     restart: unless-stopped
+    # Allow each installation on a shared Docker host to keep private credentials separate.
     env_file:
-      - .env
+      - ${SOFIA_ENV_FILE:-.env}
     environment:
       NODE_ENV: production
       PORT: "3000"
