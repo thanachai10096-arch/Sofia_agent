@@ -455,7 +455,7 @@ export class RemoteSandbox implements Sandbox {
     await collect(root, "");
 
     const relativeCwd = limits.cwd ? path.posix.normalize(limits.cwd.split(path.sep).join("/")) : ".";
-    if (relativeCwd === ".." || relativeCwd.startsWith("../") || path.posix.isAbsolute(relativeCwd)) {
+    if ((limits.cwd?.includes("\0") ?? false) || relativeCwd === ".." || relativeCwd.startsWith("../") || path.posix.isAbsolute(relativeCwd)) {
       throw new Error("Remote sandbox working directory escapes its workspace.");
     }
     const requestId = randomUUID();
@@ -545,6 +545,7 @@ export class RemoteSandbox implements Sandbox {
     if (outputBytes > maxOutputBytes) throw new Error("Remote sandbox output exceeded the configured byte limit.");
 
     let returnedBytes = 0;
+    const returnedPaths = new Set<string>();
     const updates: Array<{ target: string; data: Buffer }> = [];
     for (const item of result.files) {
       if (!item || typeof item !== "object") throw new Error("Remote sandbox returned an invalid file entry.");
@@ -554,9 +555,10 @@ export class RemoteSandbox implements Sandbox {
         throw new Error("Remote sandbox returned an invalid file path.");
       }
       const normalized = path.posix.normalize(file.path);
-      if (normalized !== file.path || normalized === "." || normalized.startsWith("../") || path.posix.isAbsolute(normalized)) {
-        throw new Error("Remote sandbox returned a path outside the project snapshot.");
+      if (normalized !== file.path || normalized === "." || normalized === ".." || normalized.startsWith("../") || path.posix.isAbsolute(normalized) || returnedPaths.has(normalized)) {
+        throw new Error("Remote sandbox returned a path outside the project snapshot or a duplicate path.");
       }
+      returnedPaths.add(normalized);
       const target = known.get(normalized);
       if (!target) throw new Error("Remote sandbox attempted to return a file outside the original snapshot.");
       const data = Buffer.from(file.contentBase64, "base64");
