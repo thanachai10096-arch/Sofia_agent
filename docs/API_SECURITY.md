@@ -49,6 +49,12 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 - [ ] Run `npm run license:check`, `npm run typecheck`, `npm test`, and `npm run build`; inspect CI for the exact commit deployed.
 - [ ] Review [open security issues](https://github.com/thanachai10096-arch/Sofia_agent/issues). Draft or unmerged PRs are not deployed behavior.
 
+## Approval broker core (preview)
+
+The core `ApprovalBroker` can be supplied as the `AgentDependencies.approval` handler. It creates a pending record bound to the authenticated principal, run ID, tool name, redacted input, risk, exact action hash, and expiry. Decisions are one-shot compare-and-set operations; wrong hashes, replayed decisions, expired requests, missing principals, and aborted runs fail closed. The gateway records approval-required, approved, or denied outcomes in the security audit.
+
+The included `InMemoryApprovalDecisionStore` is for tests and local development only. It is process-local and loses pending approvals on restart. **Do not use it in production or with multiple replicas.** A production store must implement `ApprovalDecisionStore` with shared durable transactions and atomic `resolve` semantics (pending-only + exact action-hash compare-and-set). The API review/resolve endpoints and a production shared-store adapter are not yet wired; until then, keep approval-required tools unavailable to untrusted clients unless the host supplies a trusted approval handler.
+
 ## Current limitations
 
 API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. Approval behavior depends on the configured approval handler and tool gateway. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
