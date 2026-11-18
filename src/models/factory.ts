@@ -33,6 +33,7 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -48,10 +49,11 @@ function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if
 
 function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
-  const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
-  const projectMemory=new FileProjectMemoryStore(workspace);
-  const skillLedger=new PersistentSkillLedger(projectMemory);
+  // Learned skills are installation-wide shared knowledge; project memory and
+  // rollback checkpoints are namespaced by the authenticated principal.
+  const sharedSkillMemory = new FileProjectMemoryStore("shared-skills:" + path.resolve(workspace));
+  const skillLedger=new PersistentSkillLedger(sharedSkillMemory);
   const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
     const checks = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
@@ -62,6 +64,16 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   }, { file: path.join(sofiaStateDirectory("skills"), "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
+    const principalNamespace = createHash("sha256")
+      .update(principalId?.trim() || "local-instance")
+      .digest("hex");
+    const projectMemory = new FileProjectMemoryStore(
+      "principal:" + principalNamespace + ":workspace:" + path.resolve(workspace),
+    );
+    const checkpointManager = new DurableCheckpointManager(
+      dependencies.runtime,
+      "principal:" + principalNamespace + ":workspace:" + path.resolve(workspace),
+    );
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
     if (requestedRouteId && !requestedRoute) throw new Error("Unknown model route: " + requestedRouteId);
