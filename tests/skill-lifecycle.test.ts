@@ -222,6 +222,6 @@ test("persisted verified learned skills cannot be promoted from cached evaluatio
     const quarantined = restored.list("repair-skill").find((item) => item.id === candidate.id);
     assert.equal(quarantined?.status, "rejected");
     assert.equal(quarantined?.evaluation?.checks[0]?.name, "startup-evidence-quarantine");
-    assert.throws(() => restored.promote(candidate.id), /Only verified skill candidates can be promoted/);
+    assert.throws(() => restored.promote(candidate.id), /Only successfully evaluated candidates can be promoted/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
