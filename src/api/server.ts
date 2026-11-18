@@ -165,6 +165,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
   const legacyRunStore = config.runStore;
+  if (legacyRunStore && !config.runStoreRoot && Object.keys(config.apiKeys).length > 1) {
+    throw new Error("runStoreRoot is required when a shared run store serves multiple API keys.");
+  }
   const runStores = new Map<string, FileRunRecordStore>();
   if (config.runStoreRoot !== undefined && !path.isAbsolute(config.runStoreRoot)) {
     throw new Error("runStoreRoot must be an absolute path.");
