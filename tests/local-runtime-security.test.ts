@@ -159,8 +159,9 @@ test("Git subprocess ignores inherited Git execution and repository override var
   const helper = path.join(f.parent, "hostile-git-helper.sh");
   const rogueGitDir = path.join(f.parent, "rogue.git");
   const names = [
-    "GIT_DIR", "GIT_WORK_TREE", "GIT_EXTERNAL_DIFF", "GIT_SSH_COMMAND",
-    "GIT_ASKPASS", "GIT_PAGER", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0",
+    "GIT_DIR", "GIT_WORK_TREE", "GIT_EXTERNAL_DIFF", "GIT_SSH_COMMAND", "GIT_SSH",
+    "GIT_SSH_VARIANT", "GIT_PROXY_COMMAND", "GIT_SSL_NO_VERIFY", "GIT_EXEC_PATH",
+    "GIT_CONFIG_PARAMETERS", "GIT_ASKPASS", "GIT_PAGER", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0",
     "GIT_CONFIG_VALUE_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_1",
     "GIT_CONFIG_KEY_2", "GIT_CONFIG_VALUE_2",
   ] as const;
@@ -176,6 +177,12 @@ test("Git subprocess ignores inherited Git execution and repository override var
     process.env.GIT_WORK_TREE = f.parent;
     process.env.GIT_EXTERNAL_DIFF = helper;
     process.env.GIT_SSH_COMMAND = helper;
+    process.env.GIT_SSH = helper;
+    process.env.GIT_SSH_VARIANT = "simple";
+    process.env.GIT_PROXY_COMMAND = helper;
+    process.env.GIT_SSL_NO_VERIFY = "1";
+    process.env.GIT_EXEC_PATH = f.parent;
+    process.env.GIT_CONFIG_PARAMETERS = "'diff.external=" + helper + "'";
     process.env.GIT_ASKPASS = helper;
     process.env.GIT_PAGER = helper;
     process.env.GIT_CONFIG_COUNT = "3";
