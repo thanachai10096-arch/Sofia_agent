@@ -185,17 +185,22 @@ export async function createSofiaAgentDependenciesWithOwnerSessions(
   if (!/^[a-f0-9]{32}$/u.test(ownerKeyId)) {
     throw new Error("A server-derived 32-character owner key ID is required for session isolation.");
   }
-  const dependencies = createSofiaAgentDependencies(workspace, approval);
   const databasePath = path.join(workspace, ".sofia", "sessions", ownerKeyId + ".sqlite");
   const sessionStore = await SqliteSessionStore.open(databasePath);
-  const legacyPath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite");
-  if (path.resolve(legacyPath) !== path.resolve(databasePath)) {
-    const legacyStore = await SqliteSessionStore.open(legacyPath);
-    try {
-      legacyStore.migrateOwnerTo(ownerKeyId, sessionStore);
-    } finally {
-      legacyStore.close();
+  try {
+    const legacyPath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite");
+    if (path.resolve(legacyPath) !== path.resolve(databasePath)) {
+      const legacyStore = await SqliteSessionStore.open(legacyPath);
+      try {
+        legacyStore.migrateOwnerTo(ownerKeyId, sessionStore);
+      } finally {
+        legacyStore.close();
+      }
     }
+    const dependencies = createSofiaAgentDependencies(workspace, approval);
+    return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+  } catch (error) {
+    sessionStore.close();
+    throw error;
   }
-  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
 }
