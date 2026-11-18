@@ -200,7 +200,8 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
       json(response, 404, { error: "not_found" });
       return;
     }
-    const authorizationHeader = request.headers.authorization;\n    const authorization = typeof authorizationHeader === "string" ? authorizationHeader : "";
+    const authorizationHeader = request.headers.authorization;
+    const authorization = typeof authorizationHeader === "string" ? authorizationHeader : "";
     if (!authorization.startsWith("Bearer ") || !safeEqual(authorization.slice(7), options.token)) {
       json(response, 401, { error: "unauthorized" });
       return;
@@ -257,7 +258,9 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
         files,
       });
     } catch (error) {
-      const status = isRecord(error) && typeof error.statusCode === "number"\n        ? error.statusCode\n        : error instanceof SyntaxError ? 400 : 500;
+      const status = isRecord(error) && typeof error.statusCode === "number"
+        ? error.statusCode
+        : error instanceof SyntaxError ? 400 : 500;
       if (!response.headersSent && !response.destroyed) {
         json(response, status, { error: status === 413 ? "payload_too_large" : "invalid_or_failed_request" });
       }
