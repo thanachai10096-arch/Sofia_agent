@@ -55,6 +55,8 @@ export interface ResearchLoopOptions {
   /** Live budget counters from the trusted job/runtime supervisor. */
   budgetContext: () => AutonomyContext;
   maxCycles?: number;
+  /** Stable job-scoped namespace prevents unrelated jobs for one principal colliding. */
+  idempotencyPrefix?: string;
   startCycle?: number;
   previousCycles?: ResearchCycleResult[];
   onCycle?: (cycle: ResearchCycleResult, nextCycle: number) => Promise<void> | void;
@@ -89,6 +91,8 @@ export async function runIndependentResearchLoop(
   }
   if (!options.principalId.trim()) throw new Error("A principal identity is required for autonomous learning.");
 
+  const idempotencyPrefix = options.idempotencyPrefix?.trim() || `research:${options.principalId}`;
+  if (idempotencyPrefix.length > 200) throw new Error("Research idempotency prefix is too long.");
   const startCycle = options.startCycle ?? 1;
   if (!Number.isSafeInteger(startCycle) || startCycle < 1 || startCycle > maxCycles + 1) {
     throw new Error("Research resume cycle is invalid.");
@@ -125,7 +129,7 @@ export async function runIndependentResearchLoop(
       // when the sandbox or complete budget attestation is unavailable.
       await options.adapters.recordLearning({
         principalId: options.principalId,
-        idempotencyKey: `research:${options.principalId}:${cycle}`,
+        idempotencyKey: `${idempotencyPrefix}:${cycle}`,
         question, finding, hypothesis,
         experimentSkippedReason: experimentDecision.reason,
       }, options.signal);
@@ -144,7 +148,7 @@ export async function runIndependentResearchLoop(
     }
     await options.adapters.recordLearning({
       principalId: options.principalId,
-      idempotencyKey: `research:${options.principalId}:${cycle}`,
+      idempotencyKey: `${idempotencyPrefix}:${cycle}`,
       question, finding, hypothesis, evidence,
     }, options.signal);
     const result: ResearchCycleResult = { cycle, question, finding, hypothesis, evidence, status: "learned" };
