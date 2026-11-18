@@ -50,6 +50,22 @@ else
 fi
 
 
+mark_manifest_status() {
+  local status="$1"
+  local reason="${2:-}"
+  if [ -f "$MANIFEST" ]; then
+    node --input-type=module - "$MANIFEST" "$status" "$reason" <<'NODE'
+import { readFile, writeFile } from "node:fs/promises";
+const [file, status, reason] = process.argv.slice(2);
+const data = JSON.parse(await readFile(file, "utf8"));
+data.status = status;
+if (reason) data.rollbackReason = reason;
+data.updatedAt = new Date().toISOString();
+await writeFile(file, JSON.stringify(data, null, 2) + "\\n", { mode: 0o600 });
+NODE
+  fi
+}
+
 restore_previous_image() {
   if [ -z "$PREVIOUS_IMAGE_ID" ]; then
     echo "No previous image is available for rollback." >&2
@@ -59,19 +75,21 @@ restore_previous_image() {
   docker compose up -d --no-deps --force-recreate "$SERVICE"
   local rollback_container
   rollback_container="$(docker compose ps -q "$SERVICE")"
-  [ -n "$rollback_container" ] || return 1
+  [ -n "$rollback_container" ] || { mark_manifest_status "rollback-failed" "rollback container was not created"; return 1; }
   local deadline=$((SECONDS + HEALTH_TIMEOUT))
   while [ "$SECONDS" -lt "$deadline" ]; do
     local running health
     running="$(docker inspect --format '{{.State.Running}}' "$rollback_container" 2>/dev/null || echo false)"
     health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$rollback_container" 2>/dev/null || echo missing)"
     [ "$running" = "true" ] && [ "$health" = "healthy" ] && {
+      mark_manifest_status "rolled-back" "new image did not pass health check"
       echo "Previous image is healthy again."
       return 0
     }
     [ "$running" != "true" ] || [ "$health" = "unhealthy" ] || [ "$health" = "missing" ] && return 1
     sleep 3
   done
+  mark_manifest_status "rollback-failed" "previous image did not become healthy"
   echo "Previous image was restored but did not become healthy within the timeout." >&2
   return 1
 }
