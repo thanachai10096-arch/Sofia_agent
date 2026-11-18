@@ -158,7 +158,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           controller.abort();
           controller = undefined;
           try { options.onError?.("poll_lease_unavailable"); } catch { /* diagnostics must not affect startup */ }
-          return;
+          throw new Error("Telegram poll lease is owned by another worker; refusing to poll.");
         }
         const renewEvery = options.pollLeaseRenewIntervalMs ?? 10_000;
         if (!Number.isSafeInteger(renewEvery) || renewEvery < 1_000 || renewEvery > 60_000) {
