@@ -30,7 +30,7 @@ export interface ApprovalRecord {
 /**
  * Implementations must make create() unique by id and resolve() an atomic
  * compare-and-set from pending, checking the supplied actionHash.
- * Production deployments should use a shared transactional database store.
+ * Use SQLite for a single host or Upstash Redis for shared multi-replica deployments.
  */
 export interface ApprovalDecisionStore {
   create(record: ApprovalRecord): Promise<void>;
