@@ -101,10 +101,24 @@ export async function applyMigration(report) {
       const destination = item.kind === "file" ? item.target : path.join(item.target, file.relative);
       await fs.mkdir(path.dirname(destination), { recursive: true, mode: 0o700 });
       let sourceData;
-      try { sourceData = await fs.readFile(file.source); }
-      catch (error) { throw new Error("Could not read migration source " + file.source + ": " + error.message); }
+      let sourceHandle;
+      try {
+        sourceHandle = await fs.open(file.source, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+        const sourceStat = await sourceHandle.stat();
+        if (!sourceStat.isFile()) throw new Error("Source is no longer a regular file: " + file.source);
+        sourceData = await sourceHandle.readFile();
+      } catch (error) {
+        throw new Error("Could not safely read migration source " + file.source + ": " + error.message);
+      } finally {
+        await sourceHandle?.close();
+      }
       const digest = sha256(sourceData);
       try {
+        const destinationStat = await fs.lstat(destination);
+        if (!destinationStat.isFile() || destinationStat.isSymbolicLink()) {
+          conflicts.push({ source: file.source, destination, status: "conflict" });
+          continue;
+        }
         const existing = await fs.readFile(destination);
         if (sha256(existing) === digest) {
           results.push({ source: file.source, destination, status: "identical" });
