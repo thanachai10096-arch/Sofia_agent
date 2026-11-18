@@ -36,6 +36,7 @@ test("Telegram integration remains disabled unless explicitly enabled", () => {
     TELEGRAM_ALLOWED_USER_IDS: "123",
     TELEGRAM_ALLOWED_CHAT_IDS: "123",
     TELEGRAM_USER_API_KEYS_JSON: '{"123":"telegram-user-123-key"}',
+    SOFIA_API_KEYS_JSON: '{"telegram-user-123-key":["agent:run","agent:read"]}',
     SOFIA_API_BASE_URL: "https://sofia.example.invalid",
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.equal(runtime, undefined);
@@ -61,6 +62,7 @@ test("complete Telegram configuration constructs a runtime without starting netw
     TELEGRAM_ALLOWED_USER_IDS: "123",
     TELEGRAM_ALLOWED_CHAT_IDS: "123",
     TELEGRAM_USER_API_KEYS_JSON: '{"123":"telegram-user-123-key"}',
+    SOFIA_API_KEYS_JSON: '{"telegram-user-123-key":["agent:run","agent:read"]}',
     SOFIA_API_BASE_URL: "https://sofia.example.invalid",
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.ok(runtime);
@@ -173,4 +175,21 @@ test("Telegram integration fails closed when per-user API identities are absent"
   assert.equal(runtime, undefined);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0] ?? "", /per-user API keys are required/i);
+});
+
+
+test("Telegram integration fails closed when sender API keys are not registered with required scopes", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"telegram-user-123-key"}',
+    SOFIA_API_KEYS_JSON: '{"telegram-user-123-key":["agent:run"]}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.doesNotMatch(warnings[0] ?? "", /telegram-user-123-key/);
 });
