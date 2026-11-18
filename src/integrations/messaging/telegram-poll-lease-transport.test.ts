@@ -188,3 +188,52 @@ test("Telegram transport rejects lease renewal intervals without a safe TTL marg
   await assert.rejects(() => transport.start(new AbortController().signal, async () => {}), /no more than one third of its TTL/);
   assert.equal(released, 1);
 });
+
+
+test("Telegram transport fails closed when lease acquisition hangs", async () => {
+  const events: string[] = [];
+  let fetchCalls = 0;
+  const transport = createTelegramHttpTransport({
+    token,
+    pollLeaseOperationTimeoutMs: 250,
+    pollLease: { async acquire() { return await new Promise(() => {}); } },
+    fetchImpl: async () => { fetchCalls++; return ok(true); },
+    onError(event) { events.push(event); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  assert.deepEqual(events, ["poll_lease_unavailable"]);
+  assert.equal(fetchCalls, 0);
+  await transport.stop();
+});
+
+test("Telegram transport does not hang shutdown when lease release stalls", async () => {
+  let pollStarted!: () => void;
+  const started = new Promise<void>((resolve) => { pollStarted = resolve; });
+  const transport = createTelegramHttpTransport({
+    token,
+    pollLeaseOperationTimeoutMs: 250,
+    pollLease: {
+      async acquire() {
+        return {
+          ttlMs: 30_000,
+          async renew() { return true; },
+          async release() { return await new Promise<void>(() => {}); },
+        };
+      },
+    },
+    fetchImpl: async (input, init) => {
+      if (String(input).endsWith("/deleteWebhook")) return ok(true);
+      if (String(input).endsWith("/getUpdates")) {
+        pollStarted();
+        return await new Promise<Response>((_resolve, reject) => {
+          if (init?.signal?.aborted) { reject(new Error("aborted")); return; }
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      }
+      return ok(true);
+    },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await started;
+  await transport.stop();
+});
