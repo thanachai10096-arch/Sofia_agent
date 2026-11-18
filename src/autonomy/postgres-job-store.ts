@@ -15,7 +15,7 @@ interface JobRow {
   status: AutonomyJob["status"]; payload: unknown; result: unknown; error: string | null;
   idempotency_key: string | null; attempts: number; max_attempts: number;
   created_at: Date | string; updated_at: Date | string; available_at: Date | string;
-  lease_worker_id: string | null; lease_expires_at: Date | string | null;
+  lease_worker_id: string | null; lease_expires_at: Date | string | null; checkpoint: { nextCycle: number; cycles: unknown[]; updatedAt: string } | null;
 }
 
 const iso = (value: Date | string): string => value instanceof Date ? value.toISOString() : new Date(value).toISOString();
@@ -31,12 +31,13 @@ function mapJob<TPayload = unknown, TResult = unknown>(row: JobRow): AutonomyJob
     ...(row.lease_worker_id && row.lease_expires_at
       ? { lease: { workerId: row.lease_worker_id, expiresAt: iso(row.lease_expires_at) } }
       : {}),
+    ...(row.checkpoint ? { checkpoint: row.checkpoint } : {}),
   };
 }
 
 const columns = `version, id, principal_id, kind, status, payload, result, error,
   idempotency_key, attempts, max_attempts, created_at, updated_at, available_at,
-  lease_worker_id, lease_expires_at`;
+  lease_worker_id, lease_expires_at, checkpoint`;
 
 /**
  * PostgreSQL implementation for multi-worker / multi-replica deployments.
@@ -64,8 +65,10 @@ export class PostgresAutonomyJobStore implements AutonomyJobStore {
       updated_at timestamptz NOT NULL DEFAULT now(),
       available_at timestamptz NOT NULL DEFAULT now(),
       lease_worker_id text,
-      lease_expires_at timestamptz
+      lease_expires_at timestamptz,
+      checkpoint jsonb
     )`);
+    await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS checkpoint jsonb`);
     await this.pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS ${this.table}_principal_idempotency_uq
       ON ${this.table}(principal_id, idempotency_key) WHERE idempotency_key IS NOT NULL`);
     await this.pool.query(`CREATE INDEX IF NOT EXISTS ${this.table}_queue_idx
@@ -167,6 +170,20 @@ export class PostgresAutonomyJobStore implements AutonomyJobStore {
     });
   }
 
+  async saveCheckpoint(principalId: string, jobId: string, workerId: string, checkpoint: { nextCycle: number; cycles: unknown[] }): Promise<AutonomyJob> {
+    if (!Number.isSafeInteger(checkpoint.nextCycle) || checkpoint.nextCycle < 1 || !Array.isArray(checkpoint.cycles) || checkpoint.cycles.length > 100) throw new Error("Invalid autonomy research checkpoint.");
+    const json = JSON.stringify({ ...checkpoint, updatedAt: new Date().toISOString() });
+    if (Buffer.byteLength(json, "utf8") > 2 * 1024 * 1024) throw new Error("Research checkpoint exceeds 2 MiB.");
+    return this.transaction(async (client) => {
+      await this.owned(client, principalId, jobId, workerId);
+      const result = await client.query<JobRow>(
+        `UPDATE ${this.table} SET checkpoint=$4::jsonb, updated_at=now() WHERE id=$1 AND principal_id=$2 AND lease_worker_id=$3 RETURNING ${columns}`,
+        [jobId, principalId.trim(), workerId, json],
+      );
+      if (!result.rows[0]) throw new Error("Autonomy checkpoint update lost its lease.");
+      return mapJob(result.rows[0]);
+    });
+  }
   async complete<TResult>(principalId: string, jobId: string, workerId: string, resultValue: TResult): Promise<AutonomyJob<unknown, TResult>> {
     const json = JSON.stringify(resultValue);
     if (json === undefined || Buffer.byteLength(json, "utf8") > 1024 * 1024) throw new Error("Job result must be JSON data no larger than 1 MiB.");
