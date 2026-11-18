@@ -423,6 +423,20 @@ test("lifecycle instances loaded from the same existing revision cannot lose a l
 });
 
 
+test("corrupt skill lifecycle JSON fails closed without rewriting the damaged store", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "corrupt-lifecycle.json");
+    const damaged = "{\\"schemaVersion\\":1,\\"records\\":[";
+    writeFileSync(file, damaged, { mode: 0o600 });
+    assert.throws(
+      () => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }),
+      /Unsupported or corrupt skill lifecycle store/,
+    );
+    assert.equal(readFileSync(file, "utf8"), damaged, "startup must preserve damaged bytes for recovery");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("startup quarantine fails closed when another process holds the lifecycle lock", async () => {
   const root = dir();
   try {
