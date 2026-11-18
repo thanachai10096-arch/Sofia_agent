@@ -1,6 +1,6 @@
 # Sofia Agent — Self-Hosted Quickstart
 
-This is the initial **single-host Docker Compose** deployment path. It is intended for one Sofia API process using one persistent Docker volume. It is not a horizontally scaled or multi-host deployment.
+This is the initial **single-host Docker Compose** deployment path. Each installation runs one Sofia API process with its own private environment file and persistent Docker volume. Multiple independent installations can share one Docker host; this is not a horizontally scaled or multi-host shared-queue deployment.
 
 ## Requirements
 
@@ -44,7 +44,7 @@ docker compose ps
 docker compose logs -f sofia
 ```
 
-The API is published on `127.0.0.1:3000` by default. Keep it behind an HTTPS reverse proxy for remote access. Do not expose the raw API port to the public internet. To change the local bind address or host port, set `SOFIA_BIND_ADDRESS` and `SOFIA_HOST_PORT` in the shell environment used for Compose.
+The API is published on `127.0.0.1:3000` by default. Keep it behind an HTTPS reverse proxy for remote access. Do not expose the raw API port to the public internet. To change the local bind address or host port, set `SOFIA_BIND_ADDRESS` and `SOFIA_HOST_PORT` in the shell environment used for Compose. To run multiple installations from the same checkout, give each one a private env file and unique volume/project/port values. Set `SOFIA_ENV_FILE` to that env file's absolute path and `SOFIA_DOCKER_VOLUME` to its unique volume name for every Compose, backup, restore, upgrade, and rollback command. Keep `SOFIA_ENV_FILE` and `SOFIA_DOCKER_VOLUME` consistent for the lifetime of that installation. Example: `SOFIA_ENV_FILE=/srv/sofia-a/.env SOFIA_DOCKER_VOLUME=sofia-a-data docker compose up -d`.
 
 Check readiness:
 
@@ -119,7 +119,7 @@ After configuring `.env`, run the isolated Docker acceptance test:
 bash scripts/sofia-self-hosted-smoke.sh
 ```
 
-It builds a fresh image, starts an isolated Compose project with a disposable volume, waits for health, verifies that requests without a key and with an invalid key receive HTTP 401, verifies that the configured API key can read `/v1/jobs`, restarts the service, and checks that data survives. It removes only its own test project and volume. This does not replace a real model-provider task test or a production backup/restore rehearsal.
+It builds a fresh image, starts an isolated Compose project with a disposable volume, waits for health, verifies that requests without a key and with an invalid key receive HTTP 401, verifies that the configured API key can read `/v1/jobs`, restarts the service, and checks that data survives. It removes only its own test project and volume. This does not replace a real model-provider task test or a production backup/restore rehearsal. Run `bash scripts/sofia-isolation-smoke.sh` to build one image, start two installations with distinct env files and volumes, verify that each API key is rejected by the other installation, and verify the volumes remain separate.
 
 ## Backup and restore
 
