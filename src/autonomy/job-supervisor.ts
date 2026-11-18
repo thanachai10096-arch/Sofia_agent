@@ -1,7 +1,20 @@
+import { setTimeout as delay } from "node:timers/promises";
 import type { AutonomyContext } from "./controller.js";
 import type { ResearchLoopAdapters, ResearchLoopReport } from "./research-loop.js";
 import type { AutonomyJob, AutonomyJobStore } from "./job-store.js";
 import type { AutonomyResearchRequest } from "./runtime.js";
+
+export interface AutonomyWorkerSessionOptions {
+  /** Maximum jobs processed before the host restarts or re-invokes the worker. */
+  maxJobs?: number;
+  idleDelayMs?: number;
+  maxConsecutiveErrors?: number;
+}
+export interface AutonomyWorkerSessionResult {
+  processed: number;
+  infrastructureErrors: number;
+  stoppedBy: "aborted" | "max-jobs" | "worker-error";
+}
 
 export interface AutonomyResearchExecutor {
   runResearch(request: AutonomyResearchRequest): Promise<ResearchLoopReport>;
@@ -35,6 +48,48 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
     if (!Number.isSafeInteger(this.killSwitchPollMs) || this.killSwitchPollMs < 1_000 || this.killSwitchPollMs > 60_000) {
       throw new Error("Kill-switch polling interval must be between 1s and 60s.");
     }
+  }
+
+  /**
+   * Host-invoked worker session with bounded polling, idle backoff and graceful
+   * cancellation. Process managers (Railway, containers, etc.) own restarts.
+   */
+  async runUntilStopped(
+    workerId: string,
+    signal: AbortSignal,
+    session: AutonomyWorkerSessionOptions = {},
+  ): Promise<AutonomyWorkerSessionResult> {
+    const maxJobs = session.maxJobs ?? 100;
+    const idleDelayMs = session.idleDelayMs ?? 2_000;
+    const maxConsecutiveErrors = session.maxConsecutiveErrors ?? 5;
+    if (!Number.isSafeInteger(maxJobs) || maxJobs < 1 || maxJobs > 10_000 ||
+        !Number.isSafeInteger(idleDelayMs) || idleDelayMs < 100 || idleDelayMs > 60_000 ||
+        !Number.isSafeInteger(maxConsecutiveErrors) || maxConsecutiveErrors < 1 || maxConsecutiveErrors > 20) {
+      throw new Error("Invalid autonomy worker session limits.");
+    }
+    let processed = 0;
+    let infrastructureErrors = 0;
+    let consecutiveErrors = 0;
+    while (!signal.aborted && processed < maxJobs) {
+      try {
+        const job = await this.runNext(workerId, signal);
+        consecutiveErrors = 0;
+        if (job) processed += 1;
+        else await delay(idleDelayMs, undefined, { signal }).catch(() => undefined);
+      } catch {
+        infrastructureErrors += 1;
+        consecutiveErrors += 1;
+        if (consecutiveErrors >= maxConsecutiveErrors) {
+          return { processed, infrastructureErrors, stoppedBy: "worker-error" };
+        }
+        await delay(Math.min(idleDelayMs * consecutiveErrors, 60_000), undefined, { signal }).catch(() => undefined);
+      }
+    }
+    return {
+      processed,
+      infrastructureErrors,
+      stoppedBy: signal.aborted ? "aborted" : "max-jobs",
+    };
   }
 
   async runNext(workerId: string, signal: AbortSignal): Promise<AutonomyJob | undefined> {
