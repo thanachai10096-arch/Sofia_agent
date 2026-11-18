@@ -57,7 +57,7 @@ The included `InMemoryApprovalDecisionStore` is for tests and local development 
 
 ## Enabling the SQLite approval API
 
-The API entrypoint can enable the built-in broker with SOFIA_APPROVAL_ENABLED=true. It stores decisions in SOFIA_APPROVAL_STORE_PATH or .sofia/approvals.sqlite under the workspace. API keys that review their own pending requests must include the explicit approval:manage scope in SOFIA_API_SCOPES.
+The API entrypoint can enable the built-in broker with SOFIA_APPROVAL_ENABLED=true. The built-in SQLite adapter requires a Node.js runtime that provides node:sqlite (Node.js 22.5 or newer). It stores decisions in SOFIA_APPROVAL_STORE_PATH or .sofia/approvals.sqlite under the workspace. API keys that review their own pending requests must include the explicit approval:manage scope in SOFIA_API_SCOPES.
 
 - GET /v1/approvals lists only pending requests owned by the authenticated principal.
 - POST /v1/approvals/:id/approve and POST /v1/approvals/:id/deny require the exact 64-character action hash in the request body.
