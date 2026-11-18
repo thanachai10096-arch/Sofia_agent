@@ -312,7 +312,10 @@ export class CronScheduler {
     if (!target) return false;
     const controller = this.active.get(id);
     controller?.abort(new Error("Scheduled execution cancelled"));
-    if (target.jobId) await this.runtime.cancel(target.jobId);
+    if (target.jobId) {
+      if (!this.runtime.cancelForOwner) throw new Error("Owner-scoped job cancellation is unavailable.");
+      await this.runtime.cancelForOwner(target.jobId, target.ownerKeyId);
+    }
     return true;
   }
   async history(id: string, actor: string): Promise<CronExecution[]> {
@@ -501,11 +504,11 @@ export class CronScheduler {
     const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Recovered scheduled execution cancelled"));
     controller.signal.addEventListener("abort", onAbort, { once: true });
     try {
-      const job = await this.waitForJob(jobId, timeout.signal);
+      const job = await this.waitForJob(jobId, schedule.ownerKeyId, timeout.signal);
       status = job.status === "completed" ? "completed" : job.status === "cancelled" ? "cancelled" : "failed";
       errorText = status === "failed" ? job.error ?? "Recovered runtime job failed" : undefined;
     } catch (error) {
-      await this.runtime.cancel(jobId).catch(() => false);
+      if (this.runtime.cancelForOwner) await this.runtime.cancelForOwner(jobId, schedule.ownerKeyId).catch(() => false);
       status = controller.signal.aborted ? "cancelled" : "failed";
       errorText = error instanceof Error ? error.message : String(error);
     } finally {
@@ -575,7 +578,7 @@ export class CronScheduler {
           let result: JobRecord | undefined;
           let waitError: unknown;
           try {
-            result = await this.waitForJob(submitted.id, timeout.signal);
+            result = await this.waitForJob(submitted.id, schedule.ownerKeyId, timeout.signal);
           } catch (error) {
             waitError = error;
           } finally {
@@ -585,7 +588,7 @@ export class CronScheduler {
 
           if (waitError !== undefined) {
             // Abort the actual runtime job too; aborting the polling loop alone is not cancellation.
-            await this.runtime.cancel(submitted.id).catch(() => false);
+            if (this.runtime.cancelForOwner) await this.runtime.cancelForOwner(submitted.id, schedule.ownerKeyId).catch(() => false);
             if (controller.signal.aborted) {
               status = "cancelled";
               errorText = String(controller.signal.reason ?? waitError);
@@ -628,9 +631,10 @@ export class CronScheduler {
     }).catch(() => undefined);
     this.active.delete(schedule.id);
   }
-  private async waitForJob(id: string, signal: AbortSignal): Promise<JobRecord> {
+  private async waitForJob(id: string, ownerKeyId: string, signal: AbortSignal): Promise<JobRecord> {
+    if (!this.runtime.getForOwner) throw new Error("Owner-scoped job lookup is unavailable.");
     while (!signal.aborted) {
-      const record = await this.runtime.get(id);
+      const record = await this.runtime.getForOwner(id, ownerKeyId);
       if (!record) throw new Error("Scheduled runtime job disappeared");
       if (record.status === "completed" || record.status === "failed" || record.status === "cancelled") return record;
       await new Promise<void>((resolve, reject) => {
