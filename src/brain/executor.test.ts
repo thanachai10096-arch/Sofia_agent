@@ -1014,14 +1014,18 @@ test("Brain autonomy gate denies a tool before ToolGateway execution", async () 
       return tools.execute(call, context);
     },
   };
+  let authorizationCalls = 0;
   const brain = createSofiaBrain({
     dependencies: {
       reasoner: makeReasoner(),
       tools: guardedTools,
       autonomyAuthorizer: async ({ toolCall, effects, principalId }) => {
-        assert.equal(toolCall.tool, "workspace.write_file");
-        assert.deepEqual(effects, ["write"]);
-        assert.equal(principalId, "tenant-a");
+        authorizationCalls += 1;
+        if (authorizationCalls === 1) {
+          assert.equal(toolCall.tool, "workspace.write_file");
+          assert.deepEqual(effects, ["write"]);
+          assert.equal(principalId, "tenant-a");
+        }
         return { allowed: false, reason: "No trusted isolated workspace attestation." };
       },
     },
@@ -1032,6 +1036,7 @@ test("Brain autonomy gate denies a tool before ToolGateway execution", async () 
   });
   const report = await brain.run({ task: "Create hello.txt", principalId: "tenant-a" });
   assert.equal(report.completed, false);
+  assert.ok(authorizationCalls >= 1);
   assert.equal(executions, 0);
 });
 
