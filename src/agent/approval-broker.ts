@@ -164,8 +164,10 @@ export class ApprovalBroker {
     return this.resolve(id, actionHash, "denied", approverId);
   }
 
-  private resolve(id: string, actionHash: string, decision: ApprovalDecision, approverId: string): Promise<boolean> {
-    if (!id.trim() || !actionHash.trim() || !approverId.trim()) return Promise.resolve(false);
+  private async resolve(id: string, actionHash: string, decision: ApprovalDecision, approverId: string): Promise<boolean> {
+    if (!id.trim() || !actionHash.trim() || !approverId.trim()) return false;
+    const record = await this.options.store.get(id);
+    if (!record || record.principalId !== approverId) return false;
     return this.options.store.resolve(id, actionHash, decision, approverId, this.now());
   }
 }
