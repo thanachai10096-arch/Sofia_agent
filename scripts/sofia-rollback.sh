@@ -74,6 +74,14 @@ while [ "$SECONDS" -lt "$DEADLINE" ]; do
   RUNNING="$(docker inspect --format '{{.State.Running}}' "$CONTAINER_ID" 2>/dev/null || echo false)"
   HEALTH="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$CONTAINER_ID" 2>/dev/null || echo missing)"
   [ "$RUNNING" = "true" ] && [ "$HEALTH" = "healthy" ] && {
+    node --input-type=module - "$MANIFEST" <<'NODE'
+import { readFile, writeFile } from "node:fs/promises";
+const file = process.argv[2];
+const data = JSON.parse(await readFile(file, "utf8"));
+data.status = "rolled-back";
+data.rolledBackAt = new Date().toISOString();
+await writeFile(file, JSON.stringify(data, null, 2) + "\\n", { mode: 0o600 });
+NODE
     echo "Previous image restored and healthy. Data volume was not modified."
     exit 0
   }
