@@ -53,9 +53,9 @@ test("skill lifecycle preserves prior version and can roll back", async () => {
     const file = path.join(root, "lifecycle.json");
     const platform = new InMemorySkillsPlatform();
     const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
-    const first = lifecycle.propose(pkg("1.0.0"), { source: "repair", evidenceIds: ["e1"], confidence: 0.9 });
+    const first = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, { source: "repair", evidenceIds: ["e1"], confidence: 0.9 });
     await lifecycle.evaluate(first.id); lifecycle.promote(first.id);
-    const second = lifecycle.propose(pkg("2.0.0"), { source: "repair", evidenceIds: ["e2"], confidence: 0.9 });
+    const second = lifecycle.propose({ ...pkg("2.0.0"), source: "custom" }, { source: "repair", evidenceIds: ["e2"], confidence: 0.9 });
     await lifecycle.evaluate(second.id); lifecycle.promote(second.id);
     assert.equal(platform.get("repair-skill")?.version, "2.0.0");
     lifecycle.rollback("repair-skill");
