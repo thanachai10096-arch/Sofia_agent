@@ -30,6 +30,34 @@ test("skill lifecycle requires evaluation and confidence before promotion", asyn
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("stale lifecycle instance cannot mutate the platform after a newer promotion", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "shared-platform.json");
+    const platform = new InMemorySkillsPlatform();
+    const seed = new VersionedSkillLifecycle(platform, passing, { file });
+    const first = seed.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "first", evidenceIds: ["first-evidence"], confidence: 0.95,
+    });
+    await seed.evaluate(first.id);
+    const second = seed.propose({ ...pkg("2.0.0"), source: "custom" }, {
+      source: "second", evidenceIds: ["second-evidence"], confidence: 0.95,
+    });
+    await seed.evaluate(second.id);
+
+    const stale = new VersionedSkillLifecycle(platform, passing, { file });
+    seed.promote(first.id);
+    assert.equal(platform.get("repair-skill")?.version, "1.0.0");
+
+    assert.throws(
+      () => stale.promote(second.id),
+      /Skill lifecycle store changed in another process; reload before platform mutation/,
+    );
+    assert.equal(platform.get("repair-skill")?.version, "1.0.0", "stale promotion must not alter the shared platform");
+    assert.equal(existsSync(file + ".mutation.lock"), false, "mutation lock must be released after stale revision rejection");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("skill lifecycle rejects failed evaluations and low-confidence promotion", async () => {
   const root = dir();
   try {
