@@ -167,7 +167,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         const renewEvery = options.pollLeaseRenewIntervalMs ?? Math.min(10_000, maxRenewEveryMs);
         if (!Number.isSafeInteger(leaseTtlMs) || leaseTtlMs < 5_000 || leaseTtlMs > 300_000
           || !Number.isSafeInteger(renewEvery) || renewEvery < 1_000 || renewEvery > maxRenewEveryMs) {
-          await pollLeaseHandle.release();
+          await pollLeaseHandle.release().catch(() => undefined);
           pollLeaseHandle = undefined;
           stopped = true;
           controller.abort();
