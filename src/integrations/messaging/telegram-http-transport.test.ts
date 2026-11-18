@@ -229,3 +229,60 @@ test("Telegram polling reports HTTP errors with status", async () => {
   await transport.stop();
   assert.deepEqual(events[0], { event: "poll_failed", status: 503, kind: "http" });
 });
+
+
+test("Telegram polling fails closed when the distributed lease is already held", async () => {
+  const requests: string[] = [];
+  const events: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    requests.push(String(input));
+    return ok(true);
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    pollLease: {
+      async acquire() { return undefined; },
+    },
+    onError(event) { events.push(event); },
+  });
+  await transport.start(new AbortController().signal, async () => {
+    throw new Error("Update handler must never run without the lease.");
+  });
+  assert.deepEqual(requests, []);
+  assert.deepEqual(events, ["poll_lease_unavailable"]);
+  await transport.stop();
+  assert.deepEqual(requests, []);
+});
+
+test("Telegram polling does not call deleteWebhook when lease acquisition times out", async () => {
+  const requests: string[] = [];
+  const events: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    requests.push(String(input));
+    return ok(true);
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    pollLeaseOperationTimeoutMs: 250,
+    pollLease: {
+      async acquire() {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return {
+          ttlMs: 15_000,
+          async renew() { return true; },
+          async release() { events.push("late_lease_released"); },
+        };
+      },
+    },
+    onError(event) { events.push(event); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(requests, []);
+  assert.ok(events.includes("poll_lease_unavailable"));
+  assert.ok(events.includes("late_lease_released"));
+  await transport.stop();
+  assert.deepEqual(requests, []);
+});
