@@ -105,3 +105,20 @@ and does not add a database driver dependency. Configure TLS and credentials
 outside job payloads, use a least-privilege database role, and never expose the
 pool to model-generated code. This adapter is now available but has not yet
 been connected to Railway infrastructure or validated against a live database.
+
+### Per-cycle checkpoints and replay-safe learning
+
+Research workers persist a checkpoint after each completed cycle. The checkpoint
+contains only bounded cycle evidence and the next cycle number; it is written
+under the active worker lease and principal scope. After an expired lease is
+recovered, the next worker resumes at the next uncompleted cycle rather than
+replaying all prior completed cycles.
+
+The research adapter receives a stable idempotency key in every
+`recordLearning` call (`research:<principalId>:<cycle>`). Host memory adapters
+must enforce uniqueness on that key (or map it to a deterministic memory-entry
+ID) so a crash between memory persistence and checkpoint persistence cannot
+create duplicate learning records. A cycle interrupted before its learning
+write may be recomputed; experiments must themselves be idempotent or use
+versioned, isolated artifacts before retrying. Checkpoints do not make an
+in-flight external side effect exactly-once.
