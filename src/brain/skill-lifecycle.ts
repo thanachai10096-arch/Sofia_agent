@@ -7,7 +7,7 @@ import { redactSecrets } from "../security/guard.js";
 export type SkillLifecycleStatus = "candidate" | "verified" | "rejected" | "active" | "superseded" | "rolled_back";
 export interface SkillEvaluationCheck { name: string; passed: boolean; detail?: string; }
 export interface SkillEvaluationResult { passed: boolean; checks: SkillEvaluationCheck[]; evaluatedAt?: string; }
-export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; runId?: string; }
+export interface SkillProvenance { source: string; evidenceIds: string[]; confidence: number; runId?: string; skillDigest?: string; }
 export interface SkillLifecycleRecord {
   id: string;
   skillId: string;
@@ -104,6 +104,7 @@ export class VersionedSkillLifecycle {
         !provenance.evidenceIds.every((id) => typeof id === "string" && id.trim().length > 0 && id.length <= 500) ||
         new Set(provenance.evidenceIds).size !== provenance.evidenceIds.length ||
         (provenance.runId !== undefined && (typeof provenance.runId !== "string" || !provenance.runId.trim() || provenance.runId.length > 500)) ||
+        (provenance.skillDigest !== undefined && (typeof provenance.skillDigest !== "string" || !/^[a-f0-9]{64}$/.test(provenance.skillDigest))) ||
         !Number.isFinite(provenance.confidence) || provenance.confidence < 0 || provenance.confidence > 1) {
       throw new Error("Invalid skill provenance");
     }
