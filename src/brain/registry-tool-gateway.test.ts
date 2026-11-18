@@ -449,3 +449,37 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
 });
+
+test("caller-required approval cannot be downgraded by a read-only tool descriptor", async () => {
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.read",
+    description: "Read-only tool requiring caller approval",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() {
+      executions += 1;
+      return { read: true };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+  );
+
+  const result = await gateway.execute(
+    { tool: "custom.read", input: {} },
+    {
+      runId: "caller-approval-required-test",
+      principalId: "test-principal",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.match(result.error?.message ?? "", /approval is required/i);
+  assert.equal(executions, 0, "the tool must not execute when the caller requires approval");
+});
