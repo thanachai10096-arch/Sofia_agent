@@ -8,6 +8,7 @@ on:
       - ".dockerignore"
       - ".env.example"
       - "scripts/sofia-*.sh"
+      - "scripts/sofia-*.mjs"
       - "docs/SELF_HOSTED_*.md"
       - "src/**"
       - "package.json"
@@ -22,6 +23,7 @@ on:
       - ".dockerignore"
       - ".env.example"
       - "scripts/sofia-*.sh"
+      - "scripts/sofia-*.mjs"
       - "docs/SELF_HOSTED_*.md"
       - "src/**"
       - "package.json"
@@ -62,6 +64,8 @@ jobs:
           bash -n scripts/sofia-install.sh
           bash -n scripts/sofia-backup.sh
           bash -n scripts/sofia-restore.sh
+      - name: Test state migration safety
+        run: node --test scripts/sofia-migrate-state.test.mjs
 
       - name: Validate Compose configuration
         run: |
