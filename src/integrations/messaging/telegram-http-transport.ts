@@ -174,9 +174,16 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       leaseLost = false;
       controller = new AbortController();
       if (options.pollLease) {
+        // Keep the acquisition promise so a lease granted after our local
+        // deadline can still be released. The late result must never restart
+        // polling, but leaving it held until TTL expiry harms failover.
+        const acquireOperation = Promise.resolve().then(() => options.pollLease!.acquire());
         try {
-          pollLeaseHandle = await withLeaseOperationTimeout(options.pollLease.acquire(), leaseOperationTimeoutMs, "acquire");
+          pollLeaseHandle = await withLeaseOperationTimeout(acquireOperation, leaseOperationTimeoutMs, "acquire");
         } catch {
+          void acquireOperation
+            .then((lateLease) => lateLease ? releaseLeaseSafely(lateLease, leaseOperationTimeoutMs) : undefined)
+            .catch(() => undefined);
           stopped = true;
           controller.abort();
           controller = undefined;
