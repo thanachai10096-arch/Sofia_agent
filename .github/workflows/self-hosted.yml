@@ -74,6 +74,8 @@ jobs:
       - name: Validate Compose configuration
         run: |
           cp .env.example .env
+          API_KEY="$(openssl rand -hex 32)"
+          sed -i "s/^SOFIA_API_KEY=.*/SOFIA_API_KEY=$API_KEY/" .env
           docker compose config --quiet
 
       - name: Build production image
