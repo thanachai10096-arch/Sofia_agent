@@ -495,6 +495,8 @@ export class RemoteSandbox implements Sandbox {
         },
         body: JSON.stringify(payload),
         signal: controller.signal,
+        redirect: "error",
+        cache: "no-store",
       });
       if (!response.ok) throw new Error("Remote sandbox runner rejected the request (HTTP " + response.status + ").");
       const responseLimit = Math.min(Number.MAX_SAFE_INTEGER, this.maxSnapshotBytes * 2 + maxOutputBytes * 4 + 1_048_576);
