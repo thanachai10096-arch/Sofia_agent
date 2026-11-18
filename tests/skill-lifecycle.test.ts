@@ -672,3 +672,44 @@ test("startup restore reports incomplete compensation instead of hiding platform
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("promotion reports both the original and compensation errors", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "promotion-compensation.json");
+    const backing = new InMemorySkillsPlatform();
+    const seed = new VersionedSkillLifecycle(backing, passing, { file });
+    const first = seed.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "first", evidenceIds: ["first"], confidence: 0.95,
+    });
+    await seed.evaluate(first.id);
+    seed.promote(first.id);
+
+    let failMutations = false;
+    const platform = {
+      get: (id: string) => backing.get(id),
+      list: (source?: "builtin" | "learned" | "project" | "custom" | "marketplace") => backing.list(source),
+      remove: (id: string) => backing.remove(id),
+      register: (skill: SkillPackage) => {
+        if (failMutations && skill.version === "2.0.0") throw new Error("promotion register failed");
+        if (failMutations && skill.version === "1.0.0") throw new Error("promotion compensation failed");
+        backing.register(skill);
+      },
+    };
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
+    const next = lifecycle.propose({ ...pkg("2.0.0"), source: "custom" }, {
+      source: "second", evidenceIds: ["second"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(next.id);
+    failMutations = true;
+
+    assert.throws(() => lifecycle.promote(next.id), (error: unknown) => {
+      assert.ok(error instanceof AggregateError);
+      assert.match(error.message, /promotion failed and platform compensation was incomplete/);
+      assert.equal(error.errors.length, 2);
+      assert.match(String(error.errors[0]), /promotion register failed/);
+      assert.match(String(error.errors[1]), /promotion compensation failed/);
+      return true;
+    });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
