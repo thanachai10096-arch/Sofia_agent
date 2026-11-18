@@ -150,6 +150,11 @@ export class ApprovalBroker {
     return this.options.store.listPending(principalId);
   }
 
+  get(id: string): Promise<ApprovalRecord | undefined> {
+    if (!id.trim()) return Promise.resolve(undefined);
+    return this.options.store.get(id);
+  }
+
   /** Resolve exactly the action hash shown to the approver; replay is rejected. */
   approve(id: string, actionHash: string, approverId: string): Promise<boolean> {
     return this.resolve(id, actionHash, "approved", approverId);
