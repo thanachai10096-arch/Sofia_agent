@@ -60,7 +60,7 @@ test("complete Telegram configuration constructs a runtime without starting netw
     TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
     TELEGRAM_ALLOWED_USER_IDS: "123",
     TELEGRAM_ALLOWED_CHAT_IDS: "123",
-    SOFIA_API_KEY: "test-key",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"telegram-user-123-key"}',
     SOFIA_API_BASE_URL: "https://sofia.example.invalid",
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.ok(runtime);
