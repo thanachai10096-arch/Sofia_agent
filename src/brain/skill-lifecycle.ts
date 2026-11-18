@@ -201,9 +201,17 @@ export class VersionedSkillLifecycle {
     } catch (error) {
       result = { passed: false, checks: [{ name: "evaluator", passed: false, detail: error instanceof Error ? error.message : String(error) }] };
     }
-    if (!isRecord(result) || !Array.isArray(result.checks) || result.checks.length === 0 ||
-        !result.checks.every((check) => isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
-      result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed or empty evidence" }] };
+    const checkNames = isRecord(result) && Array.isArray(result.checks)
+      ? result.checks.map((check) => isRecord(check) && typeof check.name === "string" ? check.name.trim() : "")
+      : [];
+    if (!isRecord(result) || typeof result.passed !== "boolean" ||
+        !Array.isArray(result.checks) || result.checks.length === 0 ||
+        !result.checks.every((check) => isRecord(check) &&
+          typeof check.name === "string" && check.name.trim().length > 0 &&
+          check.name.length <= 200 && typeof check.passed === "boolean" &&
+          (check.detail === undefined || typeof check.detail === "string")) ||
+        new Set(checkNames).size !== checkNames.length) {
+      result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed, empty, or ambiguous evidence" }] };
     }
     return this.withPlatformMutationLock(() => {
       const before = clone(this.snapshot);
