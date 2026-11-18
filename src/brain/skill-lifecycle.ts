@@ -64,18 +64,19 @@ export class VersionedSkillLifecycle {
     this.minimumConfidence = options.minimumConfidence ?? 0.7;
     if (!Number.isFinite(this.minimumConfidence) || this.minimumConfidence < 0 || this.minimumConfidence > 1) throw new Error("minimumConfidence must be between 0 and 1");
     this.load();
-    // Older learned skills were promoted before audit evidence was resolved to a
-    // trusted record. Quarantine them instead of silently restoring them as active.
+    // Persisted learned skills cannot be trusted merely because they contain a runId:
+    // startup must not restore them without revalidating durable evidence. Until the
+    // lifecycle has an async restore verifier, quarantine every learned active record.
     let quarantinedLegacySkills = false;
     for (const [skillId, recordId] of Object.entries(this.snapshot.activeBySkill)) {
       const record = this.snapshot.records.find((item) => item.id === recordId && item.skillId === skillId && item.status === "active");
-      if (record?.package.source === "learned" && record.provenance.source === "verified-brain-repair" && !record.provenance.runId) {
+      if (record?.package.source === "learned") {
         record.status = "rejected";
         record.updatedAt = new Date().toISOString();
         record.evaluation = {
           passed: false,
           evaluatedAt: record.updatedAt,
-          checks: [{ name: "legacy-evidence-quarantine", passed: false, detail: "Legacy learned skill has no run-bound trusted audit evidence; re-learn and verify before activation." }],
+          checks: [{ name: "startup-evidence-quarantine", passed: false, detail: "Persisted learned skills are not restored until durable evidence can be revalidated at startup; re-learn and verify before activation." }],
         };
         delete this.snapshot.activeBySkill[skillId];
         quarantinedLegacySkills = true;
