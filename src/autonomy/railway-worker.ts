@@ -95,6 +95,7 @@ export async function runRailwayAutonomyWorker<TPayload = unknown>(
 /** Bind Railway/container termination signals to an abortable worker session. */
 export async function runRailwayAutonomyWorkerWithProcessSignals<TPayload = unknown>(
   config: RailwayAutonomyWorkerConfig<TPayload>,
+  signalSource: Pick<NodeJS.Process, "once" | "removeListener"> = process,
 ): Promise<AutonomyWorkerSessionResult> {
   const controller = new AbortController();
   const stop = (signal: NodeJS.Signals) => {
@@ -102,13 +103,13 @@ export async function runRailwayAutonomyWorkerWithProcessSignals<TPayload = unkn
   };
   const onSigterm = () => stop("SIGTERM");
   const onSigint = () => stop("SIGINT");
-  process.once("SIGTERM", onSigterm);
-  process.once("SIGINT", onSigint);
+  signalSource.once("SIGTERM", onSigterm);
+  signalSource.once("SIGINT", onSigint);
   try {
     return await runRailwayAutonomyWorker(config, controller.signal);
   } finally {
-    process.removeListener("SIGTERM", onSigterm);
-    process.removeListener("SIGINT", onSigint);
+    signalSource.removeListener("SIGTERM", onSigterm);
+    signalSource.removeListener("SIGINT", onSigint);
     await config.closePool?.();
   }
 }
