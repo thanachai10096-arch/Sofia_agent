@@ -131,7 +131,6 @@ export class ApprovalBroker {
       }
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, Math.min(this.pollIntervalMs, Math.max(1, current.expiresAt - this.now())));
-        timer.unref?.();
       });
     }
 
