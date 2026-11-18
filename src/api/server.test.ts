@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
+import { ApprovalBroker, InMemoryApprovalDecisionStore } from "../agent/approval-broker.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
 
@@ -187,3 +188,76 @@ test("API ignores client-supplied principalId and derives identity only from bea
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+test("approval API lists and resolves only requests owned by the authenticated principal", async () => {
+  const ownerKey = "approval-owner-key";
+  const outsiderKey = "approval-outsider-key";
+  const ownerId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
+  const broker = new ApprovalBroker({ store: new InMemoryApprovalDecisionStore(), pollIntervalMs: 25 });
+  const pending = broker.handle({
+    runId: "api-approval-run",
+    principalId: ownerId,
+    toolName: "workspace.write_file",
+    input: { path: "safe.txt", content: "approved" },
+    actionHash: "a".repeat(64),
+    risk: "high",
+  });
+  const [record] = await broker.listPending(ownerId);
+  assert.ok(record);
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    approvalBroker: broker,
+  }, {
+    apiKeys: {
+      [ownerKey]: ["agent:run", "approval:manage"],
+      [outsiderKey]: ["approval:manage"],
+      "approval-viewer-key": ["agent:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  const auth = (key: string) => ({ authorization: "Bearer " + key });
+  try {
+    const ownerList = await fetch(base + "/v1/approvals", { headers: auth(ownerKey) });
+    assert.equal(ownerList.status, 200);
+    assert.equal((await ownerList.json() as { approvals: unknown[] }).approvals.length, 1);
+
+    const outsiderList = await fetch(base + "/v1/approvals", { headers: auth(outsiderKey) });
+    assert.equal(outsiderList.status, 200);
+    assert.deepEqual((await outsiderList.json() as { approvals: unknown[] }).approvals, []);
+
+    const hidden = await fetch(base + "/v1/approvals/" + record.id + "/approve", {
+      method: "POST",
+      headers: { ...auth(outsiderKey), "content-type": "application/json" },
+      body: JSON.stringify({ actionHash: "a".repeat(64) }),
+    });
+    assert.equal(hidden.status, 404);
+
+    const forbidden = await fetch(base + "/v1/approvals", { headers: auth("approval-viewer-key") });
+    assert.equal(forbidden.status, 403);
+
+    const approved = await fetch(base + "/v1/approvals/" + record.id + "/approve", {
+      method: "POST",
+      headers: { ...auth(ownerKey), "content-type": "application/json" },
+      body: JSON.stringify({ actionHash: "a".repeat(64) }),
+    });
+    assert.equal(approved.status, 200);
+    assert.deepEqual(await approved.json(), { id: record.id, status: "approved" });
+    assert.equal(await pending, true);
+
+    const replay = await fetch(base + "/v1/approvals/" + record.id + "/deny", {
+      method: "POST",
+      headers: { ...auth(ownerKey), "content-type": "application/json" },
+      body: JSON.stringify({ actionHash: "a".repeat(64) }),
+    });
+    assert.equal(replay.status, 409);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
