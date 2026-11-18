@@ -33,6 +33,18 @@ Edit `.env` and set at least:
 
 The generated `SOFIA_API_KEY` is the credential clients use to authenticate to this Sofia installation. Keep it private.
 
+### Per-key tool capabilities
+
+API key scopes are the trusted administrator's permission grants. In addition to the API scopes such as `agent:run` and `agent:read`, elevated tools require explicit per-key grants:
+
+- `tool:write` — write or patch files
+- `tool:shell` — run shell/terminal commands
+- `tool:network` — network-enabled tools
+- `tool:browser` — browser interaction
+- `tool:destructive` — destructive desktop actions
+
+These grants are always intersected with the installation-wide `SOFIA_ALLOW_FILE_WRITE`, `SOFIA_ALLOW_SHELL`, `SOFIA_ALLOW_NETWORK`, `SOFIA_ALLOW_BROWSER`, and `SOFIA_ALLOW_DESTRUCTIVE` settings. A key cannot enable a capability the host has disabled. Jobs persist their granted scopes so retries and resumes keep the same permissions. Grant elevated scopes only to trusted keys; do not place privileged API keys in browser or mobile clients.
+
 Do not commit `.env`, share it with users, or place provider credentials in a browser/mobile application.
 
 Build and start:
