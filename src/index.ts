@@ -1,5 +1,9 @@
 export { defaultAutonomyProfile, evaluateAutonomyRequest, evaluateSkillPromotion } from "./autonomy/controller.js";
 export type { AutonomyAction, AutonomyBudget, AutonomyProfile, AutonomyContext, SkillPromotionEvidence, AutonomyDecision } from "./autonomy/controller.js";
+export { runIndependentResearchLoop } from "./autonomy/research-loop.js";
+export type { ResearchObservation, ResearchFinding, ResearchHypothesis, ExperimentEvidence, ResearchLoopAdapters, ResearchLoopOptions, ResearchCycleResult, ResearchLoopReport } from "./autonomy/research-loop.js";
+export { SofiaAutonomyRuntime } from "./autonomy/runtime.js";
+export type { AutonomyAuditEvent, AutonomyResearchRequest, SofiaAutonomyRuntimeOptions } from "./autonomy/runtime.js";
 export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
 export { runSkillLifecycleWorkflow } from "./brain/skill-lifecycle-workflow.js";
 export { createManagedSkillLearningHandler } from "./brain/managed-skill-learning.js";
