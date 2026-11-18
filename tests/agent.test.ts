@@ -105,7 +105,7 @@ test("legacy execution fails closed when a write tool has no approval handler", 
     policy: { ...defaultPolicy, maxSteps: 1, allowFileWrite: true, maxRisk: "high", permissions: {} },
   });
 
-  await assert.rejects(agent.run({ task: "write a file" }), /Approval handler required for medium-risk tool/);
+  await assert.rejects(agent.run({ task: "write a file" }), /Approval is required for this tool/);
   assert.equal(executions, 0, "the tool must not execute without explicit approval");
 });
 
