@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { canonicalJson } from "../security/guard.js";
+import { actionHash as computeActionHash, canonicalJson } from "../security/guard.js";
 import type { SecurityAuditEvent } from "../security/audit.js";
 import type { SkillPackage } from "../skills/platform.js";
 import type { SkillEvaluationCheck, SkillProvenance } from "./skill-lifecycle.js";
@@ -49,9 +49,11 @@ export class AuditSkillEvidenceVerifier {
       attestations.length === 1 &&
       attestation &&
       attestation.decision === "completed" &&
-      typeof attestation.actionHash === "string" && attestation.actionHash.length > 0 &&
+      typeof attestation.actionHash === "string" &&
       record(attestationInput) &&
+      attestationInput.skillId === skill.skill.id &&
       attestationInput.skillDigest === provenance.skillDigest &&
+      attestation.actionHash === computeActionHash(provenance.runId, "skill.candidate.attest", attestationInput, attestation.principalId) &&
       Array.isArray(attestationInput.evidenceIds) &&
       attestationInput.evidenceIds.length === provenance.evidenceIds.length &&
       provenance.evidenceIds.every((id, index) => attestationInput.evidenceIds[index] === id) &&
