@@ -53,7 +53,7 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 
 The `ApprovalBroker` is wired into the API entrypoint when explicitly enabled. It creates a pending record bound to the authenticated principal, run ID, tool name, redacted input, risk, exact action hash, and expiry. Decisions are owner-only and one-shot; wrong hashes, replayed decisions, expired requests, missing principals, and aborted runs fail closed. The gateway records approval-required, approved, and denied outcomes in the security audit.
 
-The `InMemoryApprovalDecisionStore` is for tests and local development only. The built-in `SqliteApprovalDecisionStore` persists requests across restarts and uses conditional SQL updates so only one concurrent decision wins. For deployments across hosts, implement a transactional network-database adapter; SQLite WAL must not be assumed safe on an arbitrary shared network filesystem.
+Approval payloads are capped at 64 KiB after secret redaction, and each principal can have at most 50 pending requests; the stores enforce the pending cap atomically.\n\nThe `InMemoryApprovalDecisionStore` is for tests and local development only. The built-in `SqliteApprovalDecisionStore` persists requests across restarts and uses conditional SQL updates so only one concurrent decision wins. For deployments across hosts, implement a transactional network-database adapter; SQLite WAL must not be assumed safe on an arbitrary shared network filesystem.
 
 ## Enabling the approval API
 
