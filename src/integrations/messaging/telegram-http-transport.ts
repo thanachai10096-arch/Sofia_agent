@@ -151,7 +151,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           controller.abort();
           controller = undefined;
           try { options.onError?.("poll_lease_unavailable"); } catch { /* diagnostics must not affect startup */ }
-          return;
+          throw new Error("Telegram poll lease acquisition failed; refusing to poll without ownership.");
         }
         if (!pollLeaseHandle) {
           stopped = true;
