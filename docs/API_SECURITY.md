@@ -64,7 +64,7 @@ The API entrypoint can enable the built-in broker with SOFIA_APPROVAL_ENABLED=tr
 - Requests owned by another principal return 404. The route does not offer cross-principal admin approval.
 - SQLite requires Node.js 22.5+ (node:sqlite), stores data at SOFIA_APPROVAL_STORE_PATH or .sofia/approvals.sqlite, and uses WAL plus transactional conditional updates. It is suitable only where processes share a filesystem with verified SQLite locking/WAL semantics.
 - Redis mode uses UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN (or REDIS_REST_URL and REDIS_REST_TOKEN), with atomic Lua scripts for create/resolve and a principal-hashed inbox index. SOFIA_APPROVAL_REDIS_PREFIX optionally namespaces keys. All Redis script keys share a cluster hash tag. The adapter tests mock the REST contract; validate the real token permissions and Redis behavior in staging before enabling it in production.
-- The SQLite database and sidecars are restricted to owner-only POSIX permissions where supported. Back up and persist the database directory.
+- The SQLite database and sidecars are restricted to owner-only POSIX permissions where supported. Back up and persist the database directory. For production effectful tools, the gateway also reads back and verifies the exact `approval_approved` audit event before allowing the side effect; a missing or mismatched event blocks execution.
 
 The feature remains disabled unless explicitly enabled. Redis mode is the preferred shared store for multi-replica Railway deployments. Do not grant approval:manage to browser/mobile clients that should not approve actions.
 
