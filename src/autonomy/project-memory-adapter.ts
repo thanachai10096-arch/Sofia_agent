@@ -14,9 +14,19 @@ export function createProjectMemoryLearningRecorder(
 ): ResearchLoopAdapters["recordLearning"] {
   return async (input: LearningInput, signal: AbortSignal): Promise<void> => {
     signal.throwIfAborted();
-    const project = resolveProject(input.principalId).trim();
+    const principalId = typeof input.principalId === "string" ? input.principalId.trim() : "";
+    const idempotencyKey = typeof input.idempotencyKey === "string" ? input.idempotencyKey.trim() : "";
+    if (!principalId || principalId.length > 256) throw new Error("A valid authenticated principal is required for research memory.");
+    if (!idempotencyKey || idempotencyKey.length > 256) throw new Error("A valid research idempotency key is required.");
+    if (!input.finding || typeof input.finding.summary !== "string" ||
+        !Array.isArray(input.finding.sourceIds) || !input.hypothesis ||
+        typeof input.hypothesis.statement !== "string" || typeof input.hypothesis.successMetric !== "string" ||
+        !Number.isFinite(input.finding.confidence)) {
+      throw new Error("Research memory input is malformed.");
+    }
+    const project = resolveProject(principalId).trim();
     if (!project || project.length > 200) throw new Error("A valid project scope is required for research memory.");
-    const id = createHash("sha256").update(input.idempotencyKey).digest("hex");
+    const id = createHash("sha256").update(principalId).update("\\0").update(project).update("\\0").update(idempotencyKey).digest("hex");
     const evidence = input.evidence
       ? `Experiment: ${input.evidence.summary.slice(0, 1200)}\nPassed: ${input.evidence.passed}\nBenchmark: ${input.evidence.benchmarkBefore} -> ${input.evidence.benchmarkAfter}\nSafety incidents: ${input.evidence.safetyIncidents}\nArtifact: ${input.evidence.artifactVersion ?? "not provided"}`
       : `Experiment skipped: ${(input.experimentSkippedReason ?? "not run").slice(0, 500)}`;
@@ -34,7 +44,7 @@ export function createProjectMemoryLearningRecorder(
       project,
       kind: "decision",
       content: content.slice(0, 4000),
-      source: `sofia-autonomy:${input.idempotencyKey.slice(0, 160)}`,
+      source: `sofia-autonomy:${idempotencyKey.slice(0, 160)}`,
       confidence: Math.max(0, Math.min(1, input.finding.confidence)),
       createdAt: now,
       updatedAt: now,
