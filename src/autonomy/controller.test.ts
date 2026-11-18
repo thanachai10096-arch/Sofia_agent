@@ -21,7 +21,7 @@ test("sandbox work fails closed without isolation", () => {
   assert.equal(evaluateAutonomyRequest("run_experiment", defaultAutonomyProfile, { sandboxAvailable: true }).allowed, true);
 });
 test("sandbox work respects cycle, step, tool, time and spend budgets", () => {
-  const base = { sandboxAvailable: true };
+  const base = { sandboxAvailable: true, remainingCycles: 8, remainingSteps: 40, remainingToolCalls: 8, experimentSeconds: 300, estimatedSpendUsd: 1 };
   for (const context of [
     { ...base, remainingCycles: 0 },
     { ...base, remainingSteps: 41 },
@@ -47,4 +47,29 @@ test("skill promotion requires complete evidence and rollback", () => {
 });
 test("unknown actions are denied", () => {
   assert.equal(evaluateAutonomyRequest("unknown" as never).allowed, false);
+});
+
+test("sandbox work fails closed when any budget measurement is missing or malformed", () => {
+  const valid = { sandboxAvailable: true, remainingCycles: 8, remainingSteps: 40, remainingToolCalls: 8, experimentSeconds: 300, estimatedSpendUsd: 1 };
+  for (const context of [
+    { ...valid, remainingCycles: undefined },
+    { ...valid, remainingCycles: 9 },
+    { ...valid, remainingSteps: -1 },
+    { ...valid, remainingToolCalls: Number.NaN },
+    { ...valid, experimentSeconds: Number.POSITIVE_INFINITY },
+    { ...valid, estimatedSpendUsd: -0.01 },
+    { ...valid, estimatedSpendUsd: Number.NaN },
+    { ...valid, estimatedSpendUsd: undefined },
+  ]) assert.equal(evaluateAutonomyRequest("run_experiment", defaultAutonomyProfile, context).allowed, false);
+});
+
+test("sandbox work rejects invalid configured resource budgets", () => {
+  const valid = { sandboxAvailable: true, remainingCycles: 8, remainingSteps: 40, remainingToolCalls: 8, experimentSeconds: 300, estimatedSpendUsd: 1 };
+  for (const budget of [
+    { ...defaultAutonomyProfile.budget, maxCycles: 0 },
+    { ...defaultAutonomyProfile.budget, maxSteps: Number.NaN },
+    { ...defaultAutonomyProfile.budget, maxToolCallsPerStep: -1 },
+    { ...defaultAutonomyProfile.budget, maxExperimentSeconds: Number.POSITIVE_INFINITY },
+    { ...defaultAutonomyProfile.budget, maxSpendUsd: -1 },
+  ]) assert.equal(evaluateAutonomyRequest("run_experiment", { ...defaultAutonomyProfile, budget }, valid).allowed, false);
 });
