@@ -63,17 +63,31 @@ Compose mounts the named volume `sofia-agent-data` at `/data` and configures:
 
 All durable file-backed stores resolve beneath this root, including API run records and usage quotas, background jobs, Brain run snapshots, checkpoints, project and user memory, SQLite sessions, skill/evolution data, security audit data, and chat deduplication. The workspace itself remains at `/data/workspace`; project files and workspace-local artifacts are persisted on the same named volume. `SOFIA_RUN_STORE_DIR` and `SOFIA_CHAT_DEDUPE_DIR` remain optional explicit path overrides; leave them unset for the unified default. Do not remove the volume when upgrading. The volume contains user data and should be backed up and protected as sensitive information.
 
-## Upgrade
+## Upgrade and lifecycle management
 
-Back up the volume before upgrading. Pull the intended source revision, then rebuild:
+Pull the intended source revision, then run the managed upgrade:
 
 ```bash
 git pull --ff-only
-docker compose config --quiet
-docker compose up -d --build
+bash scripts/sofia-upgrade.sh
 ```
 
-This initial release does not include an application schema migration or automatic rollback manager. The state migration tool only copies legacy files; it does not transform database schemas.
+The upgrade script creates a consistent volume backup, preserves the current local image, rebuilds and recreates the service, then waits for the container health check. It records a private manifest in `backups/`. If the new container fails health checks, it attempts to restore the previous image without changing the data volume.
+
+Inspect the current deployment and recent upgrade history:
+
+```bash
+bash scripts/sofia-lifecycle.sh status
+bash scripts/sofia-lifecycle.sh history
+```
+
+Manually roll back a previously recorded upgrade:
+
+```bash
+bash scripts/sofia-rollback.sh backups/upgrade-<timestamp>.json --yes
+```
+
+Rollback restores the container image only. It does not reverse database/schema changes or restore older application data. Keep the pre-upgrade volume archive and rollback image until the release has been accepted. This initial release does not support automatic schema downgrade.
 
 ## Migrate legacy state
 
