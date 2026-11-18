@@ -283,7 +283,7 @@ export class ContainerSandbox implements Sandbox {
   private readonly runner: ContainerCommandRunner;
 
   constructor(private readonly options: ContainerSandboxOptions) {
-    if (!/^.+@sha256:[a-f0-9]{64}$/i.test(options.image) || options.image.includes("\\0")) {
+    if (!/^.+@sha256:[a-f0-9]{64}$/i.test(options.image) || options.image.includes("\0")) {
       throw new Error("Container image must be pinned by an immutable sha256 digest.");
     }
     this.dockerPath = options.dockerPath ?? "docker";
@@ -296,8 +296,8 @@ export class ContainerSandbox implements Sandbox {
     limits: SandboxLimits,
     signal?: AbortSignal,
   ): Promise<{ stdout: string; stderr: string; code: number }> {
-    if (!command.trim() || command.includes("\\0")) throw new Error("A valid container command is required.");
-    if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string" || arg.includes("\\0"))) {
+    if (!command.trim() || command.includes("\0")) throw new Error("A valid container command is required.");
+    if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string" || arg.includes("\0"))) {
       throw new Error("Command arguments must be strings without NUL bytes.");
     }
     if (!limits.workspaceRoot.trim()) throw new Error("A workspace root is required.");
@@ -383,10 +383,10 @@ export class RemoteSandbox implements Sandbox {
     if (parsed.username || parsed.password || parsed.search || parsed.hash) {
       throw new Error("Remote sandbox endpoint cannot contain credentials, query parameters, or fragments.");
     }
-    if (typeof options.token !== "string" || options.token.length < 32 || /[\\r\\n]/.test(options.token)) {
+    if (typeof options.token !== "string" || options.token.length < 32 || /[\r\n]/.test(options.token)) {
       throw new Error("Remote sandbox token must contain at least 32 characters.");
     }
-    this.endpoint = parsed.toString().replace(/\\/$/, "");
+    this.endpoint = parsed.toString().replace(/\/$/, "");
     this.fetcher = options.fetcher ?? fetch;
     this.maxSnapshotBytes = options.maxSnapshotBytes ?? 100 * 1024 * 1024;
     if (!Number.isSafeInteger(this.maxSnapshotBytes) || this.maxSnapshotBytes < 1) {
@@ -400,8 +400,8 @@ export class RemoteSandbox implements Sandbox {
     limits: SandboxLimits,
     signal?: AbortSignal,
   ): Promise<{ stdout: string; stderr: string; code: number }> {
-    if (!command.trim() || command.includes("\\0")) throw new Error("A valid remote sandbox command is required.");
-    if (!Array.isArray(args) || args.length > 128 || args.some((arg) => typeof arg !== "string" || arg.includes("\\0"))) {
+    if (!command.trim() || command.includes("\0")) throw new Error("A valid remote sandbox command is required.");
+    if (!Array.isArray(args) || args.length > 128 || args.some((arg) => typeof arg !== "string" || arg.includes("\0"))) {
       throw new Error("Remote sandbox arguments are invalid.");
     }
     const timeoutMs = positiveFinite(limits.timeoutMs, "timeoutMs");
@@ -536,7 +536,7 @@ export class RemoteSandbox implements Sandbox {
       if (!item || typeof item !== "object") throw new Error("Remote sandbox returned an invalid file entry.");
       const file = item as { path?: unknown; contentBase64?: unknown };
       if (typeof file.path !== "string" || typeof file.contentBase64 !== "string" ||
-          file.path.includes("\\0") || file.path.includes("\\\\")) {
+          file.path.includes("\0") || file.path.includes("\\")) {
         throw new Error("Remote sandbox returned an invalid file path.");
       }
       const normalized = path.posix.normalize(file.path);
