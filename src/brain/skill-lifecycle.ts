@@ -393,7 +393,36 @@ export class VersionedSkillLifecycle {
     if (targetPackage.skill.id !== parsed.skillId || (previousPackage && previousPackage.skill.id !== parsed.skillId)) {
       throw new Error("Skill mutation journal package identity mismatch; operator reconciliation is required");
     }
-    const committed = this.snapshot.activeBySkill[parsed.skillId] === parsed.targetActiveId;
+    if (parsed.previousActiveId === null && previousPackage !== null) {
+      throw new Error("Skill mutation journal has an impossible previous package; operator reconciliation is required");
+    }
+    const targetRecord = this.snapshot.records.find((record) =>
+      record.id === parsed.targetActiveId && record.skillId === parsed.skillId);
+    if (!targetRecord || JSON.stringify(targetRecord.package) !== JSON.stringify(targetPackage)) {
+      throw new Error("Skill mutation journal target does not match the lifecycle store; operator reconciliation is required");
+    }
+    const currentActiveId = this.snapshot.activeBySkill[parsed.skillId] ?? null;
+    const committed = currentActiveId === parsed.targetActiveId;
+    if (committed) {
+      if (targetRecord.status !== "active") {
+        throw new Error("Committed journal target is not active in the lifecycle store; operator reconciliation is required");
+      }
+    } else {
+      if (currentActiveId !== parsed.previousActiveId) {
+        throw new Error("Lifecycle active pointer matches neither side of the pending journal; operator reconciliation is required");
+      }
+      if (parsed.previousActiveId !== null) {
+        const previousRecord = this.snapshot.records.find((record) =>
+          record.id === parsed.previousActiveId && record.skillId === parsed.skillId);
+        if (!previousRecord || previousPackage === null ||
+            JSON.stringify(previousRecord.package) !== JSON.stringify(previousPackage) ||
+            previousRecord.status !== "active") {
+          throw new Error("Pending journal previous version does not match the lifecycle store; operator reconciliation is required");
+        }
+      } else if (currentActiveId !== null) {
+        throw new Error("Pending journal unexpectedly has an active lifecycle pointer");
+      }
+    }
     const expected = committed ? targetPackage : previousPackage;
     const current = this.platform.get(parsed.skillId);
     if (current && JSON.stringify(current) !== JSON.stringify(targetPackage) &&
