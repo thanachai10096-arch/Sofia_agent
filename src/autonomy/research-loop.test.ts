@@ -1,0 +1,96 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { defaultAutonomyProfile } from "./controller.js";
+import { runIndependentResearchLoop, type ResearchLoopAdapters } from "./research-loop.js";
+
+function adapters(overrides: Partial<ResearchLoopAdapters> = {}): ResearchLoopAdapters {
+  return {
+    observe: async () => ({ signal: "quality regression", sourceIds: ["run-1"] }),
+    identifyGaps: async () => ["Why did verification regress?"],
+    researchLocally: async () => ({ summary: "Recent runs show a flaky integration test.", sourceIds: ["run-1"], confidence: 0.95 }),
+    formulateHypothesis: async () => ({ statement: "A race in test setup causes the regression.", successMetric: "pass rate >= 0.95" }),
+    experiment: async () => ({ passed: true, summary: "Isolated test confirms hypothesis.", benchmarkBefore: 0.8, benchmarkAfter: 0.96, safetyIncidents: 0, artifactVersion: "exp-1", rollbackAvailable: true }),
+    recordLearning: async () => undefined,
+    ...overrides,
+  };
+}
+const validBudget = () => ({
+  remainingCycles: 8,
+  remainingSteps: 40,
+  remainingToolCalls: 8,
+  experimentSeconds: 300,
+  estimatedSpendUsd: 1,
+});
+
+test("research loop autonomously researches, experiments in sandbox and records evidence", async () => {
+  let experiments = 0;
+  let notes = 0;
+  const report = await runIndependentResearchLoop({
+    adapters: adapters({
+      experiment: async () => { experiments += 1; return { passed: true, summary: "pass", benchmarkBefore: 0.8, benchmarkAfter: 0.96, safetyIncidents: 0, artifactVersion: "v1", rollbackAvailable: true }; },
+      recordLearning: async () => { notes += 1; },
+    }),
+    signal: new AbortController().signal,
+    principalId: "tenant-user-1",
+    sandboxAvailable: true,
+    budgetContext: validBudget,
+    maxCycles: 1,
+  });
+  assert.equal(report.completed, true);
+  assert.equal(report.cycles[0]?.status, "learned");
+  assert.equal(experiments, 1);
+  assert.equal(notes, 1);
+});
+
+test("missing sandbox or budget attestation never runs experiment but still records research", async () => {
+  let experiments = 0;
+  let notes = 0;
+  const report = await runIndependentResearchLoop({
+    adapters: adapters({
+      experiment: async () => { experiments += 1; throw new Error("must not run"); },
+      recordLearning: async () => { notes += 1; },
+    }),
+    signal: new AbortController().signal,
+    principalId: "tenant-user-1",
+    sandboxAvailable: false,
+    budgetContext: () => ({}),
+    maxCycles: 1,
+  });
+  assert.equal(report.cycles[0]?.status, "experiment-denied");
+  assert.equal(experiments, 0);
+  assert.equal(notes, 1);
+});
+
+test("loop stops when no knowledge gaps remain", async () => {
+  const report = await runIndependentResearchLoop({
+    adapters: adapters({ identifyGaps: async () => [] }),
+    signal: new AbortController().signal,
+    principalId: "tenant-user-1",
+    sandboxAvailable: true,
+    budgetContext: validBudget,
+  });
+  assert.equal(report.stoppedBy, "no-knowledge-gap");
+  assert.equal(report.cycles.length, 0);
+});
+
+test("cycle limit cannot exceed profile budget", async () => {
+  await assert.rejects(() => runIndependentResearchLoop({
+    profile: defaultAutonomyProfile,
+    adapters: adapters(),
+    signal: new AbortController().signal,
+    principalId: "tenant-user-1",
+    sandboxAvailable: true,
+    budgetContext: validBudget,
+    maxCycles: defaultAutonomyProfile.budget.maxCycles + 1,
+  }), /cycle limit/i);
+});
+
+test("learning requires principal identity", async () => {
+  await assert.rejects(() => runIndependentResearchLoop({
+    adapters: adapters(),
+    signal: new AbortController().signal,
+    principalId: " ",
+    sandboxAvailable: true,
+    budgetContext: validBudget,
+  }), /principal identity/i);
+});
