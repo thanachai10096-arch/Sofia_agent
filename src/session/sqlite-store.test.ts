@@ -231,6 +231,10 @@ test("SQLite owner transcript migration copies only matching sessions and is ret
     legacy.save({ id: "owner-one:conversation-a", messages: ["legacy transcript"], updatedAt: 10 });
     legacy.save({ id: "owner-two:conversation-b", messages: ["other tenant"], updatedAt: 20 });
     legacy.save({ id: "owner-one-extra:conversation-c", messages: ["prefix collision"], updatedAt: 30 });
+    // Put the target owner beyond the first 500-row page to exercise full pagination.
+    for (let index = 0; index < 505; index += 1) {
+      legacy.save({ id: "aaa-foreign-" + String(index).padStart(4, "0"), messages: ["unrelated"], updatedAt: 0 });
+    }
 
     assert.equal(legacy.migrateOwnerTo("owner-one", ownerOne), 1);
     assert.deepEqual(ownerOne.get("owner-one:conversation-a")?.messages, ["legacy transcript"]);
