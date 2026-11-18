@@ -1,3 +1,5 @@
+export { defaultAutonomyProfile, evaluateAutonomyRequest, evaluateSkillPromotion } from "./autonomy/controller.js";
+export type { AutonomyAction, AutonomyBudget, AutonomyProfile, AutonomyContext, SkillPromotionEvidence, AutonomyDecision } from "./autonomy/controller.js";
 export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
 export { runSkillLifecycleWorkflow } from "./brain/skill-lifecycle-workflow.js";
 export { createManagedSkillLearningHandler } from "./brain/managed-skill-learning.js";
