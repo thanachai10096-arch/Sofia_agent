@@ -223,6 +223,8 @@ export class FileAutonomyJobStore implements AutonomyJobStore {
         !Array.isArray(checkpoint.cycles) || checkpoint.cycles.length > 100) {
       throw new Error("Invalid autonomy research checkpoint.");
     }
+    const encoded = JSON.stringify(checkpoint);
+    if (Buffer.byteLength(encoded, "utf8") > 2 * 1024 * 1024) throw new Error("Research checkpoint exceeds 2 MiB.");
     return this.serialize(async () => {
       const job = await this.owned(principalId, jobId, workerId);
       job.checkpoint = { ...checkpoint, updatedAt: new Date().toISOString() };
