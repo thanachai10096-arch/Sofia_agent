@@ -977,3 +977,43 @@ test("startup recovery rejects a promotion journal whose target has an impossibl
     assert.equal(existsSync(file + ".transaction.json"), true, "invalid journal must be retained for operator review");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("skill evaluation rejects duplicate check names instead of accepting ambiguous evidence", async () => {
+  const root = dir();
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, async () => ({
+      passed: true,
+      checks: [
+        { name: "regression", passed: true },
+        { name: "regression", passed: true },
+      ],
+    }), { file: path.join(root, "duplicate-evaluation.json") });
+    const candidate = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "duplicate-evaluation", evidenceIds: ["duplicate-checks"], confidence: 0.95,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+    assert.equal(evaluated.evaluation?.checks[0]?.name, "evaluation-result");
+    assert.throws(() => lifecycle.promote(candidate.id), /successfully evaluated/);
+    assert.equal(platform.get(candidate.skillId), undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("skill evaluation rejects blank or malformed check identities", async () => {
+  const root = dir();
+  try {
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async () => ({
+      passed: true,
+      checks: [{ name: "   ", passed: true }],
+    }), { file: path.join(root, "blank-evaluation.json") });
+    const candidate = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "blank-evaluation", evidenceIds: ["blank-check"], confidence: 0.95,
+    });
+    const evaluated = await lifecycle.evaluate(candidate.id);
+    assert.equal(evaluated.status, "rejected");
+    assert.equal(evaluated.evaluation?.passed, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
