@@ -20,7 +20,7 @@ const candidate: LearnedSkillCandidate = {
   evidenceIds: ["verification-typecheck", "verification-test", "verification-build"],
 };
 
-function fixture() {
+function fixture(trustedReadEvents?: () => Promise<readonly SecurityAuditEvent[]>) {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-managed-skill-"));
   const platform = new InMemorySkillsPlatform();
   const events: SecurityAuditEvent[] = (["typecheck", "test", "build"] as const).map((kind) => ({
@@ -36,7 +36,7 @@ function fixture() {
   }));
   const audit = new MemorySecurityAudit();
   for (const event of events) audit.record(event);
-  const verifier = new AuditSkillEvidenceVerifier(async () => audit.list());
+  const verifier = new AuditSkillEvidenceVerifier(trustedReadEvents ?? (async () => audit.list()));
   const lifecycle = new VersionedSkillLifecycle(platform, async (skill, provenance) => {
     const checks = [
       { name: "metadata-and-verification", passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length) },
@@ -82,6 +82,19 @@ test("managed skill learning fails closed when approval is declined", async () =
     const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false, f.audit);
     assert.equal(await declined(candidate, "run-1"), false);
     assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
+  } finally {
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});
+
+
+test("managed learning rejects memory-only evidence when durable audit is unavailable", async () => {
+  const f = fixture(async () => []);
+  try {
+    const handler = createManagedSkillLearningHandler(f.lifecycle, async () => true, f.audit);
+    assert.equal(await handler(candidate, "run-1", "operator-1"), false);
+    assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
+    assert.equal(f.audit.list().some((event) => event.toolName === "skill.candidate.attest"), true);
   } finally {
     rmSync(f.directory, { recursive: true, force: true });
   }
