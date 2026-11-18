@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
 ENV_FILE="$ROOT_DIR/.env"
 EXAMPLE_FILE="$ROOT_DIR/.env.example"
 
@@ -21,19 +22,12 @@ else
     exit 1
   fi
   API_KEY="$(openssl rand -hex 32)"
-  export SOFIA_INSTALL_API_KEY="$API_KEY"
-  node --input-type=module <<'NODE'
-import { readFileSync, writeFileSync, chmodSync } from "node:fs";
-const file = ".env";
-const key = process.env.SOFIA_INSTALL_API_KEY;
-if (!key || !/^[a-f0-9]{64}$/.test(key)) throw new Error("Generated API key did not pass validation.");
-let env = readFileSync(file, "utf8");
-if (!/^SOFIA_API_KEY=.*$/m.test(env)) throw new Error("SOFIA_API_KEY entry is missing from .env.example.");
-env = env.replace(/^SOFIA_API_KEY=.*$/m, "SOFIA_API_KEY=" + key);
-writeFileSync(file, env, { mode: 0o600 });
-chmodSync(file, 0o600);
-NODE
-  unset SOFIA_INSTALL_API_KEY
+  TMP_ENV="$(mktemp "$ROOT_DIR/.env.XXXXXX")"
+  trap 'rm -f "$TMP_ENV"' EXIT
+  awk -v key="$API_KEY" 'BEGIN { found = 0 } /^SOFIA_API_KEY=/ { print "SOFIA_API_KEY=" key; found = 1; next } { print } END { if (!found) exit 2 }' "$ENV_FILE" > "$TMP_ENV"
+  chmod 600 "$TMP_ENV"
+  mv "$TMP_ENV" "$ENV_FILE"
+  trap - EXIT
   echo "Created private .env and generated a unique SOFIA_API_KEY."
 fi
 
