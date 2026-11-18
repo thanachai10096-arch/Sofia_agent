@@ -55,6 +55,18 @@ The core `ApprovalBroker` can be supplied as the `AgentDependencies.approval` ha
 
 The included `InMemoryApprovalDecisionStore` is for tests and local development only. It is process-local and loses pending approvals on restart. **Do not use it in production or with multiple replicas.** A production store must implement `ApprovalDecisionStore` with shared durable transactions and atomic `resolve` semantics (pending-only + exact action-hash compare-and-set). The API review/resolve endpoints and a production shared-store adapter are not yet wired; until then, keep approval-required tools unavailable to untrusted clients unless the host supplies a trusted approval handler.
 
+## Enabling the SQLite approval API
+
+The API entrypoint can enable the built-in broker with SOFIA_APPROVAL_ENABLED=true. It stores decisions in SOFIA_APPROVAL_STORE_PATH or .sofia/approvals.sqlite under the workspace. API keys that review their own pending requests must include the explicit approval:manage scope in SOFIA_API_SCOPES.
+
+- GET /v1/approvals lists only pending requests owned by the authenticated principal.
+- POST /v1/approvals/:id/approve and POST /v1/approvals/:id/deny require the exact 64-character action hash in the request body.
+- Requests owned by another principal return 404. The route does not offer cross-principal admin approval.
+- SQLite uses WAL and transactional conditional updates to ensure only one decision wins. It is suitable only where all processes share a filesystem with SQLite-compatible locking and WAL semantics. Do not mount the same SQLite WAL database across unrelated hosts or network filesystems without validating those guarantees; use a transactional network database adapter for multi-host deployments.
+- The SQLite database and sidecars are restricted to owner-only POSIX permissions where supported. Back up and persist the database directory.
+
+The feature remains disabled unless explicitly enabled. Do not grant approval:manage to browser/mobile clients that should not approve actions.
+
 ## Current limitations
 
 API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. Approval behavior depends on the configured approval handler and tool gateway. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
