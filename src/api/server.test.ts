@@ -147,3 +147,46 @@ test("API rejects unknown model routes before starting a run", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+test("API usage quotas and usage reports are isolated by authenticated API key", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "ok" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "verified" }) },
+  }, {
+    apiKeys: {
+      "quota-owner-one": ["agent:run", "agent:read"],
+      "quota-owner-two": ["agent:run", "agent:read"],
+    },
+    maxRunsPerKeyPerDay: 1,
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const run = (key: string) => fetch(baseUrl + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({ task: "quota isolation check" }),
+  });
+  const usage = async (key: string) => (await fetch(baseUrl + "/v1/usage", {
+    headers: { authorization: `Bearer ${key}` },
+  })).json() as Promise<{ keyId: string; runs: number }>;
+
+  try {
+    assert.equal((await run("quota-owner-one")).status, 200);
+    assert.equal((await run("quota-owner-one")).status, 429);
+    assert.equal((await run("quota-owner-two")).status, 200);
+
+    const first = await usage("quota-owner-one");
+    const second = await usage("quota-owner-two");
+    const idFor = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 32);
+    assert.equal(first.keyId, idFor("quota-owner-one"));
+    assert.equal(first.runs, 1);
+    assert.equal(second.keyId, idFor("quota-owner-two"));
+    assert.equal(second.runs, 1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
