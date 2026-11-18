@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
@@ -188,5 +191,61 @@ test("API usage quotas and usage reports are isolated by authenticated API key",
     assert.equal(second.runs, 1);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API cron schedules persist in separate owner files and remain invisible across API keys", async () => {
+  const cronStoreRoot = await mkdtemp(path.join(tmpdir(), "sofia-api-cron-tenant-test-"));
+  const runtime = {
+    async submit() { throw new Error("future schedules must not dispatch in this test"); },
+    async getForOwner() { return undefined; },
+    async cancelForOwner() { return true; },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    jobRuntime: runtime as never,
+  }, {
+    apiKeys: {
+      "cron-owner-one": ["cron:read", "cron:manage"],
+      "cron-owner-two": ["cron:read", "cron:manage"],
+    },
+    cronStoreRoot,
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const headers = (key: string) => ({ authorization: "Bearer " + key, "content-type": "application/json" });
+  try {
+    const created = await fetch(baseUrl + "/v1/cron/schedules", {
+      method: "POST",
+      headers: headers("cron-owner-one"),
+      body: JSON.stringify({
+        name: "owner one", task: "safe future task",
+        runAt: "2099-01-01T00:00:00.000Z", timeZone: "UTC",
+      }),
+    });
+    assert.equal(created.status, 201);
+    const ownList = await fetch(baseUrl + "/v1/cron/schedules", {
+      headers: headers("cron-owner-one"),
+    });
+    const otherList = await fetch(baseUrl + "/v1/cron/schedules", {
+      headers: headers("cron-owner-two"),
+    });
+    assert.equal((await ownList.json() as { schedules: unknown[] }).schedules.length, 1);
+    assert.equal((await otherList.json() as { schedules: unknown[] }).schedules.length, 0);
+
+    const ownerOneId = createHash("sha256").update("cron-owner-one").digest("hex").slice(0, 32);
+    const ownerTwoId = createHash("sha256").update("cron-owner-two").digest("hex").slice(0, 32);
+    const files = await readdir(cronStoreRoot);
+    assert.ok(files.includes(createHash("sha256").update(ownerOneId).digest("hex") + ".json"));
+    assert.ok(files.includes(createHash("sha256").update(ownerTwoId).digest("hex") + ".json"));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(cronStoreRoot, { recursive: true, force: true });
   }
 });
