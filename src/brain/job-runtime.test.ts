@@ -1025,3 +1025,32 @@ test("DurableJobRuntime passes the authenticated owner to Brain factory for back
   assert.deepEqual(observedOwners, ["tenant-key-hash"]);
   assert.equal(runs, 1);
 });
+
+
+test("DurableJobRuntime preserves API-key tool scopes for background execution", async () => {
+  const namespace = "job-runtime-tool-scopes-" + randomUUID();
+  const observedScopes: string[][] = [];
+  const brain = {
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime((options) => {
+    observedScopes.push(options.toolScopes ?? []);
+    return brain;
+  }, undefined, namespace);
+
+  const scopes = ["agent:run", "agent:read", "tool:write"];
+  const submitted = await runtime.submit({
+    task: "scope-preservation",
+    ownerKeyId: "principal-scope-test",
+    toolScopes: scopes,
+  });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "completed");
+  assert.deepEqual(observedScopes, [scopes]);
+  assert.deepEqual(current?.toolScopes, scopes);
+});
