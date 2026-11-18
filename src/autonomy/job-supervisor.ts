@@ -31,12 +31,14 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
 
   async runNext(workerId: string, signal: AbortSignal): Promise<AutonomyJob | undefined> {
     if (signal.aborted) return undefined;
+    await this.options.store.recoverExpired();
     const job = await this.options.store.claimNext<TPayload>(workerId, this.leaseMs);
     if (!job) return undefined;
 
     const controller = new AbortController();
     const forwardAbort = () => controller.abort(signal.reason ?? new Error("Worker shutdown requested."));
     signal.addEventListener("abort", forwardAbort, { once: true });
+    if (signal.aborted) forwardAbort();
     const heartbeat = setInterval(() => {
       void this.options.store.heartbeat(job.principalId, job.id, workerId, this.leaseMs)
         .catch((error: unknown) => controller.abort(error instanceof Error ? error : new Error("Job lease heartbeat failed.")));
