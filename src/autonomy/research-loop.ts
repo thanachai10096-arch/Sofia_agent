@@ -37,6 +37,7 @@ export interface ResearchLoopAdapters {
   /** Persist a bounded learning note; implementations must scope by principal. */
   recordLearning(input: {
     principalId: string;
+    idempotencyKey: string;
     question: string;
     finding: ResearchFinding;
     hypothesis: ResearchHypothesis;
@@ -54,6 +55,9 @@ export interface ResearchLoopOptions {
   /** Live budget counters from the trusted job/runtime supervisor. */
   budgetContext: () => AutonomyContext;
   maxCycles?: number;
+  startCycle?: number;
+  previousCycles?: ResearchCycleResult[];
+  onCycle?: (cycle: ResearchCycleResult, nextCycle: number) => Promise<void> | void;
 }
 export interface ResearchCycleResult {
   cycle: number;
@@ -85,8 +89,12 @@ export async function runIndependentResearchLoop(
   }
   if (!options.principalId.trim()) throw new Error("A principal identity is required for autonomous learning.");
 
-  const cycles: ResearchCycleResult[] = [];
-  for (let cycle = 1; cycle <= maxCycles; cycle += 1) {
+  const startCycle = options.startCycle ?? 1;
+  if (!Number.isSafeInteger(startCycle) || startCycle < 1 || startCycle > maxCycles + 1) {
+    throw new Error("Research resume cycle is invalid.");
+  }
+  const cycles: ResearchCycleResult[] = [...(options.previousCycles ?? [])];
+  for (let cycle = startCycle; cycle <= maxCycles; cycle += 1) {
     if (options.signal.aborted) {
       return { completed: false, stoppedBy: "aborted", cycles };
     }
@@ -113,18 +121,19 @@ export async function runIndependentResearchLoop(
       sandboxAvailable: options.sandboxAvailable,
     });
     if (!experimentDecision.allowed) {
-      cycles.push({
-        cycle, question, finding, hypothesis,
-        status: "experiment-denied",
-        reason: experimentDecision.reason,
-      });
       // Learning from authorized research is still useful; no experiment is run
       // when the sandbox or complete budget attestation is unavailable.
       await options.adapters.recordLearning({
         principalId: options.principalId,
+        idempotencyKey: `research:${options.principalId}:${cycle}`,
         question, finding, hypothesis,
         experimentSkippedReason: experimentDecision.reason,
       }, options.signal);
+      const result: ResearchCycleResult = {
+        cycle, question, finding, hypothesis, status: "experiment-denied", reason: experimentDecision.reason,
+      };
+      cycles.push(result);
+      await options.onCycle?.(result, cycle + 1);
       continue;
     }
 
@@ -133,8 +142,14 @@ export async function runIndependentResearchLoop(
         evidence.safetyIncidents < 0 || !Number.isSafeInteger(evidence.safetyIncidents)) {
       throw new Error("Experiment adapter returned invalid benchmark or safety evidence.");
     }
-    await options.adapters.recordLearning({ principalId: options.principalId, question, finding, hypothesis, evidence }, options.signal);
-    cycles.push({ cycle, question, finding, hypothesis, evidence, status: "learned" });
+    await options.adapters.recordLearning({
+      principalId: options.principalId,
+      idempotencyKey: `research:${options.principalId}:${cycle}`,
+      question, finding, hypothesis, evidence,
+    }, options.signal);
+    const result: ResearchCycleResult = { cycle, question, finding, hypothesis, evidence, status: "learned" };
+    cycles.push(result);
+    await options.onCycle?.(result, cycle + 1);
   }
   return { completed: true, stoppedBy: "cycle-budget", cycles };
 }
