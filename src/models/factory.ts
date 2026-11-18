@@ -156,9 +156,9 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const autonomyAuthorizer = sandboxSupervisor && sandboxIdentity
       ? createBrainAutonomyAuthorizer({
           profile: { ...defaultAutonomyProfile, networkResearch: sandboxNetworkAllowed },
-          classifyTool: (request) => request.toolCall.tool === "sandbox.exec" ? "run_experiment" : "think",
+          classifyTool: (request) => request.toolCall.tool.startsWith("sandbox.") ? "run_experiment" : "think",
           getTrustedContext: async (request, action) => {
-            if (action !== "run_experiment" || request.toolCall.tool !== "sandbox.exec") return {};
+            if (action !== "run_experiment" || !request.toolCall.tool.startsWith("sandbox.")) return {};
             const attestation = await getSandboxAttestation();
             // Each explicit sandbox execution consumes one autonomous experiment cycle.
             const trustedContext = sandboxSupervisor.getAutonomyContext(sandboxIdentity, attestation);
