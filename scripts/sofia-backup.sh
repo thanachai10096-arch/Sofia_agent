@@ -31,7 +31,7 @@ restart_service() {
 trap restart_service EXIT
 
 # Stop writes before archiving to avoid a partially-written state snapshot.
-docker compose stop -t 30 sofia >/dev/null 2>&1 || true
+docker compose stop -t 30 sofia >/dev/null
 docker run --rm \
   -v "$VOLUME_NAME:/data:ro" \
   -v "$BACKUP_DIR:/backup" \
