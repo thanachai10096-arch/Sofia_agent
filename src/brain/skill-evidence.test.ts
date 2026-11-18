@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { SecurityAuditEvent } from "../security/audit.js";
 import type { SkillPackage } from "../skills/platform.js";
 import { AuditSkillEvidenceVerifier, skillPackageDigest } from "./skill-evidence.js";
+import { actionHash } from "../security/guard.js";
 
 const runId = "brain-run-1";
 const skill: SkillPackage = {
@@ -48,7 +49,7 @@ function attestation(overrides: Partial<SecurityAuditEvent> = {}): SecurityAudit
     at: new Date(0).toISOString(),
     runId,
     toolName,
-    actionHash: "attestation-action-hash",
+    actionHash: actionHash(runId, toolName, input),
     risk: "low",
     decision: "completed",
     input,
