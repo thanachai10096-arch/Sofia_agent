@@ -160,20 +160,33 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           try { options.onError?.("poll_lease_unavailable"); } catch { /* diagnostics must not affect startup */ }
           return;
         }
-        const renewEvery = options.pollLeaseRenewIntervalMs ?? 10_000;
-        if (!Number.isSafeInteger(renewEvery) || renewEvery < 1_000 || renewEvery > 60_000) {
+        const leaseTtlMs = pollLeaseHandle.ttlMs;
+        const maxRenewEveryMs = Math.floor(leaseTtlMs / 3);
+        const renewEvery = options.pollLeaseRenewIntervalMs ?? Math.min(10_000, maxRenewEveryMs);
+        if (!Number.isSafeInteger(leaseTtlMs) || leaseTtlMs < 5_000 || leaseTtlMs > 300_000
+          || !Number.isSafeInteger(renewEvery) || renewEvery < 1_000 || renewEvery > maxRenewEveryMs) {
           await pollLeaseHandle.release();
           pollLeaseHandle = undefined;
           stopped = true;
           controller.abort();
           controller = undefined;
-          throw new Error("Telegram poll lease renewal interval must be between 1 and 60 seconds.");
+          throw new Error("Telegram poll lease renewal interval must be at least 1 second and no more than one third of its TTL.");
         }
+        // Bound each Redis renewal attempt. A hung Redis request must not let
+        // this process continue polling after its distributed lease can expire.
+        const renewDeadlineMs = Math.min(renewEvery, leaseTtlMs - (2 * renewEvery));
         leaseRenewalTimer = setInterval(() => {
           if (leaseRenewalInFlight || stopped || !pollLeaseHandle) return;
           leaseRenewalInFlight = true;
-          void pollLeaseHandle.renew().then((renewed) => {
+          const lease = pollLeaseHandle;
+          let deadline: ReturnType<typeof setTimeout> | undefined;
+          const timedRenewal = new Promise<boolean>((resolve) => {
+            deadline = setTimeout(() => resolve(false), renewDeadlineMs);
+          });
+          void Promise.race([lease.renew(), timedRenewal]).then((renewed) => {
             if (!renewed && !stopped) {
+              // Abort first. The in-flight Redis call may settle later, but it
+              // cannot restore polling; shutdown releases this owner token.
               try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
               controller?.abort();
             }
@@ -182,7 +195,10 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
               try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
               controller?.abort();
             }
-          }).finally(() => { leaseRenewalInFlight = false; });
+          }).finally(() => {
+            if (deadline) clearTimeout(deadline);
+            leaseRenewalInFlight = false;
+          });
         }, renewEvery);
       }
       const stopFromParent = () => controller?.abort(signal.reason);
