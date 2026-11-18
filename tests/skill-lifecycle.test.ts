@@ -389,3 +389,30 @@ test("skill lifecycle refuses a second writer while the cross-process lock is he
     assert.equal(lifecycle.list().length, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("lifecycle instances loaded from the same existing revision cannot lose a later update", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "existing-revision.json");
+    const seed = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    seed.propose({ ...pkg("0.9.0"), source: "custom" }, {
+      source: "seed", evidenceIds: ["seed-evidence"], confidence: 0.9,
+    });
+
+    const writerA = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    const writerB = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    writerA.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "writer-a", evidenceIds: ["writer-a-evidence"], confidence: 0.9,
+    });
+
+    assert.throws(
+      () => writerB.propose({ ...pkg("2.0.0"), source: "custom" }, {
+        source: "writer-b", evidenceIds: ["writer-b-evidence"], confidence: 0.9,
+      }),
+      /Skill lifecycle store changed in another process; reload before writing/,
+    );
+    const reloaded = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    assert.deepEqual(reloaded.list().map((record) => record.package.version), ["0.9.0", "1.0.0"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
