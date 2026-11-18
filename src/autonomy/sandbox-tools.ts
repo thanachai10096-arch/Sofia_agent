@@ -1,0 +1,101 @@
+import { copyFile, lstat, mkdir, readdir } from "node:fs/promises";
+import path from "node:path";
+import type { SofiaTool } from "../tools/types.js";
+import type { SandboxAttestation, SandboxRunIdentity, SandboxSupervisor } from "./sandbox-supervisor.js";
+
+const EXCLUDED = new Set([
+  ".git", ".sofia", "node_modules", ".next", ".turbo", "dist", "build",
+  "coverage", ".venv", "venv", ".ssh", ".aws", ".config",
+]);
+const SECRET_FILE = /^(?:\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx|sqlite|db)|id_rsa|id_ed25519)$/i;
+const MAX_FILES = 10_000;
+const MAX_BYTES = 100 * 1024 * 1024;
+
+async function stageSanitizedWorkspace(source: string, destination: string): Promise<void> {
+  let count = 0;
+  let bytes = 0;
+  const root = path.resolve(source);
+  async function visit(current: string, relative: string): Promise<void> {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      if (EXCLUDED.has(entry.name) || SECRET_FILE.test(entry.name)) continue;
+      const sourcePath = path.join(current, entry.name);
+      const relativePath = relative ? path.join(relative, entry.name) : entry.name;
+      const targetPath = path.resolve(destination, relativePath);
+      const rel = path.relative(destination, targetPath);
+      if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) {
+        throw new Error("Sandbox staging path escaped its destination.");
+      }
+      const info = await lstat(sourcePath);
+      // Symlinks and special files are never copied into an execution container.
+      if (info.isSymbolicLink() || (!info.isDirectory() && !info.isFile())) continue;
+      if (info.isDirectory()) {
+        await mkdir(targetPath, { recursive: true, mode: 0o700 });
+        await visit(sourcePath, relativePath);
+        continue;
+      }
+      count += 1;
+      bytes += info.size;
+      if (count > MAX_FILES || bytes > MAX_BYTES) {
+        throw new Error("Sandbox project snapshot exceeds the staging file or size limit.");
+      }
+      await mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
+      await copyFile(sourcePath, targetPath);
+    }
+  }
+  await visit(root, "");
+}
+
+export interface SandboxToolOptions {
+  supervisor: SandboxSupervisor;
+  identity: SandboxRunIdentity;
+  sourceWorkspace: string;
+  networkAllowed: boolean;
+  getAttestation(): Promise<SandboxAttestation>;
+}
+
+/** A sandbox-only command tool. It cannot execute against the host WorkspaceRuntime. */
+export function createSandboxTools(options: SandboxToolOptions): SofiaTool[] {
+  let staged = false;
+  let staging: Promise<void> | undefined;
+  return [{
+    name: "sandbox.exec",
+    description: "Run a bounded command in an isolated, disposable copy of the project. Internet access is enabled only when the host sandbox policy allows it. Changes stay in the sandbox and are not applied to the host project.",
+    effects: ["sandbox"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string", minLength: 1 },
+        args: { type: "array", items: { type: "string" }, maxItems: 128 },
+        cwd: { type: "string" },
+        timeoutMs: { type: "integer", minimum: 1, maximum: 300000 },
+      },
+      required: ["command"],
+      additionalProperties: false,
+    },
+    async execute(input, context) {
+      const attestation = await options.getAttestation();
+      const workspace = options.supervisor.getWorkspacePath(options.identity, attestation);
+      if (!staged) {
+        staging ??= stageSanitizedWorkspace(options.sourceWorkspace, workspace);
+        await staging;
+        staged = true;
+      }
+      const command = input.command;
+      if (typeof command !== "string" || !command.trim()) throw new Error("Sandbox command is required.");
+      const args = Array.isArray(input.args) && input.args.every((value) => typeof value === "string")
+        ? input.args as string[]
+        : [];
+      const timeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 120000;
+      const cwd = typeof input.cwd === "string" ? input.cwd : undefined;
+      return options.supervisor.run(
+        options.identity,
+        attestation,
+        command,
+        args,
+        { timeoutMs, allowNetwork: options.networkAllowed, ...(cwd ? { cwd } : {}) },
+        context.signal,
+      );
+    },
+  }];
+}
