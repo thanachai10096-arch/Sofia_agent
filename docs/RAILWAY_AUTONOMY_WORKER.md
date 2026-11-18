@@ -81,3 +81,22 @@ environment patch; it has no live services yet. Do not reference those staged
 resources from production or accept that patch as part of this code change.
 Provision and validate the database in the intended Sofia environment before
 connecting the worker.
+
+## Authenticated API producer
+
+The API can optionally receive `autonomyJobStore` in `SofiaApiConfig`. When configured, it exposes:
+
+- `POST /v1/autonomy/jobs` — requires `autonomy:run`; accepts only `topic` and optional `context`. The authenticated API key's hashed key ID becomes the principal. Client-supplied principal IDs and unknown fields are rejected.
+- `GET /v1/autonomy/jobs` — requires `autonomy:read` or `autonomy:run`; lists only the authenticated principal's jobs.
+- `GET /v1/autonomy/jobs/:id` — same read scope; cross-principal lookups return 404.
+- `DELETE /v1/autonomy/jobs/:id` — requires `autonomy:run`; cancels only a job owned by the authenticated principal.
+
+An optional `Idempotency-Key` is hashed together with the authenticated principal before it reaches the queue. The endpoint does not accept sandbox settings, execution policy, budget, worker identity, adapter names, or privileged configuration from clients. The worker still resolves those dependencies from trusted host configuration.
+
+Example request body:
+
+```json
+{ "topic": "Review recovery behavior", "context": "Focus on lease expiry" }
+```
+
+The API queue is opt-in: without `autonomyJobStore`, these routes return 503. The API and worker must be configured with the same PostgreSQL database-backed store in a production deployment.
