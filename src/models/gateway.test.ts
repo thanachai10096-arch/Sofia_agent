@@ -259,6 +259,7 @@ for (const protocol of ["openai-compatible", "anthropic-messages"] as const) {
         ? JSON.stringify({ content: [{ type: "text", text: "ok" }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } })
         : JSON.stringify({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
         { status: 200, headers: { "content-type": "application/json" } });
+    };
     try {
       const gateway = new SofiaModelGateway({ coding: {
         baseUrl: protocol === "anthropic-messages" ? "https://api.deepseek.com/anthropic" : "https://api.deepseek.com",
