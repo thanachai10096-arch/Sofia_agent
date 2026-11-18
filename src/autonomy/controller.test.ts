@@ -18,7 +18,8 @@ test("network research requires both policy layers", () => {
 });
 test("sandbox work fails closed without isolation", () => {
   assert.equal(evaluateAutonomyRequest("edit_sandbox").allowed, false);
-  assert.equal(evaluateAutonomyRequest("run_experiment", defaultAutonomyProfile, { sandboxAvailable: true }).allowed, true);
+  const budgeted = { sandboxAvailable: true, remainingCycles: 8, remainingSteps: 40, remainingToolCalls: 8, experimentSeconds: 300, estimatedSpendUsd: 1 };
+  assert.equal(evaluateAutonomyRequest("run_experiment", defaultAutonomyProfile, budgeted).allowed, true);
 });
 test("sandbox work respects cycle, step, tool, time and spend budgets", () => {
   const base = { sandboxAvailable: true, remainingCycles: 8, remainingSteps: 40, remainingToolCalls: 8, experimentSeconds: 300, estimatedSpendUsd: 1 };
