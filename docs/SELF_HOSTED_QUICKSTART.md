@@ -56,7 +56,7 @@ The health endpoint is a process/API liveness check; it does not prove that a mo
 
 ## Data persistence
 
-Compose mounts the named volume `sofia-agent-data` at `/data` and configures:
+Compose mounts a named volume at `/data` and configures. The default volume is `sofia-agent-data`; set `SOFIA_DOCKER_VOLUME` before running Compose when hosting multiple Sofia installations on the same Docker host so their data volumes remain isolated:
 
 - `SOFIA_WORKSPACE=/data/workspace`
 - `SOFIA_STATE_DIR=/data/state`
@@ -110,6 +110,16 @@ node scripts/sofia-migrate-state.mjs --apply
 The tool copies known legacy stores from the workspace `.sofia` directory, OS temporary directory, platform user-data directory, and (when supplied) a previous configured state root. To migrate from an older custom state root, set `SOFIA_LEGACY_STATE_DIR=/absolute/path/to/old-state` while keeping `SOFIA_STATE_DIR` pointed at the new destination. It verifies copied content with SHA-256, treats identical files as already migrated, refuses symlinks and conflicting destination files, and never deletes source data. It does not automatically discover arbitrary custom paths; migrate those manually and keep the old data until the new installation has been verified. Browser profile data configured through `SOFIA_BROWSER_PROFILE_DIR` remains outside the canonical state root by design and must be backed up/migrated separately if you need to preserve authenticated browser profiles.
 
 For a legacy Docker container, perform and verify migration while the old container and its writable filesystem still exist. Temporary files inside a removed container cannot be recovered by this tool.
+
+## Clean-host acceptance test
+
+After configuring `.env`, run the isolated Docker acceptance test:
+
+```bash
+bash scripts/sofia-self-hosted-smoke.sh
+```
+
+It builds a fresh image, starts an isolated Compose project with a disposable volume, waits for the health check, restarts the service, and verifies that a marker survives the restart. It removes only its own test project and volume. This does not replace an authenticated model-provider task test or a production backup/restore rehearsal.
 
 ## Backup and restore
 
