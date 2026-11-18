@@ -200,3 +200,28 @@ test("persisted learned skills with even a non-empty forged runId are quarantine
     assert.equal(restored.list("repair-skill")[0]?.evaluation?.checks[0]?.name, "startup-evidence-quarantine");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("persisted verified learned skills cannot be promoted from cached evaluation after restart", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "verified-learned.json");
+    const firstPlatform = new InMemorySkillsPlatform();
+    const first = new VersionedSkillLifecycle(firstPlatform, passing, { file });
+    const candidate = first.propose({ ...pkg("1.0.0"), source: "learned" }, {
+      source: "verified-brain-repair",
+      evidenceIds: ["e1", "e2", "e3"],
+      confidence: 0.95,
+      runId: "brain-run",
+      skillDigest: "a".repeat(64),
+    });
+    const verified = await first.evaluate(candidate.id);
+    assert.equal(verified.status, "verified");
+
+    const restored = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    const quarantined = restored.list("repair-skill").find((item) => item.id === candidate.id);
+    assert.equal(quarantined?.status, "rejected");
+    assert.equal(quarantined?.evaluation?.checks[0]?.name, "startup-evidence-quarantine");
+    assert.throws(() => restored.promote(candidate.id), /Only verified skill candidates can be promoted/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
