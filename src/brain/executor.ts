@@ -14,7 +14,7 @@ import { diagnosisFromFailure, failureEvidenceFromVerification, preferredStrateg
 import { compactSkillContext, matchSkills } from "./skills.js";
 import type { LearnedSkillCandidate, SkillLedger } from "./learning.js";
 import { compactProjectContext, type ProjectContext } from "./project-context.js";
-import { isSubagentToolAllowed, roleForTask, subagentToolCatalog, type SubagentRuntime, type SubagentResult } from "./subagents.js";
+import { isSubagentToolAllowed, roleForTask, subagentToolCatalog, validateSubagentResult, type SubagentRuntime, type SubagentResult } from "./subagents.js";
 import { ExecutionTrace, type ExecutionTraceEntry } from "./execution-trace.js";
 import type { BrainRunSnapshot } from "./run-state.js";
 import type { RepositoryMap } from "./repository-intelligence.js";
@@ -576,7 +576,7 @@ export class SofiaBrain {
 
     this.usage.modelCalls += 1;
     const role = roleForTask(task, failureCategory);
-    const result = await this.wait(() =>
+    const rawResult = await this.wait(() =>
       runtime.run({
         role,
         task,
@@ -585,9 +585,13 @@ export class SofiaBrain {
         signal: this.signal,
       }),
     );
+    const result = validateSubagentResult(rawResult, role);
+    if (!result) {
+      this.emit({ type: "brain.subagent.rejected" });
+      return undefined;
+    }
 
     this.emit({ type: "brain.subagent.completed" });
-
     return result;
   }
 
