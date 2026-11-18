@@ -4,6 +4,7 @@ import type { LearnedSkillCandidate } from "./learning.js";
 import { runSkillLifecycleWorkflow } from "./skill-lifecycle-workflow.js";
 import type { VersionedSkillLifecycle } from "./skill-lifecycle.js";
 import type { SkillPackage } from "../skills/platform.js";
+import { skillPackageDigest } from "./skill-evidence.js";
 
 /**
  * Connects verified Brain repair candidates to the persisted skill lifecycle.
@@ -37,6 +38,7 @@ export function createManagedSkillLearningHandler(
         evidenceIds: [...candidate.evidenceIds],
         confidence: 0.8,
         runId,
+        skillDigest: skillPackageDigest(skillPackage),
       },
       {
         approvePromotion: async (record) => {
