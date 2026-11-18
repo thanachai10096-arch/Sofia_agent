@@ -58,7 +58,7 @@ function validateJob(value: unknown): value is AutonomyJob {
   if (!value || typeof value !== "object") return false;
   const job = value as Partial<AutonomyJob>;
   return job.version === 1 && typeof job.id === "string" &&
-    typeof job.principalId === "string" && typeof job.kind === "string" &&
+    typeof job.principalId === "string" && job.principalId.length > 0 && job.kind === "research" &&
     ["queued", "running", "completed", "failed", "cancelled"].includes(String(job.status)) &&
     Number.isSafeInteger(job.attempts) && Number.isSafeInteger(job.maxAttempts) &&
     typeof job.createdAt === "string" && typeof job.updatedAt === "string" &&
