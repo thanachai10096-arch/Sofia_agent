@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { once } from "node:events";
@@ -106,4 +106,39 @@ test("remote runner refuses network mode without a confirmed egress firewall", (
     () => createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, allowNetwork: true }),
     /egress firewall/,
   );
+});
+
+test("remote runner refuses to return files through a symlinked parent directory", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-runner-symlink-test-"));
+  const sandbox: Sandbox = {
+    isolation: "container",
+    async run(_command, _args, limits) {
+      await rm(path.join(limits.workspaceRoot, "src"), { recursive: true, force: true });
+      await symlink("/etc", path.join(limits.workspaceRoot, "src"));
+      return { stdout: "", stderr: "", code: 0 };
+    },
+  };
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, tempRoot: path.join(root, "runs") });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const project = path.join(root, "project");
+  await import("node:fs/promises").then(({ mkdir }) => mkdir(path.join(project, "src"), { recursive: true }));
+  await writeFile(path.join(project, "src", "passwd"), "not a real password file");
+  try {
+    const client = new RemoteSandbox({ endpoint: "http://127.0.0.1:" + address.port, token: TOKEN });
+    await assert.rejects(
+      () => client.run("replace-tree", [], {
+        timeoutMs: 5_000,
+        maxOutputBytes: 8_192,
+        allowNetwork: false,
+        workspaceRoot: project,
+      }),
+      /HTTP 500/,
+    );
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
 });
