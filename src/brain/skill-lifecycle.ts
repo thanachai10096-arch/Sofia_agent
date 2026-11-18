@@ -5,6 +5,18 @@ import { randomUUID } from "node:crypto";
 import type { SkillPackage, SkillsPlatform } from "../skills/platform.js";
 import { redactSecrets } from "../security/guard.js";
 
+/**
+ * Flush directory metadata after an atomic rename where the platform supports
+ * opening and syncing directory handles. Windows does not provide a portable
+ * directory-fsync contract; file contents are still fsynced before rename.
+ */
+export function syncDirectoryMetadata(directory: string, platform: NodeJS.Platform = process.platform): void {
+  if (platform === "win32") return;
+  const directoryFd = openSync(directory, "r");
+  try { fsyncSync(directoryFd); }
+  finally { closeSync(directoryFd); }
+}
+
 export type SkillLifecycleStatus = "candidate" | "verified" | "rejected" | "active" | "superseded" | "rolled_back";
 export interface SkillEvaluationCheck { name: string; passed: boolean; detail?: string; }
 export interface SkillEvaluationResult { passed: boolean; checks: SkillEvaluationCheck[]; evaluatedAt?: string; }
@@ -644,9 +656,7 @@ export class VersionedSkillLifecycle {
       // directory-fsync error must not make this process believe the old file
       // is still on disk.
       this.persistedSnapshot = nextSnapshot;
-      const directoryFd = openSync(directory, "r");
-      try { fsyncSync(directoryFd); }
-      finally { closeSync(directoryFd); }
+      syncDirectoryMetadata(directory);
     } catch (error) {
       if (temporary) rmSync(temporary, { force: true });
       throw error;
