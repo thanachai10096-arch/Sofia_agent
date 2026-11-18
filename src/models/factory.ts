@@ -121,7 +121,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
 }
 
 export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
-  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const encryptedAudit=auditSecret?new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret):undefined; const audit=encryptedAudit?new CompositeSecurityAudit([memoryAudit,encryptedAudit]):memoryAudit; const evidenceVerifier=new AuditSkillEvidenceVerifier(async()=>[...memoryAudit.list(),...(encryptedAudit?await encryptedAudit.list():[])]);
+  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const encryptedAudit=auditSecret?new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret):undefined; const audit=encryptedAudit?new CompositeSecurityAudit([memoryAudit,encryptedAudit]):memoryAudit; const evidenceVerifier=new AuditSkillEvidenceVerifier(async()=>encryptedAudit ? encryptedAudit.list() : []);
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
   const tools=createToolRegistry(createBuiltinTools());
