@@ -124,3 +124,32 @@ test("expired former Telegram poll lease owner cannot renew or release its succe
   await successor.release();
   assert.equal(owner, undefined);
 });
+
+test("Redis Telegram poll lease can retry release after a transient Redis error", async () => {
+  let owner: string | undefined;
+  let releaseAttempts = 0;
+  const client = {
+    async set(_key: string, value: string) {
+      owner = value;
+      return "OK";
+    },
+    async eval(script: string, options: { keys: string[]; arguments: string[] }) {
+      if (script !== TELEGRAM_POLL_LEASE_RELEASE_SCRIPT) return 0;
+      releaseAttempts++;
+      if (releaseAttempts === 1) throw new Error("temporary Redis failure");
+      if (owner !== options.arguments[0]) return 0;
+      owner = undefined;
+      return 1;
+    },
+  };
+  const lease = new RedisTelegramPollLease({ client, botIdentity: "retry-release-bot", ttlMs: 15_000 });
+  const handle = await lease.acquire();
+  assert.ok(handle);
+  await assert.rejects(() => handle.release(), /temporary Redis failure/);
+  assert.notEqual(owner, undefined);
+  await handle.release();
+  assert.equal(releaseAttempts, 2);
+  assert.equal(owner, undefined);
+  await handle.release();
+  assert.equal(releaseAttempts, 2);
+});
