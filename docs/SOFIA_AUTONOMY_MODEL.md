@@ -122,3 +122,11 @@ create duplicate learning records. A cycle interrupted before its learning
 write may be recomputed; experiments must themselves be idempotent or use
 versioned, isolated artifacts before retrying. Checkpoints do not make an
 in-flight external side effect exactly-once.
+
+### Host-owned kill switch
+
+The job supervisor accepts an optional host-owned `isKilled(job)` authority and
+polls it while a job is running. A positive result or a failed kill-switch
+authority check aborts the runtime and cancels the job (fail-closed). The host
+must implement the callback against authoritative user, project and global
+kill-switch state. Model output and job payloads cannot set or disable it.
