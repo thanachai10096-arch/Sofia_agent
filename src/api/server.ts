@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
@@ -8,7 +9,7 @@ import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
-import type { RunRecord } from "./run-record-store.js";
+import { FileRunRecordStore, type RunRecord, type RunRecordStore } from "./run-record-store.js";
 import { CronScheduler, FileCronStore, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 
@@ -163,8 +164,29 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
-  const runStore = config.runStore;
+  const legacyRunStore = config.runStore;
+  const runStores = new Map<string, FileRunRecordStore>();
+  if (config.runStoreRoot !== undefined && !path.isAbsolute(config.runStoreRoot)) {
+    throw new Error("runStoreRoot must be an absolute path.");
+  }
+  if (config.runStoreRoot) {
+    for (const token of Object.keys(config.apiKeys)) {
+      const ownerKeyId = createHash("sha256").update(token).digest("hex").slice(0, 32);
+      const directoryKey = createHash("sha256").update("sofia-run-store:v1:").update(ownerKeyId).digest("hex");
+      runStores.set(ownerKeyId, new FileRunRecordStore(path.join(config.runStoreRoot, directoryKey)));
+    }
+  }
+  const runStoreForOwner = (ownerKeyId: string): RunRecordStore | undefined =>
+    runStores.get(ownerKeyId) ?? legacyRunStore;
+  const runStoreInitialization = (async () => {
+    if (!legacyRunStore) return;
+    for (const [ownerKeyId, store] of runStores) {
+      await store.migrateOwnerFrom(legacyRunStore, ownerKeyId);
+    }
+  })();
+  void runStoreInitialization.catch(() => undefined);
   const persist = (run: ActiveRun): Promise<void> => {
+    const runStore = runStoreForOwner(run.ownerKeyId);
     if (!runStore) return Promise.resolve();
     const record: RunRecord = {
       id: run.id, status: run.status,
@@ -176,12 +198,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     };
     return runStore.save(record);
   };
-  if (runStore) for (const record of runStore.loadAllSync()) {
+  const initialRunRecords = [
+    ...(legacyRunStore?.loadAllSync() ?? []),
+    ...[...runStores.values()].flatMap(store => store.loadAllSync()),
+  ];
+  for (const record of initialRunRecords) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
         !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string")) {
-      void runStore.remove(record.id); continue;
+      void runStoreForOwner(record.ownerKeyId)?.remove(record.id); continue;
     }
     const run: ActiveRun = {
       id: record.id, status: interrupted ? "failed" : record.status,
@@ -273,7 +299,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const prune = () => {
     const cutoff = Date.now() - retention;
     for (const [id, run] of runs) {
-      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
+      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); void runStoreForOwner(run.ownerKeyId)?.remove(id); }
     }
     for (const [key, entry] of idempotency) {
       if (!runs.has(entry.runId)) idempotency.delete(key);
@@ -313,6 +339,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
+      try { await runStoreInitialization; }
+      catch { return json(res, 503, { error: "run_store_initialization_failed" }, origin, config); }
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
@@ -455,7 +483,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         // whose in-memory map has not seen a run accepted by the previous one.
         // Rehydrate from the shared persistent store, and refresh newer records
         // so status polling follows updates written by the original process.
-        const stored = runStore?.loadForOwner?.(id, auth.keyId);
+        const stored = runStoreForOwner(auth.keyId)?.loadForOwner?.(id, auth.keyId);
         if (stored && (!run || stored.updatedAt > run.updatedAt)) {
           run = {
             id: stored.id,
