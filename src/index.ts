@@ -17,7 +17,7 @@ export { createTenantWorkspace } from "./platform/tenant-workspace.js";
 export { detectPlatform } from "./platform/runtime.js";
 export { SofiaModelGateway } from "./models/gateway.js";
 export { loadModelConfigFromEnv } from "./models/config.js";
-export { createSofiaAgentDependencies } from "./models/factory.js";
+export { createSofiaAgentDependencies, createSofiaAgentDependenciesForTenant } from "./models/factory.js";
 export { createToolRegistry } from "./tools/registry.js";
 export { createDesktopTools } from "./desktop/tools.js";
 export { createDesktopAdapterTools } from "./desktop/adapter.js";
