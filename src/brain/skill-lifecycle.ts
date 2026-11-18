@@ -170,6 +170,10 @@ export class VersionedSkillLifecycle {
   }
 
   promote(candidateId: string): SkillLifecycleRecord {
+    return this.withPlatformMutationLock(() => this.promoteWithLock(candidateId));
+  }
+
+  private promoteWithLock(candidateId: string): SkillLifecycleRecord {
     const candidate = this.requireRecord(candidateId);
     if (candidate.status !== "verified" || candidate.evaluation?.passed !== true) throw new Error("Only successfully evaluated candidates can be promoted");
     if (candidate.provenance.confidence < this.minimumConfidence) throw new Error("Skill candidate confidence is below the promotion threshold");
@@ -206,6 +210,10 @@ export class VersionedSkillLifecycle {
   }
 
   rollback(skillId: string): SkillLifecycleRecord {
+    return this.withPlatformMutationLock(() => this.rollbackWithLock(skillId));
+  }
+
+  private rollbackWithLock(skillId: string): SkillLifecycleRecord {
     const activeId = this.snapshot.activeBySkill[skillId];
     if (!activeId) throw new Error("No managed active skill to roll back: " + skillId);
     const active = this.requireRecord(activeId);
@@ -249,6 +257,33 @@ export class VersionedSkillLifecycle {
   active(skillId: string): SkillLifecycleRecord | undefined {
     const id = this.snapshot.activeBySkill[skillId];
     return id ? this.get(id) : undefined;
+  }
+
+  private withPlatformMutationLock<T>(operation: () => T): T {
+    const directory = path.dirname(this.file);
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const lockFile = this.file + ".mutation.lock";
+    let lockFd: number | undefined;
+    try {
+      // Serialize external platform side effects across processes. The
+      // snapshot comparison must happen while holding this lock, before
+      // register/remove can mutate the shared platform.
+      lockFd = openSync(lockFile, "wx", 0o600);
+      if (existsSync(this.file)) {
+        if (lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
+        const current = JSON.parse(readFileSync(this.file, "utf8")) as unknown;
+        const currentSnapshot = JSON.stringify(current, null, 2) + "\\n";
+        if (this.persistedSnapshot === null || currentSnapshot !== this.persistedSnapshot) {
+          throw new Error("Skill lifecycle store changed in another process; reload before platform mutation");
+        }
+      } else if (this.persistedSnapshot !== null) {
+        throw new Error("Skill lifecycle store was removed in another process; reload before platform mutation");
+      }
+      return operation();
+    } finally {
+      if (lockFd !== undefined) closeSync(lockFd);
+      if (lockFd !== undefined) rmSync(lockFile, { force: true });
+    }
   }
 
   private requireRecord(id: string): SkillLifecycleRecord {
