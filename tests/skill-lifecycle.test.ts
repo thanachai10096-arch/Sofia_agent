@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { VersionedSkillLifecycle } from "../src/brain/skill-lifecycle.js";
@@ -412,8 +412,13 @@ test("lifecycle instances loaded from the same existing revision cannot lose a l
       }),
       /Skill lifecycle store changed in another process; reload before writing/,
     );
+    assert.equal(existsSync(file + ".lock"), false, "compare-and-swap conflict must release its lock");
     const reloaded = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
     assert.deepEqual(reloaded.list().map((record) => record.package.version), ["0.9.0", "1.0.0"]);
+    reloaded.propose({ ...pkg("2.0.0"), source: "custom" }, {
+      source: "writer-c-after-reload", evidenceIds: ["writer-c-evidence"], confidence: 0.9,
+    });
+    assert.equal(new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }).list().length, 3);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
