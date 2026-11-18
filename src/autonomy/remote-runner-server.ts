@@ -200,7 +200,7 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
       json(response, 404, { error: "not_found" });
       return;
     }
-    const authorization = request.headers.authorization ?? "";
+    const authorizationHeader = request.headers.authorization;\n    const authorization = typeof authorizationHeader === "string" ? authorizationHeader : "";
     if (!authorization.startsWith("Bearer ") || !safeEqual(authorization.slice(7), options.token)) {
       json(response, 401, { error: "unauthorized" });
       return;
