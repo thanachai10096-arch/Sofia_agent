@@ -217,6 +217,48 @@ test("approval cannot mutate the action that the gateway executes", async () => 
   assert.equal(executedInput?.content, "approved content");
 });
 
+test("approved actions are audited with the exact action hash before execution", async () => {
+  let executions = 0;
+  const events: SecurityAuditEvent[] = [];
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Approved write action",
+    inputSchema: { type: "object" },
+    effects: ["write"] as const,
+    async execute() { executions += 1; return { committed: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, capabilitySecret: "approval-approved-audit-test-secret" },
+    async (request) => {
+      assert.equal(request.principalId, "principal-approval-audit");
+      assert.match(request.actionHash, /^[a-f0-9]{64}$/);
+      return true;
+    },
+    undefined,
+    undefined,
+    { record(event) { events.push(event); } },
+  );
+  const result = await gateway.execute(
+    { tool: "custom.write", input: { value: "approved" } },
+    {
+      runId: "approval-approved-audit",
+      principalId: "principal-approval-audit",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(executions, 1);
+  const approved = events.find((event) => event.decision === "approval_approved");
+  const completed = events.find((event) => event.decision === "completed");
+  assert.ok(approved);
+  assert.ok(completed);
+  assert.equal(approved.actionHash, completed.actionHash);
+  assert.equal(approved.principalId, completed.principalId);
+});
+
 test("tool catalog exposes only registered tools with accurate desktop effects", () => {
   const desktopTools = [
     {
