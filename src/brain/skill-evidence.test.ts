@@ -174,3 +174,14 @@ test("trusted evidence verifier rejects an attestation for a different digest", 
   assert.equal(checks[0]?.name, "skill-artifact-attestation");
   assert.equal(checks[0]?.passed, false);
 });
+
+
+test("trusted evidence verifier rejects an attestation with a forged action hash", async () => {
+  const verifier = new AuditSkillEvidenceVerifier(async () => [
+    ...["typecheck", "test", "build"].map((kind) => event(kind)),
+    attestation({ actionHash: "f".repeat(64) }),
+  ]);
+  const checks = await verifier.verify(skill, provenance);
+  assert.equal(checks[0]?.name, "skill-artifact-attestation");
+  assert.equal(checks[0]?.passed, false);
+});
