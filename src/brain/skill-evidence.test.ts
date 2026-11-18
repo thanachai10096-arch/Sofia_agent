@@ -40,9 +40,25 @@ const provenance = {
   confidence: 0.8,
   skillDigest: skillPackageDigest(skill),
 };
+function attestation(overrides: Partial<SecurityAuditEvent> = {}): SecurityAuditEvent {
+  const toolName = "skill.candidate.attest";
+  const input = { skillId: skill.skill.id, skillDigest: provenance.skillDigest, evidenceIds: [...provenance.evidenceIds] };
+  return {
+    id: "skill-attestation-1",
+    at: new Date(0).toISOString(),
+    runId,
+    toolName,
+    actionHash: "attestation-action-hash",
+    risk: "low",
+    decision: "completed",
+    input,
+    result: { passed: true, skillDigest: provenance.skillDigest },
+    ...overrides,
+  };
+}
 
 test("trusted evidence verifier accepts successful audit records from the same Brain run", async () => {
-  const records = ["typecheck", "test", "build"].map((kind) => event(kind));
+  const records = [...["typecheck", "test", "build"].map((kind) => event(kind)), attestation()];
   const verifier = new AuditSkillEvidenceVerifier(async () => records);
   const checks = await verifier.verify(skill, provenance);
   assert.equal(checks.every((check) => check.passed), true);
@@ -53,6 +69,7 @@ test("trusted evidence verifier rejects forged, failed, and cross-run evidence",
     event("typecheck"),
     event("test", { runId: "different-run" }),
     event("build", { result: { kind: "build", code: 1, passed: false } }),
+    attestation(),
   ];
   const verifier = new AuditSkillEvidenceVerifier(async () => records);
   const checks = await verifier.verify(skill, provenance);
@@ -82,6 +99,7 @@ test("trusted evidence verifier rejects a result whose verification kind differs
     event("typecheck"),
     event("test"),
     event("build", { result: { kind: "test", code: 0, passed: true } }),
+    attestation(),
   ];
   const verifier = new AuditSkillEvidenceVerifier(async () => records);
   const checks = await verifier.verify(skill, provenance);
@@ -96,6 +114,7 @@ test("trusted evidence verifier rejects conflicting audit records that reuse an 
     event("test"),
     event("build"),
     event("typecheck", { result: { kind: "typecheck", code: 1, passed: false } }),
+    attestation(),
   ];
   const verifier = new AuditSkillEvidenceVerifier(async () => records);
   const checks = await verifier.verify(skill, provenance);
@@ -104,7 +123,7 @@ test("trusted evidence verifier rejects conflicting audit records that reuse an 
 });
 
 test("trusted evidence verifier rejects surplus evidence IDs instead of silently ignoring them", async () => {
-  const verifier = new AuditSkillEvidenceVerifier(async () => ["typecheck", "test", "build"].map((kind) => event(kind)));
+  const verifier = new AuditSkillEvidenceVerifier(async () => [...["typecheck", "test", "build"].map((kind) => event(kind)), attestation()]);
   const checks = await verifier.verify(skill, {
     ...provenance,
     evidenceIds: [...provenance.evidenceIds, "unused-extra-evidence"],
@@ -116,7 +135,7 @@ test("trusted evidence verifier rejects surplus evidence IDs instead of silently
 
 
 test("trusted evidence verifier rejects a changed Skill artifact digest", async () => {
-  const records = ["typecheck", "test", "build"].map((kind) => event(kind));
+  const records = [...["typecheck", "test", "build"].map((kind) => event(kind)), attestation()];
   const verifier = new AuditSkillEvidenceVerifier(async () => records);
   const changedSkill: SkillPackage = {
     ...skill,
@@ -138,4 +157,19 @@ test("skill package digest is stable for object key order and changes with artif
     skillPackageDigest({ ...skill, version: "1.0.1" }),
     skillPackageDigest(skill),
   );
+});
+
+
+test("trusted evidence verifier rejects an attestation for a different digest", async () => {
+  const wrong = attestation({
+    input: { skillId: skill.skill.id, skillDigest: "0".repeat(64), evidenceIds: [...provenance.evidenceIds] },
+    result: { passed: true, skillDigest: "0".repeat(64) },
+  });
+  const verifier = new AuditSkillEvidenceVerifier(async () => [
+    ...["typecheck", "test", "build"].map((kind) => event(kind)),
+    wrong,
+  ]);
+  const checks = await verifier.verify(skill, provenance);
+  assert.equal(checks[0]?.name, "skill-artifact-attestation");
+  assert.equal(checks[0]?.passed, false);
 });
