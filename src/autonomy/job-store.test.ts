@@ -68,3 +68,20 @@ test("retryable failures requeue only while attempts remain; cancellation is ter
     assert.equal(await store.cancel("user-a", another.id).then((x) => x.status), "cancelled");
   });
 });
+
+test("checkpoint survives worker interruption and remains principal-scoped", async () => {
+  await fixture(async (store) => {
+    const job = await store.enqueue({ principalId: "user-a", kind: "research", payload: {} });
+    await store.claimNext("worker-1", 10_000);
+    const checkpoint = { nextCycle: 2, cycles: [{ cycle: 1, status: "learned" }] };
+    await store.saveCheckpoint("user-a", job.id, "worker-1", checkpoint);
+    const persisted = await store.get("user-a", job.id);
+    assert.deepEqual(persisted?.checkpoint?.cycles, checkpoint.cycles);
+    assert.equal(persisted?.checkpoint?.nextCycle, 2);
+    assert.equal(await store.get("user-b", job.id), undefined);
+    await store.recoverExpired(new Date(Date.now() + 20_000));
+    const resumed = await store.claimNext("worker-2", 10_000);
+    assert.deepEqual(resumed?.checkpoint?.cycles, checkpoint.cycles);
+    assert.equal(resumed?.checkpoint?.nextCycle, 2);
+  });
+});
