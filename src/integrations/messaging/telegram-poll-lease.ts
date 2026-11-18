@@ -6,6 +6,8 @@ export interface TelegramPollLeaseRedisClient {
 }
 
 export interface TelegramPollLeaseHandle {
+  /** Lease expiry window, used to bound renewal cadence and deadlines. */
+  readonly ttlMs: number;
   renew(): Promise<boolean>;
   release(): Promise<void>;
 }
@@ -64,6 +66,7 @@ export class RedisTelegramPollLease implements TelegramPollLease {
     if (claimed !== "OK") return undefined;
     let released = false;
     return {
+      ttlMs: this.ttlMs,
       renew: async () => {
         if (released) return false;
         const result = await this.client.eval(TELEGRAM_POLL_LEASE_RENEW_SCRIPT, {
