@@ -430,7 +430,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         // whose in-memory map has not seen a run accepted by the previous one.
         // Rehydrate from the shared persistent store, and refresh newer records
         // so status polling follows updates written by the original process.
-        const stored = runStore?.load?.(id);
+        const stored = runStore?.loadForOwner?.(id, auth.keyId);
         if (stored && (!run || stored.updatedAt > run.updatedAt)) {
           run = {
             id: stored.id,
