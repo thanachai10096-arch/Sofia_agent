@@ -251,3 +251,36 @@ test("persisted verified learned skills cannot be promoted from cached evaluatio
     assert.throws(() => restored.promote(candidate.id), /Only successfully evaluated candidates can be promoted/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("restart quarantines superseded learned skills so rollback cannot reactivate them", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "superseded-learned.json");
+    const firstPlatform = new InMemorySkillsPlatform();
+    const first = new VersionedSkillLifecycle(firstPlatform, passing, { file });
+    const learned = first.propose(pkg("1.0.0"), {
+      source: "verified-brain-repair",
+      evidenceIds: ["learned-evidence"],
+      confidence: 0.95,
+      runId: "brain-run",
+      skillDigest: "b".repeat(64),
+    });
+    await first.evaluate(learned.id);
+    first.promote(learned.id);
+
+    const replacement = first.propose({ ...pkg("2.0.0"), source: "custom" }, {
+      source: "manual", evidenceIds: ["manual-evidence"], confidence: 0.95,
+    });
+    await first.evaluate(replacement.id);
+    first.promote(replacement.id);
+    assert.equal(first.get(learned.id)?.status, "superseded");
+
+    const restoredPlatform = new InMemorySkillsPlatform();
+    const restored = new VersionedSkillLifecycle(restoredPlatform, passing, { file });
+    assert.equal(restored.get(learned.id)?.status, "rejected");
+    assert.equal(restoredPlatform.get("repair-skill")?.version, "2.0.0");
+    assert.throws(() => restored.rollback("repair-skill"), /No previous version is available/);
+    assert.equal(restoredPlatform.get("repair-skill")?.version, "2.0.0");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
