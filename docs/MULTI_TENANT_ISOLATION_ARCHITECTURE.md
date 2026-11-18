@@ -16,7 +16,8 @@ The following observations were verified against the current `main` implementati
 
 | Component | Current implementation | Isolation consequence |
 |---|---|---|
-| API authentication | `src/api/server.ts` hashes the bearer token into `keyId` and attaches configured scopes | Distinct API keys receive distinct opaque principals; this does not itself partition runtime resources |\n| API transcripts | `createSofiaAgentDependenciesWithOwnerSessions` opens `.sofia/sessions/<keyId>.sqlite` for the single-key API entrypoint and migrates only `<keyId>:` records from the legacy shared SQLite database | Physical per-owner database files for the entrypoint; direct multi-key `createSofiaApi` hosts must still inject a correctly routed per-owner session store |
+| API authentication | `src/api/server.ts` hashes the bearer token into `keyId` and attaches configured scopes | Distinct API keys receive distinct opaque principals; this does not itself partition runtime resources |
+| API transcripts | `createSofiaAgentDependenciesWithOwnerSessions` opens `.sofia/sessions/<keyId>.sqlite` for the single-key API entrypoint and migrates only `<keyId>:` records from the legacy shared SQLite database | Physical per-owner database files for the entrypoint; direct multi-key `createSofiaApi` hosts must still inject a correctly routed per-owner session store |
 | User memory | `FileUserMemoryStore` receives `auth.keyId` for API CRUD and hashes the user ID for its filename | API user-memory files are principal-scoped; this does not isolate project memory |
 | Project memory | `createBrainFactory` constructs one `FileProjectMemoryStore(workspace)`; store hashes only the project namespace | Runs using the same workspace share project memory and the persistent skill ledger |
 | Brain run snapshots | One `FileRunStore(workspace)` is captured by the Brain factory | Brain snapshots are namespaced by workspace, not by authenticated principal |
