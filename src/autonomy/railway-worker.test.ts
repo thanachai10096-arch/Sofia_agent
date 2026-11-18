@@ -52,3 +52,22 @@ test("Railway worker fails closed when trusted host dependencies are incomplete"
     );
   });
 });
+
+
+test("Railway worker validates the injected PostgreSQL pool before starting", async () => {
+  await withEnv({
+    SOFIA_AUTONOMY_WORKER_ENABLED: "true",
+    DATABASE_URL: "postgres://configured",
+  }, async () => {
+    await assert.rejects(
+      runRailwayAutonomyWorker({
+        pool: { query: async () => { throw new Error("database unavailable"); }, connect: async () => { throw new Error("unused"); } },
+        resolveAdapters: async () => { throw new Error("unused"); },
+        sandboxAvailable: async () => false,
+        budgetContext: () => ({}),
+        isKilled: async () => false,
+      }, new AbortController().signal),
+      /database unavailable/,
+    );
+  });
+});
