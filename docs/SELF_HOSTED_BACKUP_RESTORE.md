@@ -37,3 +37,22 @@ before restoring if rollback may be needed.
 - Test restore on a disposable host before relying on a backup for production.
 - These scripts have not yet passed clean-host acceptance testing; the self-hosted
   pull request remains a draft until CI and restore drills pass.
+
+
+## Upgrade and image rollback
+
+Run an upgrade from the repository root:
+
+```bash
+bash scripts/sofia-upgrade.sh
+```
+
+The command validates Compose configuration, preserves the current image under a timestamped local rollback tag, creates a consistent pre-upgrade volume backup, rebuilds and recreates the service, and waits for Docker health status. It writes a private manifest in `backups/` when a previous image exists. If the new container fails its health check, it attempts to restore the previous image automatically.
+
+To manually restore the image recorded in a manifest:
+
+```bash
+bash scripts/sofia-rollback.sh backups/upgrade-<timestamp>.json --yes
+```
+
+Rollback verifies that the local rollback image ID matches the manifest before changing the service. It restores the image only; it never restores or modifies the data volume. Keep the pre-upgrade volume archive separately. This is not a database schema downgrade mechanism, and incompatible irreversible migrations remain unsupported. Retain the rollback image tag and manifest for the entire rollback window. A first install has no prior image to roll back to.
