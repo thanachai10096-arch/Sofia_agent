@@ -532,6 +532,49 @@ test("corrupt skill lifecycle JSON fails closed without rewriting the damaged st
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("startup restoration compensates earlier registrations when a later registration fails", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "partial-startup-restore.json");
+    const seedPlatform = new InMemorySkillsPlatform();
+    const seed = new VersionedSkillLifecycle(seedPlatform, passing, { file });
+    const first = seed.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "startup-first", evidenceIds: ["startup-first"], confidence: 0.95,
+    });
+    await seed.evaluate(first.id);
+    seed.promote(first.id);
+    const secondPackage = {
+      ...pkg("2.0.0"),
+      source: "custom" as const,
+      skill: { ...pkg("2.0.0").skill, id: "second-skill", name: "Second skill" },
+    };
+    const second = seed.propose(secondPackage, {
+      source: "startup-second", evidenceIds: ["startup-second"], confidence: 0.95,
+    });
+    await seed.evaluate(second.id);
+    seed.promote(second.id);
+
+    const restoredPlatform = new InMemorySkillsPlatform();
+    let registrations = 0;
+    const failingPlatform = {
+      get: (id: string) => restoredPlatform.get(id),
+      list: (source?: "builtin" | "learned" | "project" | "custom" | "marketplace") => restoredPlatform.list(source),
+      remove: (id: string) => restoredPlatform.remove(id),
+      register: (skill: SkillPackage) => {
+        registrations += 1;
+        if (registrations === 2) throw new Error("simulated second registration failure");
+        restoredPlatform.register(skill);
+      },
+    };
+    assert.throws(
+      () => new VersionedSkillLifecycle(failingPlatform, passing, { file }),
+      /simulated second registration failure/,
+    );
+    assert.equal(restoredPlatform.get("repair-skill"), undefined, "first registration must be compensated");
+    assert.equal(restoredPlatform.get("second-skill"), undefined, "failed registration must not leave a partial restore");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("startup restoration refuses to mutate the platform while another lifecycle process holds the mutation lock", async () => {
   const root = dir();
   try {
