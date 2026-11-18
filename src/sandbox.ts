@@ -463,6 +463,14 @@ export class RemoteSandbox implements Sandbox {
     const timer = setTimeout(() => controller.abort(), timeoutMs + 10_000);
     timer.unref?.();
     let response: Response;
+    let result: {
+      protocolVersion?: number;
+      requestId?: string;
+      stdout?: unknown;
+      stderr?: unknown;
+      code?: unknown;
+      files?: unknown;
+    };
     try {
       response = await this.fetcher(this.endpoint + "/v1/sandbox/execute", {
         method: "POST",
@@ -474,41 +482,45 @@ export class RemoteSandbox implements Sandbox {
         body: JSON.stringify(payload),
         signal: controller.signal,
       });
+      if (!response.ok) throw new Error("Remote sandbox runner rejected the request (HTTP " + response.status + ").");
+      const responseLimit = Math.min(Number.MAX_SAFE_INTEGER, this.maxSnapshotBytes * 2 + maxOutputBytes * 4 + 1_048_576);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Remote sandbox runner returned an empty response body.");
+      const responseChunks: Uint8Array[] = [];
+      let responseBytes = 0;
+      try {
+        while (true) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          responseBytes += chunk.value.byteLength;
+          if (responseBytes > responseLimit) {
+            await reader.cancel().catch(() => undefined);
+            throw new Error("Remote sandbox response exceeded the configured byte limit.");
+          }
+          responseChunks.push(chunk.value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+      const responseText = new TextDecoder().decode(Buffer.concat(responseChunks.map((chunk) => Buffer.from(chunk))));
+      result = JSON.parse(responseText) as {
+        protocolVersion?: number;
+        requestId?: string;
+        stdout?: unknown;
+        stderr?: unknown;
+        code?: unknown;
+        files?: unknown;
+      };
     } catch (error) {
-      throw new Error(controller.signal.aborted ? "Remote sandbox request was aborted or timed out." : "Remote sandbox runner is unreachable.", { cause: error });
+      if (controller.signal.aborted) {
+        throw new Error("Remote sandbox request was aborted or timed out.", { cause: error });
+      }
+      if (error instanceof Error && error.message.startsWith("Remote sandbox")) throw error;
+      throw new Error("Remote sandbox runner is unreachable or returned invalid JSON.", { cause: error });
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
     }
-    if (!response.ok) throw new Error("Remote sandbox runner rejected the request (HTTP " + response.status + ").");
-    const responseLimit = Math.min(Number.MAX_SAFE_INTEGER, this.maxSnapshotBytes * 2 + maxOutputBytes * 4 + 1_048_576);
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error("Remote sandbox runner returned an empty response body.");
-    const responseChunks: Uint8Array[] = [];
-    let responseBytes = 0;
-    try {
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        responseBytes += chunk.value.byteLength;
-        if (responseBytes > responseLimit) {
-          await reader.cancel().catch(() => undefined);
-          throw new Error("Remote sandbox response exceeded the configured byte limit.");
-        }
-        responseChunks.push(chunk.value);
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    const responseText = new TextDecoder().decode(Buffer.concat(responseChunks.map((chunk) => Buffer.from(chunk))));
-    const result = JSON.parse(responseText) as {
-      protocolVersion?: number;
-      requestId?: string;
-      stdout?: unknown;
-      stderr?: unknown;
-      code?: unknown;
-      files?: unknown;
-    };
     if (result.protocolVersion !== 1 || result.requestId !== requestId ||
         typeof result.stdout !== "string" || typeof result.stderr !== "string" ||
         !Number.isInteger(result.code) || (result.code as number) < 0 ||
