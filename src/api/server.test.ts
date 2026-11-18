@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
+import path from "node:path";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -247,5 +248,56 @@ test("API cron schedules persist in separate owner files and remain invisible ac
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(cronStoreRoot, { recursive: true, force: true });
+  }
+});
+
+
+test("API run records are physically partitioned by authenticated API key", async () => {
+  const runStoreRoot = await mkdtemp(path.join(tmpdir(), "sofia-api-run-tenant-test-"));
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {
+      "run-owner-one": ["agent:run", "agent:read"],
+      "run-owner-two": ["agent:run", "agent:read"],
+    },
+    runStoreRoot,
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const start = async (key: string) => {
+    const response = await fetch(baseUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer " + key, "content-type": "application/json" },
+      body: JSON.stringify({ task: "tenant run record isolation", async: true }),
+    });
+    assert.equal(response.status, 202);
+    return (await response.json() as { id: string }).id;
+  };
+  try {
+    const [firstRunId, secondRunId] = await Promise.all([
+      start("run-owner-one"),
+      start("run-owner-two"),
+    ]);
+    const ownerOneId = createHash("sha256").update("run-owner-one").digest("hex").slice(0, 32);
+    const ownerTwoId = createHash("sha256").update("run-owner-two").digest("hex").slice(0, 32);
+    const directoryOne = createHash("sha256").update("sofia-run-store:v1:").update(ownerOneId).digest("hex");
+    const directoryTwo = createHash("sha256").update("sofia-run-store:v1:").update(ownerTwoId).digest("hex");
+    assert.notEqual(directoryOne, directoryTwo);
+    assert.deepEqual(await readdir(path.join(runStoreRoot, directoryOne)), [firstRunId + ".json"]);
+    assert.deepEqual(await readdir(path.join(runStoreRoot, directoryTwo)), [secondRunId + ".json"]);
+
+    const foreignRead = await fetch(baseUrl + "/v1/agent/runs/" + firstRunId, {
+      headers: { authorization: "Bearer run-owner-two" },
+    });
+    assert.equal(foreignRead.status, 404);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(runStoreRoot, { recursive: true, force: true });
   }
 });
