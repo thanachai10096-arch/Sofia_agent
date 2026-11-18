@@ -66,6 +66,32 @@ test("skill lifecycle preserves prior version and can roll back", async () => {
 });
 
 
+test("skill lifecycle refuses rollback to a learned skill without fresh durable evidence", async () => {
+  const root = dir();
+  try {
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file: path.join(root, "lifecycle.json") });
+    const learned = lifecycle.propose(pkg("1.0.0"), { source: "repair", evidenceIds: ["learned-1"], confidence: 0.9 });
+    await lifecycle.evaluate(learned.id);
+    lifecycle.promote(learned.id);
+
+    const managed = lifecycle.propose({ ...pkg("2.0.0"), source: "custom" }, {
+      source: "repair", evidenceIds: ["custom-2"], confidence: 0.9,
+    });
+    await lifecycle.evaluate(managed.id);
+    lifecycle.promote(managed.id);
+
+    assert.equal(platform.get("repair-skill")?.version, "2.0.0");
+    assert.throws(
+      () => lifecycle.rollback("repair-skill"),
+      /Cannot roll back to a learned skill without fresh durable-evidence verification/,
+    );
+    assert.equal(platform.get("repair-skill")?.version, "2.0.0");
+    assert.equal(lifecycle.active("repair-skill")?.id, managed.id);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
 test("skill lifecycle refuses to overwrite an unmanaged platform skill", async () => {
   const root = dir();
   try {
