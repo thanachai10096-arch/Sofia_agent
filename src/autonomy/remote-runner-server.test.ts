@@ -172,3 +172,47 @@ test("remote runner readiness reflects Docker daemon and preloaded image health"
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("remote runner rejects unknown protocol fields and bounds HTTP connection lifetimes", async () => {
+  const sandbox: Sandbox = {
+    isolation: "container",
+    async run() { throw new Error("must not execute"); },
+  };
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox });
+  assert.equal(server.headersTimeout, 30_000);
+  assert.equal(server.requestTimeout, 300_000);
+  assert.equal(server.keepAliveTimeout, 5_000);
+  assert.equal(server.maxHeadersCount, 32);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const requestId = "123e4567-e89b-42d3-a456-426614174000";
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/sandbox/execute", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + TOKEN,
+        "content-type": "application/json",
+        "x-sofia-request-id": requestId,
+      },
+      body: JSON.stringify({
+        protocolVersion: 1,
+        requestId,
+        workspaceDigest: "a".repeat(64),
+        command: "true",
+        args: [],
+        cwd: ".",
+        timeoutMs: 1000,
+        maxOutputBytes: 1024,
+        allowNetwork: false,
+        files: [],
+        unexpectedPrivilege: true,
+      }),
+    });
+    assert.equal(response.status, 400);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
