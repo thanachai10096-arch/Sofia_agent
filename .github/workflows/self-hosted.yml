@@ -67,6 +67,7 @@ jobs:
           bash -n scripts/sofia-upgrade.sh
           bash -n scripts/sofia-rollback.sh
           bash -n scripts/sofia-lifecycle.sh
+          bash -n scripts/sofia-self-hosted-smoke.sh
       - name: Test state migration safety
         run: node --test scripts/sofia-migrate-state.test.mjs
 
@@ -77,3 +78,6 @@ jobs:
 
       - name: Build production image
         run: docker build --tag sofia-agent:self-hosted-ci .
+
+      - name: Clean-volume container acceptance test
+        run: bash scripts/sofia-self-hosted-smoke.sh
