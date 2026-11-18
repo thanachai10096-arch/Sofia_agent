@@ -57,6 +57,23 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
         sandboxAvailable,
         budgetContext: () => this.options.budgetContext(job),
         ...(this.options.maxCycles !== undefined ? { maxCycles: this.options.maxCycles } : {}),
+        ...(job.checkpoint ? {
+          startCycle: job.checkpoint.nextCycle,
+          previousCycles: job.checkpoint.cycles as ResearchLoopReport["cycles"],
+        } : {}),
+        onCycle: async (cycle, nextCycle) => {
+          const previous = job.checkpoint?.cycles ?? [];
+          await this.options.store.saveCheckpoint(job.principalId, job.id, workerId, {
+            nextCycle,
+            cycles: [...previous, cycle],
+          });
+          if (job.checkpoint) {
+            job.checkpoint.nextCycle = nextCycle;
+            job.checkpoint.cycles = [...previous, cycle];
+          } else {
+            job.checkpoint = { nextCycle, cycles: [cycle], updatedAt: new Date().toISOString() };
+          }
+        },
       });
       if (controller.signal.aborted || report.stoppedBy === "aborted") {
         return await this.options.store.cancel(job.principalId, job.id);
