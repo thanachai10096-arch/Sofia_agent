@@ -119,3 +119,21 @@ test("SQLite approval database and sidecars are private on POSIX", { skip: proce
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("SQLite store caps pending approvals atomically per principal", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-quota-"));
+  const file = path.join(dir, "approvals.sqlite");
+  const first = await SqliteApprovalDecisionStore.open(file);
+  const second = await SqliteApprovalDecisionStore.open(file);
+  try {
+    for (let index = 0; index < 50; index += 1) await first.create(record({ id: "quota-" + index }));
+    await assert.rejects(second.create(record({ id: "quota-overflow" })), /Too many pending approval requests/);
+    assert.equal((await second.listPending("principal-1")).length, 50);
+    await second.resolve("quota-0", "a".repeat(64), "denied", "principal-1", Date.now());
+    await first.create(record({ id: "quota-after-decision" }));
+    assert.equal((await second.listPending("principal-1")).length, 50);
+  } finally {
+    first.close(); second.close(); fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
