@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTelegramHttpTransport } from "./telegram-http-transport.js";
+import { createTelegramMessagingRuntime } from "./telegram-runtime.js";
 
 const token = "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi";
 const ok = (result: unknown) => new Response(JSON.stringify({ ok: true, result }), { status: 200 });
@@ -17,7 +18,7 @@ test("Telegram transport does not poll when distributed lease is unavailable", a
     },
     onError(event) { events.push(event); },
   });
-  await transport.start(new AbortController().signal, async () => {});
+  await assert.rejects(() => transport.start(new AbortController().signal, async () => {}), /refusing to poll without ownership/);
   assert.deepEqual(calls, []);
   assert.deepEqual(events, ["poll_lease_unavailable"]);
   await transport.stop();
@@ -56,4 +57,34 @@ test("Telegram transport releases its distributed lease after polling stops", as
   await transport.stop();
   assert.equal(released, 1);
   assert.deepEqual(events, []);
+});
+
+test("Railway Telegram runtime fails closed without shared Redis lease credentials", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: token,
+    TELEGRAM_ALLOWED_USER_IDS: "12345",
+    TELEGRAM_ALLOWED_CHAT_IDS: "12345",
+    SOFIA_API_KEY: "api-key",
+    SOFIA_API_BASE_URL: "https://sofia.example.test",
+    RAILWAY_ENVIRONMENT: "production",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /shared Redis poll lease is required/);
+});
+
+test("local Telegram runtime remains opt-in compatible when a lease is not required", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: token,
+    TELEGRAM_ALLOWED_USER_IDS: "12345",
+    TELEGRAM_ALLOWED_CHAT_IDS: "12345",
+    SOFIA_API_KEY: "api-key",
+    SOFIA_API_BASE_URL: "https://sofia.example.test",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.ok(runtime);
+  assert.deepEqual(warnings, []);
 });
