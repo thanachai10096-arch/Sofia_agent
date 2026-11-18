@@ -141,7 +141,11 @@ export class SqliteApprovalDecisionStore implements ApprovalDecisionStore {
       UPDATE approval_requests
       SET status = ?, resolved_at = ?, resolved_by = ?
       WHERE id = ? AND status = 'pending' AND action_hash = ? AND expires_at > ?
-    `).run(decision, now, resolvedBy, id, actionHash, now);
+        AND (
+          (? IN ('approved', 'denied') AND resolved_by = principal_id)
+          OR (? = 'cancelled' AND ? = 'system:abort')
+        )
+    `).run(decision, now, resolvedBy, id, actionHash, now, decision, decision, resolvedBy);
     restrictSqlitePermissions(this.filePath);
     return Number(result.changes) === 1;
   }
