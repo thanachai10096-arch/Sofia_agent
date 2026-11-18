@@ -33,6 +33,7 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
+import { mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
@@ -63,16 +64,25 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(sofiaStateDirectory("skills"), "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
-  return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
+  return async ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
     const principalNamespace = createHash("sha256")
       .update(principalId?.trim() || "local-instance")
       .digest("hex");
+    // Each authenticated principal gets a distinct filesystem root. Never mount
+    // the shared installation workspace into a user's tool runtime.
+    const workspaceRoot = path.resolve(
+      process.env.SOFIA_USER_WORKSPACES_DIR?.trim() || sofiaStateDirectory("user-workspaces"),
+    );
+    if (!path.isAbsolute(workspaceRoot)) throw new Error("SOFIA_USER_WORKSPACES_DIR must be absolute.");
+    const principalWorkspace = path.join(workspaceRoot, principalNamespace);
+    await mkdir(principalWorkspace, { recursive: true, mode: 0o700 });
+    const principalRuntime = createNodeWorkspaceRuntime(principalWorkspace);
     const projectMemory = new FileProjectMemoryStore(
-      "principal:" + principalNamespace + ":workspace:" + path.resolve(workspace),
+      "principal:" + principalNamespace + ":workspace:" + principalWorkspace,
     );
     const checkpointManager = new DurableCheckpointManager(
-      dependencies.runtime,
-      "principal:" + principalNamespace + ":workspace:" + path.resolve(workspace),
+      principalRuntime,
+      "principal:" + principalNamespace + ":workspace:" + principalWorkspace,
     );
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
@@ -107,7 +117,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const runDesktopTools = grantedDesktopCapabilities.length
       ? createDesktopTools({
           runtime: new DesktopRuntime({
-            workspaceRoot: workspace,
+            workspaceRoot: principalWorkspace,
             allowedExecutables: (process.env.SOFIA_DESKTOP_ALLOWED_EXECUTABLES ?? "").split(",").map((value) => value.trim()).filter(Boolean),
           }),
           principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
@@ -118,7 +128,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       ...runBrowserTools,
       ...runDesktopTools,
     ]);
-    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const toolGateway=new RegistryToolGateway({runtime:principalRuntime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
       maxConcurrency:intEnv("SOFIA_SUBAGENT_MAX_CONCURRENCY",3,1),
@@ -127,7 +137,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       maxContextBytes:intEnv("SOFIA_SUBAGENT_MAX_CONTEXT_BYTES",32768,256),
     });
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(principalRuntime),repositoryMapLoader:task=>buildRepositoryMap(principalRuntime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
   };
 }
 
