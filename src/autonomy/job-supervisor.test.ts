@@ -114,3 +114,35 @@ test("supervisor passes persisted checkpoint to the runtime after worker recover
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("host kill switch cancels a claimed job before research starts", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-killswitch-"));
+  try {
+    const store = new FileAutonomyJobStore("kill-switch-test", root);
+    const job = await store.enqueue({ principalId: "tenant-1", kind: "research", payload: {} });
+    let executed = false;
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: { runResearch: async () => { executed = true; return { completed: true, stoppedBy: "cycle-budget", cycles: [] }; } },
+      resolveAdapters: async () => ({
+        observe: async () => ({ signal: "x", sourceIds: [] }),
+        identifyGaps: async () => [],
+        researchLocally: async () => ({ summary: "x", sourceIds: [], confidence: 1 }),
+        formulateHypothesis: async () => ({ statement: "x", successMetric: "x" }),
+        experiment: async () => ({ passed: true, summary: "x", benchmarkBefore: 0, benchmarkAfter: 1, safetyIncidents: 0, rollbackAvailable: true }),
+        recordLearning: async () => undefined,
+      }),
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+      isKilled: async () => true,
+      leaseMs: 3_000,
+      killSwitchPollMs: 1_000,
+    });
+    const result = await supervisor.runNext("worker-1", new AbortController().signal);
+    assert.equal(result?.id, job.id);
+    assert.equal(result?.status, "cancelled");
+    assert.equal(executed, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
