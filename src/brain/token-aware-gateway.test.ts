@@ -403,6 +403,51 @@ test("gateway falls back once to another eligible route after malformed structur
   assert.equal(budget.snapshot().reservedTokens, 0);
 });
 
+test("gateway settles incomplete output usage before one bounded approved-route fallback", async () => {
+  const budget = new TokenBudget(
+    { maxTokens: 10_000, maxCostNanoUsd: 1_000_000n, maxCalls: 10, maxInFlight: 1 },
+    ["primary", "fallback"].map((key) => ({
+      key,
+      limit: { maxTokens: 10_000, maxCostNanoUsd: 1_000_000n, maxCalls: 10, maxInFlight: 1 },
+      price: { inputNanoUsdPerToken: 1n, outputNanoUsdPerToken: 1n },
+    })),
+  );
+  let primaryCalls = 0;
+  let fallbackCalls = 0;
+  const primary: InternalRoute = {
+    ...route(async () => {
+      primaryCalls += 1;
+      return {
+        value: { partial: true },
+        usage: { inputTokens: 13, outputTokens: 7 },
+        finishReason: "length",
+      };
+    }),
+    id: "primary",
+    budgetKey: "primary",
+  };
+  const fallback: InternalRoute = {
+    ...route(async () => {
+      fallbackCalls += 1;
+      return {
+        value: { recovered: true },
+        usage: { inputTokens: 11, outputTokens: 6 },
+        finishReason: "complete",
+      };
+    }),
+    id: "fallback",
+    budgetKey: "fallback",
+  };
+
+  const gateway = new TokenAwareGateway(budget, [primary, fallback]);
+  assert.deepEqual(await gateway.generate(request()), { recovered: true });
+  assert.equal(primaryCalls, 1);
+  assert.equal(fallbackCalls, 1);
+  assert.equal(budget.snapshot().calls, 2);
+  assert.equal(budget.snapshot().chargedTokens, 37);
+  assert.equal(budget.snapshot().reservedTokens, 0);
+});
+
 test("gateway does not fail over on provider authentication or billing errors", async () => {
   const budget = new TokenBudget(
     { maxTokens: 10_000, maxCostNanoUsd: 1_000_000n, maxCalls: 10, maxInFlight: 1 },
