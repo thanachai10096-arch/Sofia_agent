@@ -192,4 +192,10 @@ export interface BrainEvent {
   count?: number;
   passed?: boolean;
   category?: FailureCategory;
+  /** Parent-generated identifier linking child assignment, proposal, and execution. */
+  childTaskId?: string;
+  agentRole?: string;
+  /** Parent-computed SHA-256 fingerprint of the exact delegated tool/input. */
+  proposalFingerprint?: string;
+  toolName?: string;
 }
