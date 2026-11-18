@@ -908,3 +908,41 @@ test("mutation lock diagnostics identify a lock owned by another host without pr
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("pending mutation journal blocks new candidate writes until startup recovery", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "pending-blocks-propose.json");
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    const before = readFileSync(file, "utf8");
+    writeFileSync(file + ".transaction.json", "pending-recovery");
+    assert.throws(
+      () => lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+        source: "blocked-write", evidenceIds: ["blocked-write"], confidence: 0.95,
+      }),
+      /pending skill mutation journal requires recovery/,
+    );
+    assert.equal(readFileSync(file, "utf8"), before, "candidate writes must not alter the snapshot");
+    assert.equal(existsSync(file + ".transaction.json"), true, "pending journal must remain untouched");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("pending mutation journal blocks evaluation writes until startup recovery", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "pending-blocks-evaluate.json");
+    const lifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file });
+    const candidate = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "evaluation-block", evidenceIds: ["evaluation-block"], confidence: 0.95,
+    });
+    const before = readFileSync(file, "utf8");
+    writeFileSync(file + ".transaction.json", "pending-recovery");
+    await assert.rejects(
+      () => lifecycle.evaluate(candidate.id),
+      /pending skill mutation journal requires recovery/,
+    );
+    assert.equal(readFileSync(file, "utf8"), before, "evaluation must not alter the snapshot");
+    assert.equal(lifecycle.get(candidate.id)?.status, "candidate");
+    assert.equal(existsSync(file + ".transaction.json"), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
