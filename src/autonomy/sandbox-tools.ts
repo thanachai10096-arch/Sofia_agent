@@ -1,4 +1,5 @@
-import { copyFile, lstat, mkdir, readdir } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { SofiaTool } from "../tools/types.js";
 import type { SandboxAttestation, SandboxRunIdentity, SandboxSupervisor } from "./sandbox-supervisor.js";
@@ -40,7 +41,15 @@ async function stageSanitizedWorkspace(source: string, destination: string): Pro
         throw new Error("Sandbox project snapshot exceeds the staging file or size limit.");
       }
       await mkdir(path.dirname(targetPath), { recursive: true, mode: 0o700 });
-      await copyFile(sourcePath, targetPath);
+      const sourceHandle = await open(sourcePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const openedInfo = await sourceHandle.stat();
+        if (!openedInfo.isFile()) continue;
+        const data = await sourceHandle.readFile();
+        await writeFile(targetPath, data, { flag: "wx", mode: 0o600 });
+      } finally {
+        await sourceHandle.close();
+      }
     }
   }
   await visit(root, "");
