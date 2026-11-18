@@ -4,3 +4,5 @@ export * from "./runtime.js";
 export * from "./job-store.js";
 export * from "./job-supervisor.js";
 export * from "./postgres-job-store.js";
+
+export { createProjectMemoryLearningRecorder } from "./project-memory-adapter.js";
