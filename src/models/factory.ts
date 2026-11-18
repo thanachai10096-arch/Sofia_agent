@@ -61,7 +61,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     ];
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
-  const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
+  const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval, dependencies.audit);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
