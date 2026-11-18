@@ -185,7 +185,7 @@ export async function createSofiaAgentDependenciesWithOwnerSessions(
   if (!/^[a-f0-9]{32}$/u.test(ownerKeyId)) {
     throw new Error("A server-derived 32-character owner key ID is required for session isolation.");
   }
-  const databasePath = path.join(workspace, ".sofia", "sessions", ownerKeyId + ".sqlite");
+  const databasePath = path.join(sofiaStateDirectory("sessions"), "tenants", ownerKeyId + ".sqlite");
   const sessionStore = await SqliteSessionStore.open(databasePath);
   try {
     const legacyPath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite");
