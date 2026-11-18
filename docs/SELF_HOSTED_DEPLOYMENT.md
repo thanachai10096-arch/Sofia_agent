@@ -88,8 +88,8 @@ A self-hosted release is not ready until all of the following pass:
 9. Backup and restore reproduce the expected state on a clean volume.
 10. Upgrade and rollback procedures are tested against a prior release.
 11. Container runs non-root and does not expose secrets in logs or image layers.
-13. Upgrade creates a verified pre-upgrade backup, preserves the previous image, and passes a health-check rollback drill without mutating user state.
-12. Existing CI, typecheck, tests and build pass; Railway Staging/Production are not modified as part of this branch.
+
+12. Upgrade and rollback procedures are tested against a prior release.\n13. Existing CI, typecheck, tests and build pass; Railway Staging/Production are not modified as part of this branch.
 
 ## Implementation sequence
 
