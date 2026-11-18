@@ -217,8 +217,13 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           leaseRenewalInFlight = true;
           const lease = pollLeaseHandle;
           let deadline: ReturnType<typeof setTimeout> | undefined;
+          let renewalTimedOut = false;
+          const renewalOperation = Promise.resolve().then(() => lease.renew());
           const timedRenewal = new Promise<boolean>((resolve) => {
-            deadline = setTimeout(() => resolve(false), renewDeadlineMs);
+            deadline = setTimeout(() => {
+              renewalTimedOut = true;
+              resolve(false);
+            }, renewDeadlineMs);
           });
           const markLeaseLost = () => {
             if (stopped || leaseLost) return;
@@ -228,8 +233,18 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
             try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
             controller?.abort();
           };
-          void Promise.race([Promise.resolve().then(() => lease.renew()), timedRenewal]).then((renewed) => {
-            if (!renewed) markLeaseLost();
+          void Promise.race([renewalOperation, timedRenewal]).then((renewed) => {
+            if (!renewed) {
+              markLeaseLost();
+              if (renewalTimedOut) {
+                // A timed-out Redis command may still complete and extend the
+                // TTL after this process has stopped polling. Release that
+                // late extension using the owner-scoped lease handle.
+                void renewalOperation
+                  .then((lateRenewed) => lateRenewed ? releaseLeaseSafely(lease, leaseOperationTimeoutMs) : undefined)
+                  .catch(() => undefined);
+              }
+            }
           }).catch(() => {
             markLeaseLost();
           }).finally(() => {
