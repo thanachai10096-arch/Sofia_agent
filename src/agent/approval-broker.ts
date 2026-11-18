@@ -35,7 +35,7 @@ export interface ApprovalRecord {
 export interface ApprovalDecisionStore {
   create(record: ApprovalRecord): Promise<void>;
   get(id: string): Promise<ApprovalRecord | undefined>;
-  listPending(principalId?: string): Promise<ApprovalRecord[]>;
+  listPending(principalId: string): Promise<ApprovalRecord[]>;
   resolve(id: string, actionHash: string, decision: ApprovalDecision, resolvedBy: string, now: number): Promise<boolean>;
 }
 
@@ -58,7 +58,8 @@ export class InMemoryApprovalDecisionStore implements ApprovalDecisionStore {
     return record ? copy(record) : undefined;
   }
 
-  async listPending(principalId?: string): Promise<ApprovalRecord[]> {
+  async listPending(principalId: string): Promise<ApprovalRecord[]> {
+    if (!principalId.trim()) return [];
     return [...this.records.values()]
       .filter((record) => record.status === "pending" && (!principalId || record.principalId === principalId))
       .sort((a, b) => a.createdAt - b.createdAt)
@@ -144,7 +145,8 @@ export class ApprovalBroker {
     return false;
   };
 
-  listPending(principalId?: string): Promise<ApprovalRecord[]> {
+  listPending(principalId: string): Promise<ApprovalRecord[]> {
+    if (!principalId.trim()) return Promise.resolve([]);
     return this.options.store.listPending(principalId);
   }
 
