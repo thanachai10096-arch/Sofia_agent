@@ -101,6 +101,10 @@ export class VersionedSkillLifecycle {
   }
 
   propose(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
+    return this.withPlatformMutationLock(() => this.proposeWithLock(skillPackage, provenance));
+  }
+
+  private proposeWithLock(skillPackage: SkillPackage, provenance: SkillProvenance): SkillLifecycleRecord {
     const safePackage = validatePackage(skillPackage);
     if (!isRecord(provenance) || typeof provenance.source !== "string" || !provenance.source.trim() ||
         !Array.isArray(provenance.evidenceIds) || provenance.evidenceIds.length === 0 ||
@@ -151,22 +155,25 @@ export class VersionedSkillLifecycle {
         !result.checks.every((check) => isRecord(check) && typeof check.name === "string" && typeof check.passed === "boolean")) {
       result = { passed: false, checks: [{ name: "evaluation-result", passed: false, detail: "Evaluator returned malformed or empty evidence" }] };
     }
-    const before = clone(this.snapshot);
-    const record = this.requireRecord(candidateId);
-    record.evaluation = {
-      passed: result.passed === true && result.checks.every((check) => check.passed === true),
-      checks: result.checks.map((check) => ({
-        name: check.name.slice(0, 200),
-        passed: check.passed,
-        ...(typeof check.detail === "string" ? { detail: String(redactSecrets(check.detail)).slice(0, 1000) } : {}),
-      })),
-      evaluatedAt: new Date().toISOString(),
-    };
-    record.status = record.evaluation.passed ? "verified" : "rejected";
-    record.updatedAt = new Date().toISOString();
-    try { this.persist(); }
-    catch (error) { this.snapshot = before; throw error; }
-    return clone(record);
+    return this.withPlatformMutationLock(() => {
+      const before = clone(this.snapshot);
+      const record = this.requireRecord(candidateId);
+      if (record.status !== "candidate") throw new Error("Candidate changed while evaluation was running; reload before writing");
+      record.evaluation = {
+        passed: result.passed === true && result.checks.every((check) => check.passed === true),
+        checks: result.checks.map((check) => ({
+          name: check.name.slice(0, 200),
+          passed: check.passed,
+          ...(typeof check.detail === "string" ? { detail: String(redactSecrets(check.detail)).slice(0, 1000) } : {}),
+        })),
+        evaluatedAt: new Date().toISOString(),
+      };
+      record.status = record.evaluation.passed ? "verified" : "rejected";
+      record.updatedAt = new Date().toISOString();
+      try { this.persist(); }
+      catch (error) { this.snapshot = before; throw error; }
+      return clone(record);
+    });
   }
 
   promote(candidateId: string): SkillLifecycleRecord {
