@@ -14,7 +14,7 @@ services:
       PORT: "3000"
       SOFIA_WORKSPACE: /data/workspace
       SOFIA_STATE_DIR: /data/state
-          ports:
+    ports:
       - "${SOFIA_BIND_ADDRESS:-127.0.0.1}:${SOFIA_HOST_PORT:-3000}:3000"
     volumes:
       - sofia-data:/data
