@@ -623,6 +623,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const result = await agent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            toolScopes: auth.scopes,
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
