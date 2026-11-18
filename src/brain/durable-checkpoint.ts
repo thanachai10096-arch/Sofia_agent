@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import type { Checkpoint, CheckpointManager } from "./checkpoint.js";
 import { RuntimeCheckpointManager } from "./checkpoint.js";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 interface CheckpointStore {
   save(checkpoint: Checkpoint): Promise<void>;
@@ -14,7 +14,7 @@ interface CheckpointStore {
 class FileCheckpointStore implements CheckpointStore {
   private readonly directory: string;
 
-  constructor(namespace: string, root = path.join(os.tmpdir(), "sofia-agents-checkpoints")) {
+  constructor(namespace: string, root = sofiaStateDirectory("checkpoints")) {
     const key = createHash("sha256").update(namespace).digest("hex");
     this.directory = path.join(root, key);
   }
