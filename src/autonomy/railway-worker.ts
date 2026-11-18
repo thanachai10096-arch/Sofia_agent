@@ -9,6 +9,8 @@ import type { AutonomyJob } from "./job-store.js";
 export interface RailwayAutonomyWorkerConfig<TPayload = unknown> {
   /** Trusted server-side pg-compatible pool. Never accept this from a job payload. */
   pool: AutonomyPgPool;
+  /** Close the host-owned pool when the process-signal wrapper exits. */
+  closePool?: () => Promise<void>;
   resolveAdapters(job: AutonomyJob<TPayload>): Promise<ResearchLoopAdapters>;
   sandboxAvailable(job: AutonomyJob<TPayload>): Promise<boolean>;
   budgetContext(job: AutonomyJob<TPayload>): AutonomyContext;
@@ -63,6 +65,11 @@ export async function runRailwayAutonomyWorker<TPayload = unknown>(
   const leaseMs = config.leaseMs ?? 30_000;
   const killSwitchPollMs = config.killSwitchPollMs ?? boundedInteger("SOFIA_AUTONOMY_KILL_SWITCH_POLL_MS", process.env.SOFIA_AUTONOMY_KILL_SWITCH_POLL_MS, 5_000, 1_000, 60_000);
 
+  if (typeof config.pool.query !== "function" || typeof config.pool.connect !== "function") {
+    throw new Error("A valid trusted PostgreSQL pool is required.");
+  }
+  // Fail startup immediately rather than entering the worker retry loop with a dead database.
+  await config.pool.query("SELECT 1");
   const store = new PostgresAutonomyJobStore(config.pool);
   if (config.ensureSchema) await store.ensureSchema();
 
@@ -102,5 +109,6 @@ export async function runRailwayAutonomyWorkerWithProcessSignals<TPayload = unkn
   } finally {
     process.removeListener("SIGTERM", onSigterm);
     process.removeListener("SIGINT", onSigint);
+    await config.closePool?.();
   }
 }
