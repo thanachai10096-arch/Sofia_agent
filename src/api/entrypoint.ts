@@ -10,6 +10,8 @@ import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplica
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { ApprovalBroker } from "../agent/approval-broker.js";
+import { SqliteApprovalDecisionStore } from "../agent/sqlite-approval-store.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -21,6 +23,15 @@ const runStoreDirectory = path.resolve(
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+let approvalStore: SqliteApprovalDecisionStore | undefined;
+if (process.env.SOFIA_APPROVAL_ENABLED?.trim().toLowerCase() === "true") {
+  approvalStore = await SqliteApprovalDecisionStore.open(
+    process.env.SOFIA_APPROVAL_STORE_PATH?.trim() || path.join(workspace, ".sofia", "approvals.sqlite"),
+  );
+  const broker = new ApprovalBroker({ store: approvalStore });
+  deps.approvalBroker = broker;
+  deps.approval = broker.handle;
+}
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -215,6 +226,7 @@ const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
   deps.closeSessionStore();
+  approvalStore?.close();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
 server.listen(port, "0.0.0.0", () => {
