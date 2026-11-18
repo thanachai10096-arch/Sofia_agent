@@ -28,7 +28,7 @@ export interface AutonomyJobSupervisorOptions<TPayload = unknown> {
   sandboxAvailable(job: AutonomyJob<TPayload>): Promise<boolean>;
   budgetContext(job: AutonomyJob<TPayload>): AutonomyContext;
   /** Host-owned user/project/system kill switch; never model-controlled. */
-  isKilled?(job: AutonomyJob<TPayload>): Promise<boolean>;
+  isKilled(job: AutonomyJob<TPayload>): Promise<boolean>;
   killSwitchPollMs?: number;
   leaseMs?: number;
   maxCycles?: number;
@@ -103,9 +103,10 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
     signal.addEventListener("abort", forwardAbort, { once: true });
     if (signal.aborted) forwardAbort();
     const pollKillSwitch = async () => {
-      if (!this.options.isKilled || controller.signal.aborted) return;
+      if (controller.signal.aborted) return;
       try {
-        if (await this.options.isKilled(job)) controller.abort(new Error("Autonomy kill switch activated."));
+        const killed = await this.options.isKilled(job);
+        if (killed !== false) controller.abort(new Error("Autonomy kill switch is active or returned an invalid result."));
       } catch {
         // Fail closed: an unavailable kill-switch authority stops autonomous work.
         controller.abort(new Error("Autonomy kill-switch check failed."));
