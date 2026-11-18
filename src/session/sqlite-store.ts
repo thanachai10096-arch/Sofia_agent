@@ -240,16 +240,21 @@ export class SqliteSessionStore {
     }
     if (destination === this) throw new Error("Session migration source and destination must differ.");
     const prefix = ownerPrefix.endsWith(":") ? ownerPrefix : ownerPrefix + ":";
-    const owned = this.listSessions({ limit: 500, offset: 0 })
-      .filter((session) => session.id.startsWith(prefix));
     let migrated = 0;
-    for (const session of owned) {
-      const current = destination.get(session.id);
-      if (!current || session.updatedAt > current.updatedAt) {
-        destination.save({ id: session.id, messages: [...session.messages], updatedAt: session.updatedAt });
+    // Read the complete legacy database in bounded pages. Delete each migrated
+    // row immediately so the next page cannot skip rows after offset shifts.
+    for (;;) {
+      const owned = this.listSessions({ limit: 500, offset: 0 })
+        .filter((session) => session.id.startsWith(prefix));
+      if (owned.length === 0) break;
+      for (const session of owned) {
+        const current = destination.get(session.id);
+        if (!current || session.updatedAt > current.updatedAt) {
+          destination.save({ id: session.id, messages: [...session.messages], updatedAt: session.updatedAt });
+        }
+        this.delete(session.id);
+        migrated += 1;
       }
-      this.delete(session.id);
-      migrated += 1;
     }
     return migrated;
   }
