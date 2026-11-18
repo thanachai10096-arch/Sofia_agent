@@ -390,6 +390,9 @@ class FileJobStateStore {
       const index = records.findIndex((item) => item.id === record.id);
       if (index >= 0) {
         const current = records[index]!;
+        // The authenticated owner is fixed at submission. A later write must
+        // never be able to transfer a durable job to another principal.
+        if (current.ownerKeyId !== record.ownerKeyId) return false;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
         records[index] = {
