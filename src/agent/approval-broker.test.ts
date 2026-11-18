@@ -85,3 +85,13 @@ test("approval broker validates its expiry and polling bounds", () => {
   assert.throws(() => new ApprovalBroker({ store, ttlMs: 10 }), /TTL/);
   assert.throws(() => new ApprovalBroker({ store, pollIntervalMs: 1 }), /poll interval/);
 });
+
+
+test("approval broker bounds the serialized review payload", async () => {
+  const broker = new ApprovalBroker({ store: new InMemoryApprovalDecisionStore() });
+  await assert.rejects(broker.handle({
+    runId: "run-large-input", principalId: "principal-1", toolName: "workspace.write_file",
+    input: { content: "x".repeat(70 * 1024) }, actionHash: "large-input-hash", risk: "high",
+  }), /64 KiB limit/);
+  assert.deepEqual(await broker.listPending("principal-1"), []);
+});
