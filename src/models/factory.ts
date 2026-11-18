@@ -34,7 +34,7 @@ import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { principalWorkspacePath } from "../platform/user-workspace.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -65,16 +65,10 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   }, { file: path.join(sofiaStateDirectory("skills"), "skill-lifecycle.json") });
   const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
-    const principalNamespace = createHash("sha256")
-      .update(principalId?.trim() || "local-instance")
-      .digest("hex");
     // Each authenticated principal gets a distinct filesystem root. Never mount
     // the shared installation workspace into a user's tool runtime.
-    const workspaceRoot = path.resolve(
-      process.env.SOFIA_USER_WORKSPACES_DIR?.trim() || sofiaStateDirectory("user-workspaces"),
-    );
-    if (!path.isAbsolute(workspaceRoot)) throw new Error("SOFIA_USER_WORKSPACES_DIR must be absolute.");
-    const principalWorkspace = path.join(workspaceRoot, principalNamespace);
+    const principalWorkspace = principalWorkspacePath(principalId);
+    const principalNamespace = path.basename(principalWorkspace);
     mkdirSync(principalWorkspace, { recursive: true, mode: 0o700 });
     const principalRuntime = createNodeWorkspaceRuntime(principalWorkspace);
     const projectMemory = new FileProjectMemoryStore(
