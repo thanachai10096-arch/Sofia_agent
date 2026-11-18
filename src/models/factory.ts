@@ -33,6 +33,7 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
+import fs from "node:fs";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
@@ -185,7 +186,17 @@ export async function createSofiaAgentDependenciesWithOwnerSessions(
   if (!/^[a-f0-9]{32}$/u.test(ownerKeyId)) {
     throw new Error("A server-derived 32-character owner key ID is required for session isolation.");
   }
-  const databasePath = path.join(sofiaStateDirectory("sessions"), "tenants", ownerKeyId + ".sqlite");
+  const tenantSessionDirectory = path.join(sofiaStateDirectory("sessions"), "tenants");
+  fs.mkdirSync(tenantSessionDirectory, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") {
+    const directoryStat = fs.lstatSync(tenantSessionDirectory);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+      throw new Error("Tenant session storage must be a real directory, not a symbolic link.");
+    }
+    const privateMode = directoryStat.mode & 0o700;
+    if ((directoryStat.mode & 0o777) !== privateMode) fs.chmodSync(tenantSessionDirectory, privateMode);
+  }
+  const databasePath = path.join(tenantSessionDirectory, ownerKeyId + ".sqlite");
   const sessionStore = await SqliteSessionStore.open(databasePath);
   try {
     const legacyPath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite");
