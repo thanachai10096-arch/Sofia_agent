@@ -389,3 +389,39 @@ test("cron recovery refuses to reconcile a job owned by another API principal", 
   assert.match(state.history[0].error, /not found/i);
   assert.equal(unscopedReads, 0);
 });
+
+test("legacy cron migration partitions each owner and is safe to retry", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-tenant-migration-"));
+  try {
+    const legacy = new FileCronStore("legacy-shared-cron", root);
+    const alice = new FileCronStore("tenant-alice", root);
+    const bob = new FileCronStore("tenant-bob", root);
+    await legacy.transact(state => {
+      state.schedules.push(
+        { id: "alice-schedule", name: "a", task: "a", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice", status: "enabled", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", nextRunAt: "2026-01-01T00:01:00.000Z", consecutiveFailures: 0 },
+        { id: "bob-schedule", name: "b", task: "b", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "bob", status: "enabled", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", nextRunAt: "2026-01-01T00:01:00.000Z", consecutiveFailures: 0 },
+      );
+      state.history.push(
+        { id: "alice-history", scheduleId: "alice-schedule", scheduledFor: "2026-01-01T00:01:00.000Z", startedAt: "2026-01-01T00:01:00.000Z", status: "completed", attempt: 1 },
+        { id: "bob-history", scheduleId: "bob-schedule", scheduledFor: "2026-01-01T00:01:00.000Z", startedAt: "2026-01-01T00:01:00.000Z", status: "completed", attempt: 1 },
+      );
+      state.audit.push(
+        { at: "2026-01-01T00:01:00.000Z", actor: "alice", action: "schedule.created", scheduleId: "alice-schedule" },
+        { at: "2026-01-01T00:01:00.000Z", actor: "bob", action: "schedule.created", scheduleId: "bob-schedule" },
+      );
+    });
+    assert.equal(await alice.migrateOwnerFrom(legacy, "alice"), 1);
+    assert.equal(await alice.migrateOwnerFrom(legacy, "alice"), 0);
+    assert.equal(await bob.migrateOwnerFrom(legacy, "bob"), 1);
+    const [aliceState, bobState, legacyState] = await Promise.all([
+      alice.transact(state => ({ schedules: state.schedules.map(x => x.id), history: state.history.map(x => x.id), audit: state.audit.map(x => x.scheduleId) })),
+      bob.transact(state => ({ schedules: state.schedules.map(x => x.id), history: state.history.map(x => x.id), audit: state.audit.map(x => x.scheduleId) })),
+      legacy.transact(state => ({ schedules: state.schedules.map(x => x.id), history: state.history.map(x => x.id), audit: state.audit.map(x => x.scheduleId) })),
+    ]);
+    assert.deepEqual(aliceState, { schedules: ["alice-schedule"], history: ["alice-history"], audit: ["alice-schedule"] });
+    assert.deepEqual(bobState, { schedules: ["bob-schedule"], history: ["bob-history"], audit: ["bob-schedule"] });
+    assert.deepEqual(legacyState, { schedules: [], history: [], audit: [] });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
