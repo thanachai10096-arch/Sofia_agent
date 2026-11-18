@@ -197,3 +197,50 @@ test("Telegram transport releases a lease granted after acquisition timeout", as
   assert.equal(fetchCalls, 0);
   await transport.stop();
 });
+
+test("Telegram transport releases a lease when renewal succeeds after its timeout", async () => {
+  const events: string[] = [];
+  let released = 0;
+  let resolveRenewal!: (renewed: boolean) => void;
+  let renewalStarted!: () => void;
+  const renewing = new Promise<void>((resolve) => { renewalStarted = resolve; });
+  const lateRenewal = new Promise<boolean>((resolve) => { resolveRenewal = resolve; });
+  let pollAborted!: () => void;
+  const aborted = new Promise<void>((resolve) => { pollAborted = resolve; });
+  const transport = createTelegramHttpTransport({
+    token,
+    pollLeaseRenewIntervalMs: 1_000,
+    pollLease: {
+      async acquire() {
+        return {
+          ttlMs: 5_000,
+          async renew() {
+            renewalStarted();
+            return await lateRenewal;
+          },
+          async release() { released++; },
+        };
+      },
+    },
+    fetchImpl: async (input, init) => {
+      if (String(input).endsWith("/deleteWebhook")) return ok(true);
+      if (String(input).endsWith("/getUpdates")) {
+        return await new Promise<Response>((_resolve, reject) => {
+          if (init?.signal?.aborted) { pollAborted(); reject(new Error("aborted")); return; }
+          init?.signal?.addEventListener("abort", () => { pollAborted(); reject(new Error("aborted")); }, { once: true });
+        });
+      }
+      return ok(true);
+    },
+    onError(event) { events.push(event); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await renewing;
+  await aborted;
+  await transport.stop();
+  assert.deepEqual(events, ["poll_lease_lost"]);
+  assert.equal(released, 1);
+  resolveRenewal(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(released, 2);
+});
