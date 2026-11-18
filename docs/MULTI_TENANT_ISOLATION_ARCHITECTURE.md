@@ -10,6 +10,34 @@ The current process constructs a single `AgentDependencies` instance from one op
 
 Client-supplied workspace paths are rejected by the API validation guard. Do not work around this by accepting arbitrary paths or by deriving paths directly from request body fields.
 
+## 1.1 Verified implementation inventory (repository audit)
+
+The following observations were verified against the current `main` implementation during this audit. They describe the present code, not the target architecture.
+
+| Component | Current implementation | Isolation consequence |
+|---|---|---|
+| API authentication | `src/api/server.ts` hashes the bearer token into `keyId` and attaches configured scopes | Distinct API keys receive distinct opaque principals; this does not itself partition runtime resources |
+| User memory | `FileUserMemoryStore` receives `auth.keyId` for API CRUD and hashes the user ID for its filename | API user-memory files are principal-scoped; this does not isolate project memory |
+| Project memory | `createBrainFactory` constructs one `FileProjectMemoryStore(workspace)`; store hashes only the project namespace | Runs using the same workspace share project memory and the persistent skill ledger |
+| Brain run snapshots | One `FileRunStore(workspace)` is captured by the Brain factory | Brain snapshots are namespaced by workspace, not by authenticated principal |
+| Checkpoints | One `DurableCheckpointManager(runtime, workspace)` is captured by the Brain factory | Checkpoint metadata is workspace-namespaced, while rollback acts on the same shared runtime |
+| Evolution | One `EvolutionEngine(workspace/.sofia/evolution.json)` is constructed by dependency factory | Skill/task performance history is shared across principals using this process |
+| Skill lifecycle | One lifecycle file at `workspace/.sofia/skill-lifecycle.json` is captured by the Brain factory | Learned/approved skill lifecycle state is shared |
+| Workspace runtime | One `createNodeWorkspaceRuntime(workspace)` is injected into every Brain run | File reads/writes, shell and Git operate against the same configured root |
+| Desktop tools | Per-run tools are created with the same `workspace` root | Per-run tool objects do not provide per-tenant filesystem isolation |
+| API durable jobs | `DurableJobRuntime` is constructed once with a workspace-scoped run store | Job ownership checks exist, but the job execution factory still targets the shared workspace |
+
+**Important distinction:** creating per-principal copies of memory, snapshots, or checkpoint metadata would not make the filesystem safe to share. Checkpoint rollback, shell execution, Git, repository indexing, project context discovery, and generated artifacts all act on the runtime root. The runtime/workspace boundary must be isolated before user-controlled code execution is offered to multiple tenants.
+
+### Safe interim operating mode
+
+Until a tenant-aware runtime factory and tenant-owned workspace roots exist:
+- treat the API deployment as a single trusted workspace/operator, even when API keys have separate run and user-memory records;
+- do not grant desktop workspace or process-execution scopes to untrusted principals;
+- keep Discord/Telegram identities allowlisted as trusted operators, not as independent workspace tenants;
+- do not enable public self-service signup, arbitrary project import, or shared-workspace execution;
+- retain the workspace override rejection and clearly disclose the single-workspace limitation.
+
 ## 2. Security invariants
 
 1. **Server-derived tenant identity:** tenant/principal identity comes only from authenticated server-side credentials and membership records. Never trust `tenantId`, `ownerId`, `workspace`, storage keys, or capability claims supplied by a client.
