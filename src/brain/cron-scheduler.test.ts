@@ -357,3 +357,35 @@ test("execution timeout cancels the runtime job and records failure", async () =
   assert.equal(state.history[0].status, "failed");
   assert.match(state.history[0].error, /timed out/i);
 });
+
+test("cron recovery refuses to reconcile a job owned by another API principal", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let unscopedReads = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get() { unscopedReads++; throw new Error("unscoped lookup must never be used"); },
+    async getForOwner(_id: string, _ownerKeyId: string) { return undefined; },
+    async cancel() { return true; },
+    async cancelForOwner() { return true; },
+    async list() { return []; },
+    async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, now: () => new Date("2026-10-17T00:00:00.000Z") });
+  const schedule = await scheduler.create({
+    name: "tenant-recovery", task: "must remain isolated", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "owner-a",
+  }, "owner-a");
+  state.history.push({
+    id: "cross-owner-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "job-owned-by-someone-else", attempt: 1,
+  });
+
+  const result = await scheduler.recover();
+  assert.deepEqual(result, { reconciled: 1, monitoring: 0, indeterminate: 0 });
+  assert.equal(state.history[0].status, "failed");
+  assert.match(state.history[0].error, /not found/i);
+  assert.equal(unscopedReads, 0);
+});
