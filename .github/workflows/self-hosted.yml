@@ -83,3 +83,5 @@ jobs:
 
       - name: Clean-volume container acceptance test
         run: bash scripts/sofia-self-hosted-smoke.sh
+      - name: Multi-installation credential and volume isolation test
+        run: bash scripts/sofia-isolation-smoke.sh
