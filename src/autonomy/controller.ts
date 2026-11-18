@@ -65,6 +65,22 @@ export function evaluateAutonomyRequest(
   profile: AutonomyProfile = defaultAutonomyProfile,
   context: AutonomyContext = {},
 ): AutonomyDecision {
+  if (typeof action !== "string" || ![
+    "think", "plan", "read_memory", "write_memory", "research_local", "research_network",
+    "create_skill_candidate", "run_experiment", "edit_sandbox", "promote_skill",
+    "deploy_production", "external_side_effect", "change_security_policy", "read_secret",
+    "destructive_production",
+  ].includes(action)) {
+    return { allowed: false, mode: "denied", reason: "Unknown autonomy action; default deny." };
+  }
+  if (!profile || typeof profile !== "object" ||
+      typeof profile.independentThinking !== "boolean" ||
+      typeof profile.continuousLearning !== "boolean" ||
+      typeof profile.networkResearch !== "boolean" ||
+      typeof profile.skillCandidateCreation !== "boolean" ||
+      typeof profile.sandboxExperiments !== "boolean") {
+    return { allowed: false, mode: "denied", reason: "Autonomy profile is missing or malformed; default deny." };
+  }
   if (approvalRequired.has(action)) {
     return { allowed: false, mode: "approval-required", reason: "This action remains under explicit human approval and cannot be enabled by an autonomy profile." };
   }
@@ -131,8 +147,17 @@ export function evaluateAutonomyRequest(
 
 /** Eligibility only; this function never mutates the skill registry or deploys. */
 export function evaluateSkillPromotion(evidence: SkillPromotionEvidence): AutonomyDecision {
-  const validScore = Number.isFinite(evidence.benchmarkScore) && evidence.benchmarkScore >= 0.9 && evidence.benchmarkScore <= 1;
-  if (!evidence.testsPassed || !evidence.adversarialTestsPassed || !validScore ||
+  if (!evidence || typeof evidence !== "object") {
+    return { allowed: false, mode: "denied", reason: "Promotion evidence is missing or malformed." };
+  }
+  const validScore = typeof evidence.benchmarkScore === "number" &&
+    Number.isFinite(evidence.benchmarkScore) && evidence.benchmarkScore >= 0.9 && evidence.benchmarkScore <= 1;
+  const validEvidence = typeof evidence.testsPassed === "boolean" &&
+    typeof evidence.adversarialTestsPassed === "boolean" &&
+    Number.isSafeInteger(evidence.safetyIncidents) && evidence.safetyIncidents >= 0 &&
+    typeof evidence.versionedArtifact === "boolean" &&
+    typeof evidence.rollbackAvailable === "boolean";
+  if (!validEvidence || !evidence.testsPassed || !evidence.adversarialTestsPassed || !validScore ||
       evidence.safetyIncidents !== 0 || !evidence.versionedArtifact || !evidence.rollbackAvailable) {
     return { allowed: false, mode: "denied", reason: "Requires passing tests and adversarial tests, benchmark >= 0.90, zero safety incidents, a versioned artifact and rollback." };
   }
