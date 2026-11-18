@@ -150,3 +150,46 @@ test("Telegram run completion records timeout and failed delivery separately", a
     "telegram_completion_delivery_failed run_id=run-timeout",
   ]);
 });
+
+
+test("Telegram runtime fails closed when distributed polling lease is required but missing", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    SOFIA_TELEGRAM_REQUIRE_POLL_LEASE: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    SOFIA_API_KEY: "test-key",
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.deepEqual(warnings, [
+    "Telegram integration disabled: a required distributed poll lease is not configured.",
+  ]);
+});
+
+test("Telegram runtime can be constructed with a required injected poll lease", async () => {
+  const warnings: string[] = [];
+  const pollLease = {
+    async acquire() {
+      return {
+        ttlMs: 15_000,
+        async renew() { return true; },
+        async release() {},
+      };
+    },
+  };
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    SOFIA_TELEGRAM_REQUIRE_POLL_LEASE: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    SOFIA_API_KEY: "test-key",
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message), { pollLease });
+  assert.ok(runtime);
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
+});
