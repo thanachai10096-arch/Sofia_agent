@@ -17,6 +17,8 @@ export interface JobRecord {
   task: string;
   modelRouteId?: string;
   ownerKeyId?: string;
+  /** Persisted API-key tool capabilities so retries and resumes retain the same policy. */
+  toolScopes?: string[];
   /** Destination used only for post-restart Discord job recovery notices. */
   notificationChannelId?: string;
   /** Opaque per-user/per-channel key; never shared across Discord principals. */
@@ -75,7 +77,7 @@ function publicJobRecord(record: JobRecord): JobRecord {
 
 
 export interface JobRuntime {
-  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
+  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; toolScopes?: string[]; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
@@ -425,6 +427,7 @@ export class DurableJobRuntime implements JobRuntime {
       signal?: AbortSignal;
       maxSteps?: number;
       principalId?: string;
+      toolScopes?: string[];
       onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
       modelRouteId?: string;
     }) => SofiaBrain,
@@ -441,6 +444,7 @@ export class DurableJobRuntime implements JobRuntime {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
       ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
+      ...(input.toolScopes ? { toolScopes: [...input.toolScopes] } : {}),
       ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
       ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
       ...(input.sessionTask ? { sessionTask: input.sessionTask } : {}),
@@ -529,7 +533,7 @@ export class DurableJobRuntime implements JobRuntime {
       record.notificationDelivered = false;
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
-      await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
+      await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria, ...(record.toolScopes ? { toolScopes: record.toolScopes } : {}) }, signal, record.snapshot);
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
@@ -624,6 +628,7 @@ export class DurableJobRuntime implements JobRuntime {
       const brain = this.brainFactory({
         signal: controller.signal,
         ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
+        ...(record.toolScopes ? { toolScopes: record.toolScopes } : {}),
         onRunSnapshot: onSnapshot,
         ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}),
       });
