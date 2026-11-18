@@ -65,3 +65,27 @@ This is a policy decision module. Runtime entry points must call it before
 autonomous loops or sandbox operations and must still enforce ExecutionPolicy
 at every tool invocation. Promotion eligibility is not itself a registry mutation;
 the registry integration must preserve versioning, audit records and rollback.
+
+## Durable research jobs
+
+The autonomy job-store contract persists queued/running/terminal state, principal
+ownership, idempotency keys, bounded retry attempts, worker leases and result or
+failure metadata. The local `FileAutonomyJobStore` uses atomic file replacement
+under `SOFIA_STATE_DIR`, restrictive directory/file modes and per-process
+serialization. Expired worker leases can be recovered after a process restart;
+retry attempts remain bounded and cancellation is terminal.
+
+**Deployment constraint:** the file implementation is for one active process and
+one worker claim domain. Atomic rename is not a distributed lock. Do not run
+multiple Railway replicas against this store and assume exclusive claims. For
+multi-replica production use, implement the same `AutonomyJobStore` contract
+with transactional PostgreSQL/Redis claims, lease compare-and-swap, and tenant
+scoping. Configure `SOFIA_STATE_DIR` to a persistent Railway Volume path;
+ephemeral container storage does not survive replacement/redeploy.
+
+The queue is a persistence primitive, not an autonomous scheduler. A trusted
+host supervisor must explicitly enqueue work, claim jobs, resolve adapters from
+trusted server configuration, pass authenticated principal identity and the
+kill-switch signal into `SofiaAutonomyRuntime`, heartbeat leases, and persist
+completion/failure. Never deserialize executable adapters or credentials from
+job payloads. Job payloads are data only and must be validated by the host.
