@@ -272,7 +272,7 @@ export class VersionedSkillLifecycle {
       if (existsSync(this.file)) {
         if (lstatSync(this.file).isSymbolicLink()) throw new Error("Skill lifecycle file must not be a symbolic link");
         const current = JSON.parse(readFileSync(this.file, "utf8")) as unknown;
-        const currentSnapshot = JSON.stringify(current, null, 2) + "\\n";
+        const currentSnapshot = JSON.stringify(current, null, 2) + "\n";
         if (this.persistedSnapshot === null || currentSnapshot !== this.persistedSnapshot) {
           throw new Error("Skill lifecycle store changed in another process; reload before platform mutation");
         }
