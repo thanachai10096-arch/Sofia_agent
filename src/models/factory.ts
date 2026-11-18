@@ -33,6 +33,12 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
+import os from "node:os";
+import { ContainerSandbox } from "../sandbox.js";
+import { SandboxSupervisor } from "../autonomy/sandbox-supervisor.js";
+import { createSandboxTools } from "../autonomy/sandbox-tools.js";
+import { createBrainAutonomyAuthorizer } from "../autonomy/brain-adapter.js";
+import { defaultAutonomyProfile } from "../autonomy/controller.js";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
 import { EncryptedFileAudit } from "../security/persistent-audit.js";
@@ -100,12 +106,63 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
           principal: createDesktopPrincipal(principalId ?? "local-agent", grantedDesktopCapabilities),
         })
       : [];
+    const sandboxImage = process.env.SOFIA_SANDBOX_IMAGE?.trim();
+    const sandboxSecret = process.env.SOFIA_SANDBOX_ATTESTATION_SECRET;
+    const sandboxEnabled = dependencies.policy.allowSandbox && Boolean(principalId && sandboxImage && sandboxSecret);
+    const sandboxNetworkAllowed = sandboxEnabled && process.env.SOFIA_SANDBOX_ALLOW_NETWORK !== "false";
+    const sandboxSupervisor = sandboxEnabled ? new SandboxSupervisor({
+      workspaceRoot: process.env.SOFIA_SANDBOX_ROOT?.trim() || path.join(os.tmpdir(), "sofia-sandbox-supervisor"),
+      attestationSecret: sandboxSecret!,
+      sandbox: new ContainerSandbox({ image: sandboxImage! }),
+      allowNetwork: sandboxNetworkAllowed,
+      budget: {
+        maxCycles: intEnv("SOFIA_AUTONOMY_MAX_CYCLES", 8, 1),
+        maxSteps: intEnv("SOFIA_AUTONOMY_MAX_STEPS", 40, 1),
+        maxToolCallsPerStep: intEnv("SOFIA_AUTONOMY_MAX_TOOL_CALLS_PER_STEP", 8, 1),
+        maxExperimentSeconds: intEnv("SOFIA_AUTONOMY_MAX_EXPERIMENT_SECONDS", 300, 1),
+        maxSpendUsd: Number.isFinite(Number(process.env.SOFIA_AUTONOMY_MAX_SPEND_USD))
+          ? Math.max(0, Number(process.env.SOFIA_AUTONOMY_MAX_SPEND_USD)) : 1,
+        maxOutputBytes: intEnv("SOFIA_SANDBOX_MAX_OUTPUT_BYTES", 262144, 1),
+      },
+    }) : undefined;
+    const sandboxIdentity = sandboxSupervisor ? { principalId: principalId!, runId: "pending" } : undefined;
+    let sandboxAttestation: Awaited<ReturnType<SandboxSupervisor["beginRun"]>> | undefined;
+    const getSandboxAttestation = async () => {
+      if (!sandboxSupervisor || !sandboxIdentity) throw new Error("Sandbox is not configured for this run.");
+      if (!sandboxAttestation) {
+        sandboxIdentity.runId = activeBrainRunId;
+        sandboxAttestation = await sandboxSupervisor.beginRun(sandboxIdentity);
+      }
+      return sandboxAttestation;
+    };
+    const activeBrainRunId = "host-run-" + randomUUID();
+    const runSandboxTools = sandboxSupervisor && sandboxIdentity
+      ? createSandboxTools({
+          supervisor: sandboxSupervisor,
+          identity: sandboxIdentity,
+          sourceWorkspace: workspace,
+          networkAllowed: sandboxNetworkAllowed,
+          getAttestation: getSandboxAttestation,
+        })
+      : [];
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
       ...runBrowserTools,
       ...runDesktopTools,
+      ...runSandboxTools,
     ]);
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const autonomyAuthorizer = sandboxSupervisor && sandboxIdentity
+      ? createBrainAutonomyAuthorizer({
+          profile: { ...defaultAutonomyProfile, networkResearch: sandboxNetworkAllowed },
+          classifyTool: (request) => request.toolCall.tool === "sandbox.exec" ? "run_experiment" : undefined,
+          getTrustedContext: async (request, action) => {
+            if (action !== "run_experiment" || request.toolCall.tool !== "sandbox.exec") return {};
+            const attestation = await getSandboxAttestation();
+            return sandboxSupervisor.getAutonomyContext(sandboxIdentity, attestation);
+          },
+        })
+      : undefined;
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
       maxConcurrency:intEnv("SOFIA_SUBAGENT_MAX_CONCURRENCY",3,1),
@@ -114,7 +171,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       maxContextBytes:intEnv("SOFIA_SUBAGENT_MAX_CONTEXT_BYTES",32768,256),
     });
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,...(autonomyAuthorizer ? {autonomyAuthorizer} : {}),allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{if(sandboxSupervisor && sandboxIdentity) await sandboxSupervisor.disposeRun(sandboxIdentity).catch(()=>undefined);await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
   };
 }
 
