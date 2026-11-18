@@ -122,7 +122,7 @@ export class PostgresAutonomyJobStore implements AutonomyJobStore {
       `WITH candidate AS (
         SELECT id FROM ${this.table}
         WHERE status='queued' AND available_at <= now()
-        ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1
+        ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
       )
       UPDATE ${this.table} AS job
       SET status='running', attempts=job.attempts+1, updated_at=now(),
