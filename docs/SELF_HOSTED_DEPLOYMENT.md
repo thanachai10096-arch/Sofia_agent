@@ -16,7 +16,7 @@ Verified on `main`:
 - The entrypoint uses `SOFIA_RUN_STORE_DIR` for API run records, but uses workspace-relative `.sofia/api-usage.json` for API usage data.
 - The README documents `SOFIA_STATE_DIR` for local job records, run snapshots and project memory, and explicitly says the file-backed runtime is for a single active process.
 - `.env.example` documents provider configuration, sandbox policy, capability/audit secrets, and optional messaging integrations.
-- No root `Dockerfile`, `compose.yaml`, `docker-compose.yml`, or `.env.example`-adjacent container deployment manifest was found on the default branch during this audit.
+- The default branch had no root container deployment manifest at audit time. This feature branch now adds an initial `Dockerfile`, `compose.yaml`, `.dockerignore`, and `docs/SELF_HOSTED_QUICKSTART.md`; these additions are an implementation baseline and have not yet passed clean-host acceptance testing.
 
 ## Important gap: state directory contract
 
