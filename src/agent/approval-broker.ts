@@ -12,6 +12,9 @@ export interface ApprovalRequest {
 }
 
 export type ApprovalDecision = "approved" | "denied" | "expired" | "cancelled";
+
+export const MAX_PENDING_APPROVALS_PER_PRINCIPAL = 50;
+export const MAX_APPROVAL_INPUT_BYTES = 64 * 1024;
 export interface ApprovalRecord {
   id: string;
   runId: string;
@@ -129,13 +132,19 @@ export class ApprovalBroker {
     if (!principalId || !request.runId.trim() || !request.toolName.trim() || !request.actionHash.trim()) return false;
     if (request.signal?.aborted) return false;
 
+    const safeInput = redactSecrets(structuredClone(request.input)) as Record<string, unknown>;
+    let inputBytes: number;
+    try { inputBytes = Buffer.byteLength(JSON.stringify(safeInput), "utf8"); }
+    catch { throw new Error("Approval input must be JSON-serializable."); }
+    if (inputBytes > MAX_APPROVAL_INPUT_BYTES) throw new Error("Approval input exceeds the 64 KiB limit.");
+
     const createdAt = this.now();
     const record: ApprovalRecord = {
       id: randomUUID(),
       runId: request.runId,
       principalId,
       toolName: request.toolName,
-      input: redactSecrets(structuredClone(request.input)) as Record<string, unknown>,
+      input: safeInput,
       actionHash: request.actionHash,
       risk: request.risk,
       status: "pending",
