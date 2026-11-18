@@ -53,6 +53,7 @@ export class VersionedSkillLifecycle {
   private snapshot: LifecycleSnapshot = { schemaVersion: 1, records: [], activeBySkill: {} };
   private readonly file: string;
   private readonly minimumConfidence: number;
+  private readonly evaluations = new Map<string, Promise<SkillLifecycleRecord>>();
 
   constructor(
     private readonly platform: SkillsPlatform,
@@ -125,7 +126,18 @@ export class VersionedSkillLifecycle {
     return clone(record);
   }
 
-  async evaluate(candidateId: string): Promise<SkillLifecycleRecord> {
+  evaluate(candidateId: string): Promise<SkillLifecycleRecord> {
+    const inFlight = this.evaluations.get(candidateId);
+    if (inFlight) return inFlight;
+    const operation = this.evaluateCandidate(candidateId);
+    this.evaluations.set(candidateId, operation);
+    void operation.finally(() => {
+      if (this.evaluations.get(candidateId) === operation) this.evaluations.delete(candidateId);
+    }).catch(() => undefined);
+    return operation;
+  }
+
+  private async evaluateCandidate(candidateId: string): Promise<SkillLifecycleRecord> {
     const candidate = this.requireRecord(candidateId);
     if (candidate.status !== "candidate") throw new Error("Only candidate skills can be evaluated");
     let result: SkillEvaluationResult;
