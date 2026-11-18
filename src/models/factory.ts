@@ -33,6 +33,7 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
 import { EncryptedFileAudit } from "../security/persistent-audit.js";
@@ -168,5 +169,33 @@ export async function createSofiaAgentDependenciesWithSessions(
 ): Promise<AgentDependencies & { closeSessionStore: () => void }> {
   const dependencies = createSofiaAgentDependencies(workspace, approval);
   const sessionStore = await SqliteSessionStore.open(databasePath);
+  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+}
+
+/**
+ * Create dependencies with a physically private transcript database for one
+ * server-derived API owner. Legacy shared transcripts for that owner are copied
+ * before deletion, so startup can safely retry an interrupted migration.
+ */
+export async function createSofiaAgentDependenciesWithOwnerSessions(
+  workspace: string,
+  ownerKeyId: string,
+  approval?: AgentDependencies["approval"],
+): Promise<AgentDependencies & { closeSessionStore: () => void }> {
+  if (!/^[a-f0-9]{32}$/u.test(ownerKeyId)) {
+    throw new Error("A server-derived 32-character owner key ID is required for session isolation.");
+  }
+  const dependencies = createSofiaAgentDependencies(workspace, approval);
+  const databasePath = path.join(workspace, ".sofia", "sessions", ownerKeyId + ".sqlite");
+  const sessionStore = await SqliteSessionStore.open(databasePath);
+  const legacyPath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite");
+  if (path.resolve(legacyPath) !== path.resolve(databasePath)) {
+    const legacyStore = await SqliteSessionStore.open(legacyPath);
+    try {
+      legacyStore.migrateOwnerTo(ownerKeyId, sessionStore);
+    } finally {
+      legacyStore.close();
+    }
+  }
   return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
 }
