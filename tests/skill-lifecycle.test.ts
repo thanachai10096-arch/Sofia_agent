@@ -946,3 +946,34 @@ test("pending mutation journal blocks evaluation writes until startup recovery",
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+
+
+test("startup recovery rejects a promotion journal whose target has an impossible pre-commit status", () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "journal-target-status.json");
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
+    const candidate = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "target-status", evidenceIds: ["target-status"], confidence: 0.95,
+    });
+    // A real Promote can only journal a verified target. A candidate status
+    // indicates a stale, forged, or inconsistent transaction record.
+    writeFileSync(file + ".transaction.json", JSON.stringify({
+      schemaVersion: 1,
+      transactionId: "impossible-target-status",
+      operation: "promote",
+      skillId: candidate.skillId,
+      previousActiveId: null,
+      targetActiveId: candidate.id,
+      previousPackage: null,
+      targetPackage: candidate.package,
+    }));
+    assert.throws(
+      () => new VersionedSkillLifecycle(platform, passing, { file }),
+      /unexpected pre-commit lifecycle status/,
+    );
+    assert.equal(platform.get(candidate.skillId), undefined, "invalid journal must not mutate the platform");
+    assert.equal(existsSync(file + ".transaction.json"), true, "invalid journal must be retained for operator review");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
