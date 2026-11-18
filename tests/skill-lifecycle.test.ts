@@ -819,3 +819,40 @@ test("startup recovery retains a corrupt journal and fails closed", () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("startup journal recovery rejects a lifecycle pointer matching neither transaction side", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "journal-pointer-mismatch.json");
+    const platform = new InMemorySkillsPlatform();
+    const lifecycle = new VersionedSkillLifecycle(platform, passing, { file });
+    const first = lifecycle.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "pointer-first", evidenceIds: ["pointer-first"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(first.id);
+    lifecycle.promote(first.id);
+    const second = lifecycle.propose({ ...pkg("2.0.0"), source: "custom" }, {
+      source: "pointer-second", evidenceIds: ["pointer-second"], confidence: 0.95,
+    });
+    await lifecycle.evaluate(second.id);
+
+    // The durable store still points at first, while this forged/stale journal
+    // claims a different prior pointer. Recovery must not guess which side wins.
+    writeFileSync(file + ".transaction.json", JSON.stringify({
+      schemaVersion: 1,
+      transactionId: "pointer-mismatch",
+      operation: "promote",
+      skillId: first.skillId,
+      previousActiveId: "unknown-prior-record",
+      targetActiveId: second.id,
+      previousPackage: { ...pkg("1.0.0"), source: "custom" },
+      targetPackage: second.package,
+    }));
+    assert.throws(
+      () => new VersionedSkillLifecycle(platform, passing, { file }),
+      /matches neither side of the pending journal/,
+    );
+    assert.equal(platform.get(first.skillId)?.version, "1.0.0");
+    assert.equal(existsSync(file + ".transaction.json"), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
