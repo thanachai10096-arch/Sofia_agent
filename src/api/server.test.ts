@@ -73,7 +73,6 @@ test("API sessions are persisted and scoped to the authenticated API key", async
     ]);
     assert.equal(sessions.get("shared-client-session"), undefined);
   } finally {
-    controller.abort(new Error("test cleanup"));
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
@@ -260,6 +259,7 @@ test("approval API lists and resolves only requests owned by the authenticated p
     });
     assert.equal(replay.status, 409);
   } finally {
+    controller.abort(new Error("test cleanup"));
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
