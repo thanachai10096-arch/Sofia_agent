@@ -507,6 +507,28 @@ test("corrupt skill lifecycle JSON fails closed without rewriting the damaged st
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("startup restoration refuses to mutate the platform while another lifecycle process holds the mutation lock", async () => {
+  const root = dir();
+  try {
+    const file = path.join(root, "startup-mutation-lock.json");
+    const seedPlatform = new InMemorySkillsPlatform();
+    const seed = new VersionedSkillLifecycle(seedPlatform, passing, { file });
+    const candidate = seed.propose({ ...pkg("1.0.0"), source: "custom" }, {
+      source: "startup", evidenceIds: ["startup-restore"], confidence: 0.95,
+    });
+    await seed.evaluate(candidate.id);
+    seed.promote(candidate.id);
+
+    const targetPlatform = new InMemorySkillsPlatform();
+    writeFileSync(file + ".mutation.lock", "held", { flag: "wx", mode: 0o600 });
+    assert.throws(
+      () => new VersionedSkillLifecycle(targetPlatform, passing, { file }),
+      /EEXIST/,
+    );
+    assert.equal(targetPlatform.get("repair-skill"), undefined, "startup must not restore skills without the cross-process lock");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("startup quarantine fails closed when another process holds the lifecycle lock", async () => {
   const root = dir();
   try {
