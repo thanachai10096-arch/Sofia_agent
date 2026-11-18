@@ -95,3 +95,21 @@ test("approval broker bounds the serialized review payload", async () => {
   }), /64 KiB limit/);
   assert.deepEqual(await broker.listPending("principal-1"), []);
 });
+
+
+test("in-memory approval store enforces the per-principal pending cap", async () => {
+  const store = new InMemoryApprovalDecisionStore();
+  for (let index = 0; index < 50; index += 1) {
+    await store.create({
+      id: "memory-quota-" + index, runId: "run-" + index, principalId: "principal-1",
+      toolName: "workspace.write_file", input: {}, actionHash: "hash-" + index,
+      risk: "high", status: "pending", createdAt: index, expiresAt: 60_000 + index,
+    });
+  }
+  await assert.rejects(store.create({
+    id: "memory-quota-overflow", runId: "run-overflow", principalId: "principal-1",
+    toolName: "workspace.write_file", input: {}, actionHash: "hash-overflow",
+    risk: "high", status: "pending", createdAt: 100, expiresAt: 60_100,
+  }), /Too many pending approval requests/);
+  assert.equal((await store.listPending("principal-1")).length, 50);
+});
