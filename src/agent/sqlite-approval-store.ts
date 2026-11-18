@@ -41,30 +41,37 @@ export class SqliteApprovalDecisionStore implements ApprovalDecisionStore {
   }
 
   private migrate(): void {
-    const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
-    if (version > 1) throw new Error(`Approval database schema version ${version} is newer than this Sofia Agent supports.`);
-    if (version === 0) {
-      this.db.exec(`
-        BEGIN IMMEDIATE;
-        CREATE TABLE approval_requests (
-          id TEXT PRIMARY KEY NOT NULL,
-          run_id TEXT NOT NULL,
-          principal_id TEXT NOT NULL,
-          tool_name TEXT NOT NULL,
-          input_json TEXT NOT NULL,
-          action_hash TEXT NOT NULL,
-          risk TEXT NOT NULL,
-          status TEXT NOT NULL CHECK (status IN ('pending','approved','denied','expired','cancelled')),
-          created_at INTEGER NOT NULL,
-          expires_at INTEGER NOT NULL,
-          resolved_at INTEGER,
-          resolved_by TEXT
-        );
-        CREATE INDEX approval_pending_owner_idx ON approval_requests(principal_id, status, created_at);
-        CREATE INDEX approval_expiry_idx ON approval_requests(status, expires_at);
-        PRAGMA user_version = 1;
-        COMMIT;
-      `);
+    // Re-check the schema version after acquiring the write lock. Multiple
+    // replicas may open the same database simultaneously during deployment.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const version = Number(this.db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
+      if (version > 1) throw new Error(`Approval database schema version ${version} is newer than this Sofia Agent supports.`);
+      if (version === 0) {
+        this.db.exec(`
+          CREATE TABLE approval_requests (
+            id TEXT PRIMARY KEY NOT NULL,
+            run_id TEXT NOT NULL,
+            principal_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            input_json TEXT NOT NULL,
+            action_hash TEXT NOT NULL,
+            risk TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('pending','approved','denied','expired','cancelled')),
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            resolved_at INTEGER,
+            resolved_by TEXT
+          );
+          CREATE INDEX approval_pending_owner_idx ON approval_requests(principal_id, status, created_at);
+          CREATE INDEX approval_expiry_idx ON approval_requests(status, expires_at);
+          PRAGMA user_version = 1;
+        `);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
     }
   }
 
