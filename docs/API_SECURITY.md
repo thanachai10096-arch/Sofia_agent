@@ -51,9 +51,9 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 
 ## Approval broker core (preview)
 
-The core `ApprovalBroker` can be supplied as the `AgentDependencies.approval` handler. It creates a pending record bound to the authenticated principal, run ID, tool name, redacted input, risk, exact action hash, and expiry. Decisions are one-shot compare-and-set operations; wrong hashes, replayed decisions, expired requests, missing principals, and aborted runs fail closed. The gateway records approval-required, approved, or denied outcomes in the security audit.
+The `ApprovalBroker` is wired into the API entrypoint when explicitly enabled. It creates a pending record bound to the authenticated principal, run ID, tool name, redacted input, risk, exact action hash, and expiry. Decisions are owner-only and one-shot; wrong hashes, replayed decisions, expired requests, missing principals, and aborted runs fail closed. The gateway records approval-required, approved, and denied outcomes in the security audit.
 
-The included `InMemoryApprovalDecisionStore` is for tests and local development only. It is process-local and loses pending approvals on restart. **Do not use it in production or with multiple replicas.** A production store must implement `ApprovalDecisionStore` with shared durable transactions and atomic `resolve` semantics (pending-only + exact action-hash compare-and-set). The API review/resolve endpoints and a production shared-store adapter are not yet wired; until then, keep approval-required tools unavailable to untrusted clients unless the host supplies a trusted approval handler.
+The `InMemoryApprovalDecisionStore` is for tests and local development only. The built-in `SqliteApprovalDecisionStore` persists requests across restarts and uses conditional SQL updates so only one concurrent decision wins. For deployments across hosts, implement a transactional network-database adapter; SQLite WAL must not be assumed safe on an arbitrary shared network filesystem.
 
 ## Enabling the SQLite approval API
 
