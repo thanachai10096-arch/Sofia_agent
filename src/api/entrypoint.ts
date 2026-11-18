@@ -25,6 +25,7 @@ mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 const deps = await createSofiaAgentDependenciesWithSessions(workspace);
 let approvalStore: SqliteApprovalDecisionStore | undefined;
 if (process.env.SOFIA_APPROVAL_ENABLED?.trim().toLowerCase() === "true") {
+  if (!scopes.includes("approval:manage")) throw new Error("SOFIA_APPROVAL_ENABLED requires approval:manage in SOFIA_API_SCOPES.");
   approvalStore = await SqliteApprovalDecisionStore.open(
     process.env.SOFIA_APPROVAL_STORE_PATH?.trim() || path.join(workspace, ".sofia", "approvals.sqlite"),
   );
