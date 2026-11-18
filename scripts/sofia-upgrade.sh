@@ -61,7 +61,7 @@ const data = JSON.parse(await readFile(file, "utf8"));
 data.status = status;
 if (reason) data.rollbackReason = reason;
 data.updatedAt = new Date().toISOString();
-await writeFile(file, JSON.stringify(data, null, 2) + "\\n", { mode: 0o600 });
+await writeFile(file, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
 NODE
   fi
 }
@@ -86,7 +86,10 @@ restore_previous_image() {
       echo "Previous image is healthy again."
       return 0
     }
-    [ "$running" != "true" ] || [ "$health" = "unhealthy" ] || [ "$health" = "missing" ] && return 1
+    if [ "$running" != "true" ] || [ "$health" = "unhealthy" ] || [ "$health" = "missing" ]; then
+      mark_manifest_status "rollback-failed" "rollback container exited or reported unhealthy"
+      return 1
+    fi
     sleep 3
   done
   mark_manifest_status "rollback-failed" "previous image did not become healthy"
