@@ -1,4 +1,5 @@
-import { actionHash } from "../security/guard.js";
+import { actionHash, newSecurityEventId } from "../security/guard.js";
+import type { SecurityAuditSink } from "../security/audit.js";
 import type { ApprovalHandler } from "../agent/approval.js";
 import type { LearnedSkillCandidate } from "./learning.js";
 import { runSkillLifecycleWorkflow } from "./skill-lifecycle-workflow.js";
@@ -13,6 +14,7 @@ import { skillPackageDigest } from "./skill-evidence.js";
 export function createManagedSkillLearningHandler(
   lifecycle: VersionedSkillLifecycle,
   approval?: ApprovalHandler,
+  audit?: SecurityAuditSink,
 ): (candidate: LearnedSkillCandidate, runId: string, principalId?: string) => Promise<boolean> {
   return async (candidate, runId, principalId) => {
     const skillPackage: SkillPackage = {
@@ -30,6 +32,30 @@ export function createManagedSkillLearningHandler(
       version: "1.0.0",
       publisher: "sofia",
     };
+    if (!audit) return false;
+    const skillDigest = skillPackageDigest(skillPackage);
+    const attestationTool = "skill.candidate.attest";
+    const attestationInput: Record<string, unknown> = {
+      skillId: skillPackage.skill.id,
+      skillDigest,
+      evidenceIds: [...candidate.evidenceIds],
+    };
+    try {
+      await audit.record({
+        id: newSecurityEventId(),
+        at: new Date().toISOString(),
+        runId,
+        ...(principalId ? { principalId } : {}),
+        toolName: attestationTool,
+        actionHash: actionHash(runId, attestationTool, attestationInput, principalId),
+        risk: "low",
+        decision: "completed",
+        input: attestationInput,
+        result: { passed: true, skillDigest },
+      });
+    } catch {
+      return false;
+    }
     const result = await runSkillLifecycleWorkflow(
       lifecycle,
       skillPackage,
@@ -38,7 +64,7 @@ export function createManagedSkillLearningHandler(
         evidenceIds: [...candidate.evidenceIds],
         confidence: 0.8,
         runId,
-        skillDigest: skillPackageDigest(skillPackage),
+        skillDigest,
       },
       {
         approvePromotion: async (record) => {
