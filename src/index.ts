@@ -144,3 +144,6 @@ export { SandboxSupervisor } from "./autonomy/sandbox-supervisor.js";
 export type { SandboxSupervisorOptions, SandboxSupervisorBudget, SandboxRunIdentity, SandboxAttestation } from "./autonomy/sandbox-supervisor.js";
 
 export { createSandboxTools } from "./autonomy/sandbox-tools.js";
+
+export { runRailwayAutonomyWorker, runRailwayAutonomyWorkerWithProcessSignals } from "./autonomy/railway-worker.js";
+export type { RailwayAutonomyWorkerConfig } from "./autonomy/railway-worker.js";
