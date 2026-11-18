@@ -164,6 +164,7 @@ export interface TelegramMessagingEnvironment {
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
   TELEGRAM_USER_API_KEYS_JSON?: string;
+  SOFIA_API_KEYS_JSON?: string;
   SOFIA_API_BASE_URL?: string;
   RAILWAY_PUBLIC_DOMAIN?: string;
   SOFIA_CHAT_DEDUPE_DIR?: string;
@@ -187,11 +188,12 @@ export function createTelegramMessagingRuntime(
   const rawUsers = env.TELEGRAM_ALLOWED_USER_IDS?.trim();
   const rawChats = env.TELEGRAM_ALLOWED_CHAT_IDS?.trim();
   const rawUserApiKeys = env.TELEGRAM_USER_API_KEYS_JSON;
+  const rawRegisteredApiKeys = env.SOFIA_API_KEYS_JSON;
   const railwayDomain = env.RAILWAY_PUBLIC_DOMAIN?.trim();
   const baseUrl = env.SOFIA_API_BASE_URL?.trim() ||
     (railwayDomain ? "https://" + railwayDomain.replace(/^https?:\/\//i, "").replace(/\/$/, "") : "");
 
-  if (!token || !rawUsers || !rawChats || !rawUserApiKeys || !baseUrl) {
+  if (!token || !rawUsers || !rawChats || !rawUserApiKeys || !rawRegisteredApiKeys || !baseUrl) {
     onWarning("Telegram integration disabled: token, API connection, explicit allowlists, and per-user API keys are required.");
     return undefined;
   }
@@ -200,6 +202,16 @@ export function createTelegramMessagingRuntime(
     const allowedUsers = parseTelegramUserAllowlist(rawUsers);
     const allowedChats = parseTelegramChatAllowlist(rawChats);
     const userApiKeys = parseTelegramUserApiKeys(rawUserApiKeys, allowedUsers);
+    const registered = JSON.parse(rawRegisteredApiKeys) as unknown;
+    if (!registered || typeof registered !== "object" || Array.isArray(registered)) {
+      throw new Error("Telegram sender API keys must be registered with required API scopes.");
+    }
+    for (const apiKey of userApiKeys.values()) {
+      const scopes = (registered as Record<string, unknown>)[apiKey];
+      if (!Array.isArray(scopes) || !scopes.includes("agent:run") || !scopes.includes("agent:read")) {
+        throw new Error("Telegram sender API keys must be registered with required API scopes.");
+      }
+    }
     const clientsByUser = new Map<string, SofiaClient>();
     const clientForUser = (userId: string) => {
       const existing = clientsByUser.get(userId);
