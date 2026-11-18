@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
-import { mkdir, realpath } from "node:fs/promises";
+import { mkdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import type { AutonomyContext } from "./controller.js";
 import type { Sandbox, SandboxLimits } from "../sandbox.js";
@@ -249,5 +249,30 @@ export class SandboxSupervisor {
   endRun(identity: SandboxRunIdentity): void {
     const run = this.runs.get(this.key(identity));
     if (run) run.active = false;
+  }
+
+  /**
+   * Revoke access and remove the per-run workspace after the host has collected
+   * any required artifacts. Refuses cleanup if the path no longer resolves to
+   * the exact directory originally issued by this supervisor.
+   */
+  async disposeRun(identity: SandboxRunIdentity): Promise<void> {
+    const key = this.key(identity);
+    const run = this.runs.get(key);
+    if (!run) return;
+    run.active = false;
+    const trustedRoot = await realpath(this.root);
+    const currentWorkspace = await realpath(run.workspace).catch(() => undefined);
+    if (!currentWorkspace || currentWorkspace !== run.workspace) {
+      this.runs.delete(key);
+      throw new Error("Sandbox workspace identity changed; refusing unsafe cleanup.");
+    }
+    const relative = path.relative(trustedRoot, currentWorkspace);
+    if (!relative || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
+      this.runs.delete(key);
+      throw new Error("Sandbox workspace escaped the supervisor root; refusing cleanup.");
+    }
+    await rm(currentWorkspace, { recursive: true, force: true });
+    this.runs.delete(key);
   }
 }
