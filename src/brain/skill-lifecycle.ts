@@ -200,6 +200,12 @@ export class VersionedSkillLifecycle {
       .filter((item) => item.skillId === skillId && item.status === "superseded")
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
     if (!previous) throw new Error("No previous version is available for rollback: " + skillId);
+    // Learned artifacts are never reactivated through rollback: rollback has no
+    // trusted-evidence verifier here, so cached provenance/evaluation is insufficient.
+    // A learned skill must be proposed and evaluated again through the managed workflow.
+    if (previous.package.source === "learned") {
+      throw new Error("Cannot roll back to a learned skill without fresh durable-evidence verification: " + skillId);
+    }
     const before = clone(this.snapshot);
     const platformCurrent = this.platform.get(skillId);
     const now = new Date().toISOString();
