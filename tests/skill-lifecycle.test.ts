@@ -427,7 +427,7 @@ test("corrupt skill lifecycle JSON fails closed without rewriting the damaged st
   const root = dir();
   try {
     const file = path.join(root, "corrupt-lifecycle.json");
-    const damaged = "{\\"schemaVersion\\":1,\\"records\\":[";
+    const damaged = '{"schemaVersion":1,"records":[';
     writeFileSync(file, damaged, { mode: 0o600 });
     assert.throws(
       () => new VersionedSkillLifecycle(new InMemorySkillsPlatform(), passing, { file }),
