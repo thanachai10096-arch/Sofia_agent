@@ -21,6 +21,8 @@ export interface Sandbox {
     limits: SandboxLimits,
     signal?: AbortSignal,
   ): Promise<{ stdout: string; stderr: string; code: number }>;
+  /** Optional liveness/readiness probe for independently operated runners. */
+  healthCheck?(): Promise<void>;
 }
 
 export class PolicySandbox implements Sandbox {
@@ -288,6 +290,18 @@ export class ContainerSandbox implements Sandbox {
     }
     this.dockerPath = options.dockerPath ?? "docker";
     this.runner = options.runner ?? ((args, runnerOptions) => runContainerCli(this.dockerPath, args, runnerOptions));
+  }
+
+  async healthCheck(): Promise<void> {
+    const limits = { timeoutMs: 10_000, maxOutputBytes: 4_096 };
+    const daemon = await this.runner(["info", "--format", "{{.ServerVersion}}"], limits);
+    if (daemon.code !== 0 || !daemon.stdout.trim()) {
+      throw new Error("Container daemon is unavailable.");
+    }
+    const image = await this.runner(["image", "inspect", "--format", "{{.Id}}", this.options.image], limits);
+    if (image.code !== 0 || !image.stdout.trim()) {
+      throw new Error("Configured sandbox image is not preloaded on the runner host.");
+    }
   }
 
   async run(
