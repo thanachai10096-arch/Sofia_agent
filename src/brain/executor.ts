@@ -725,6 +725,15 @@ export class SofiaBrain {
       throw new RecoverableFailure(failureCategory(error), errorMessage(error));
     }
 
+    if (result.ok && (!result.evidenceId || !result.evidenceId.trim())) {
+      // The side effect may already have happened, but without durable evidence
+      // the Brain must not verify, replan, or retry it automatically.
+      this.emit({ type: "brain.tool.evidence_missing", stepId: step.id });
+      throw new Stop(
+        "Tool side effect may have completed, but completion evidence was not persisted. Run halted without verification or retry.",
+      );
+    }
+
     const p = preview(result.data);
     const fenced = fenceUntrustedOutput(step.call.tool, p.text);
     const observation: Observation = {
