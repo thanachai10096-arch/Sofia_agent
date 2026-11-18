@@ -444,24 +444,32 @@ export class VersionedSkillLifecycle {
     }
     const currentActiveId = this.snapshot.activeBySkill[parsed.skillId] ?? null;
     const committed = currentActiveId === parsed.targetActiveId;
+    const previousRecord = parsed.previousActiveId === null ? undefined : this.snapshot.records.find((record) =>
+      record.id === parsed.previousActiveId && record.skillId === parsed.skillId);
     if (committed) {
       if (targetRecord.status !== "active") {
         throw new Error("Committed journal target is not active in the lifecycle store; operator reconciliation is required");
+      }
+      if (parsed.previousActiveId !== null &&
+          (!previousRecord || previousRecord.status !== (parsed.operation === "promote" ? "superseded" : "rolled_back"))) {
+        throw new Error("Committed journal previous record has an unexpected lifecycle status; operator reconciliation is required");
       }
     } else {
       if (currentActiveId !== parsed.previousActiveId) {
         throw new Error("Lifecycle active pointer matches neither side of the pending journal; operator reconciliation is required");
       }
+      const expectedTargetStatus = parsed.operation === "promote" ? "verified" : "superseded";
+      if (targetRecord.status !== expectedTargetStatus) {
+        throw new Error("Pending journal target has an unexpected pre-commit lifecycle status; operator reconciliation is required");
+      }
       if (parsed.previousActiveId !== null) {
-        const previousRecord = this.snapshot.records.find((record) =>
-          record.id === parsed.previousActiveId && record.skillId === parsed.skillId);
-        if (!previousRecord || previousPackage === null ||
-            JSON.stringify(previousRecord.package) !== JSON.stringify(previousPackage) ||
-            previousRecord.status !== "active") {
+        if (!previousRecord || previousRecord.status !== "active" ||
+            (parsed.operation === "promote" &&
+             (previousPackage === null || JSON.stringify(previousRecord.package) !== JSON.stringify(previousPackage)))) {
           throw new Error("Pending journal previous version does not match the lifecycle store; operator reconciliation is required");
         }
-      } else if (currentActiveId !== null) {
-        throw new Error("Pending journal unexpectedly has an active lifecycle pointer");
+      } else if (currentActiveId !== null || parsed.operation !== "promote") {
+        throw new Error("Pending journal unexpectedly has no prior active version");
       }
     }
     const expected = committed ? targetPackage : previousPackage;
