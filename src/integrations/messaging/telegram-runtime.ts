@@ -120,6 +120,7 @@ function parseTelegramIds(value: string, pattern: RegExp, name: string): Readonl
 
 export interface TelegramMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
+  SOFIA_TELEGRAM_REQUIRE_POLL_LEASE?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
@@ -143,6 +144,11 @@ export function createTelegramMessagingRuntime(
 ): TelegramMessagingRuntime | undefined {
   const requested = env.SOFIA_MESSAGING_ENABLED === "true";
   if (!requested) return undefined;
+  const requirePollLease = env.SOFIA_TELEGRAM_REQUIRE_POLL_LEASE?.trim().toLowerCase() === "true";
+  if (requirePollLease && !dependencies.pollLease) {
+    onWarning("Telegram integration disabled: a required distributed poll lease is not configured.");
+    return undefined;
+  }
 
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   const rawUsers = env.TELEGRAM_ALLOWED_USER_IDS?.trim();
