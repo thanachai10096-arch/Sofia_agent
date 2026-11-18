@@ -148,6 +148,43 @@ export class FileCronStore implements CronStore {
       await fs.rm(this.lock, { force: true });
     }
   }
+  /**
+   * Move one owner's records out of the legacy shared file into this isolated
+   * store. Destination is written before source deletion, making retries safe
+   * after a crash; IDs are de-duplicated on every retry.
+   */
+  async migrateOwnerFrom(source: FileCronStore, ownerKeyId: string): Promise<number> {
+    if (!ownerKeyId.trim()) throw new Error("Cron migration owner is required");
+    if (source === this) return 0;
+    const owned = await source.transact(state => {
+      const schedules = state.schedules.filter(item => item.ownerKeyId === ownerKeyId).map(item => ({ ...item }));
+      const scheduleIds = new Set(schedules.map(item => item.id));
+      return {
+        schedules,
+        history: state.history.filter(item => scheduleIds.has(item.scheduleId)).map(item => ({ ...item })),
+        audit: state.audit.filter(item => scheduleIds.has(item.scheduleId)).map(item => ({ ...item })),
+      };
+    });
+    if (!owned.schedules.length) return 0;
+    await this.transact(state => {
+      const scheduleIds = new Set(state.schedules.map(item => item.id));
+      for (const item of owned.schedules) if (!scheduleIds.has(item.id)) state.schedules.push(item);
+      const historyIds = new Set(state.history.map(item => item.id));
+      for (const item of owned.history) if (!historyIds.has(item.id)) state.history.push(item);
+      const auditKeys = new Set(state.audit.map(item => JSON.stringify(item)));
+      for (const item of owned.audit) {
+        const key = JSON.stringify(item);
+        if (!auditKeys.has(key)) { state.audit.push(item); auditKeys.add(key); }
+      }
+    });
+    const ids = new Set(owned.schedules.map(item => item.id));
+    await source.transact(state => {
+      state.schedules = state.schedules.filter(item => !ids.has(item.id));
+      state.history = state.history.filter(item => !ids.has(item.scheduleId));
+      state.audit = state.audit.filter(item => !ids.has(item.scheduleId));
+    });
+    return owned.schedules.length;
+  }
 }
 
 function parseField(source: string, min: number, max: number): Set<number> {
