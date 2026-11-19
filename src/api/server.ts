@@ -76,6 +76,16 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes };
 }
 
+function currentApiKeyAuthorization(config: SofiaApiConfig, ownerKeyId: string): { toolScopes: string[]; desktopCapabilities: DesktopCapability[] } {
+  for (const [token, scopes] of Object.entries(config.apiKeys)) {
+    if (createHash("sha256").update(token).digest("hex").slice(0, 32) === ownerKeyId && Array.isArray(scopes)) {
+      const validScopes = scopes.filter((scope): scope is string => typeof scope === "string");
+      return { toolScopes: validScopes, desktopCapabilities: desktopCapabilitiesFromScopes(validScopes) };
+    }
+  }
+  return { toolScopes: [], desktopCapabilities: [] };
+}
+
 function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapability[] {
   const mapping: Record<string, DesktopCapability> = {
     "desktop:discover": "system:discover",
@@ -143,7 +153,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try { usage.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
-  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime, {
+    resolveAuthorization: (ownerKeyId) => currentApiKeyAuthorization(config, ownerKeyId),
+  }) : undefined;
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
