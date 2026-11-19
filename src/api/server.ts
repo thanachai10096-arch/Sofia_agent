@@ -9,6 +9,8 @@ import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
+import type { BrainRunSnapshot } from "../brain/run-state.js";
+import { redactSecrets } from "../security/guard.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 
@@ -25,6 +27,7 @@ interface ActiveRun {
   /** Hashed owner-scoped idempotency key; raw client key is never persisted. */
   idempotencyId?: string;
   requestFingerprint?: string;
+  snapshot?: BrainRunSnapshot;
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -154,6 +157,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
       ...(run.idempotencyId ? { idempotencyId: run.idempotencyId } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
+      ...(run.snapshot ? { snapshot: run.snapshot } : {}),
     };
     return runStore.save(record);
   };
@@ -173,6 +177,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
       ...(record.idempotencyId ? { idempotencyId: record.idempotencyId } : {}),
       ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
+      ...(record.snapshot ? { snapshot: record.snapshot } : {}),
     };
     runs.set(run.id, run); if (interrupted) void persist(run).catch(() => undefined);
   }
@@ -225,6 +230,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
           onEvent: (event) => { countToolCall(run.ownerKeyId, run.controller, event); },
+          onRunSnapshot: async (snapshot) => {
+            run.snapshot = redactSecrets(snapshot) as BrainRunSnapshot;
+            run.updatedAt = Date.now();
+            await persist(run);
+          },
         });
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -480,6 +490,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             desktopCapabilities: stored.desktopCapabilities as DesktopCapability[],
             ...(stored.idempotencyId ? { idempotencyId: stored.idempotencyId } : {}),
             ...(stored.requestFingerprint ? { requestFingerprint: stored.requestFingerprint } : {}),
+            ...(stored.snapshot ? { snapshot: stored.snapshot } : {}),
           };
           runs.set(id, run);
         }
