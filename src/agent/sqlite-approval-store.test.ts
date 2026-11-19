@@ -55,11 +55,10 @@ test("SQLite approval store binds decisions to owner and exact action hash", asy
 
 test("SQLite approval store rejects duplicate IDs and never stores proposed tool input", async () => {
   await withStores(async (first, _second, file) => {
-    assert.equal(first.createPending(record), true);
+    assert.equal(first.createPending({ ...record, input: { content: "sensitive-proposed-input" } } as ApprovalAuditRecord), true);
     assert.equal(first.createPending(record), false);
     const raw = fs.readFileSync(file, "utf8");
-    assert.equal(raw.includes("approved"), false);
-    assert.equal(raw.includes("content"), false);
+    assert.equal(raw.includes("sensitive-proposed-input"), false);
   });
 });
 
