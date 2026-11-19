@@ -148,6 +148,43 @@ export class FileCronStore implements CronStore {
       await fs.rm(this.lock, { force: true });
     }
   }
+  /**
+   * Move one owner's records out of the legacy shared file into this isolated
+   * store. Destination is written before source deletion, making retries safe
+   * after a crash; IDs are de-duplicated on every retry.
+   */
+  async migrateOwnerFrom(source: FileCronStore, ownerKeyId: string): Promise<number> {
+    if (!ownerKeyId.trim()) throw new Error("Cron migration owner is required");
+    if (source === this) return 0;
+    const owned = await source.transact(state => {
+      const schedules = state.schedules.filter(item => item.ownerKeyId === ownerKeyId).map(item => ({ ...item }));
+      const scheduleIds = new Set(schedules.map(item => item.id));
+      return {
+        schedules,
+        history: state.history.filter(item => scheduleIds.has(item.scheduleId)).map(item => ({ ...item })),
+        audit: state.audit.filter(item => scheduleIds.has(item.scheduleId)).map(item => ({ ...item })),
+      };
+    });
+    if (!owned.schedules.length) return 0;
+    await this.transact(state => {
+      const scheduleIds = new Set(state.schedules.map(item => item.id));
+      for (const item of owned.schedules) if (!scheduleIds.has(item.id)) state.schedules.push(item);
+      const historyIds = new Set(state.history.map(item => item.id));
+      for (const item of owned.history) if (!historyIds.has(item.id)) state.history.push(item);
+      const auditKeys = new Set(state.audit.map(item => JSON.stringify(item)));
+      for (const item of owned.audit) {
+        const key = JSON.stringify(item);
+        if (!auditKeys.has(key)) { state.audit.push(item); auditKeys.add(key); }
+      }
+    });
+    const ids = new Set(owned.schedules.map(item => item.id));
+    await source.transact(state => {
+      state.schedules = state.schedules.filter(item => !ids.has(item.id));
+      state.history = state.history.filter(item => !ids.has(item.scheduleId));
+      state.audit = state.audit.filter(item => !ids.has(item.scheduleId));
+    });
+    return owned.schedules.length;
+  }
 }
 
 function parseField(source: string, min: number, max: number): Set<number> {
@@ -312,7 +349,10 @@ export class CronScheduler {
     if (!target) return false;
     const controller = this.active.get(id);
     controller?.abort(new Error("Scheduled execution cancelled"));
-    if (target.jobId) await this.runtime.cancel(target.jobId);
+    if (target.jobId) {
+      if (!this.runtime.cancelForOwner) throw new Error("Owner-scoped job cancellation is unavailable.");
+      await this.runtime.cancelForOwner(target.jobId, target.ownerKeyId);
+    }
     return true;
   }
   async history(id: string, actor: string): Promise<CronExecution[]> {
@@ -427,8 +467,13 @@ export class CronScheduler {
 
       let job: JobRecord | undefined;
       try {
-        job = await this.runtime.get(execution.jobId);
+        if (!this.runtime.getForOwner) {
+          throw new Error("Owner-scoped job lookup is unavailable; refusing unscoped cron recovery.");
+        }
+        job = await this.runtime.getForOwner(execution.jobId, schedule.ownerKeyId);
       } catch {
+        // Never reconcile a persisted schedule against a runtime job without
+        // proving that the job belongs to the schedule's immutable owner.
         job = undefined;
       }
       if (!job) {
@@ -496,11 +541,11 @@ export class CronScheduler {
     const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Recovered scheduled execution cancelled"));
     controller.signal.addEventListener("abort", onAbort, { once: true });
     try {
-      const job = await this.waitForJob(jobId, timeout.signal);
+      const job = await this.waitForJob(jobId, schedule.ownerKeyId, timeout.signal);
       status = job.status === "completed" ? "completed" : job.status === "cancelled" ? "cancelled" : "failed";
       errorText = status === "failed" ? job.error ?? "Recovered runtime job failed" : undefined;
     } catch (error) {
-      await this.runtime.cancel(jobId).catch(() => false);
+      if (this.runtime.cancelForOwner) await this.runtime.cancelForOwner(jobId, schedule.ownerKeyId).catch(() => false);
       status = controller.signal.aborted ? "cancelled" : "failed";
       errorText = error instanceof Error ? error.message : String(error);
     } finally {
@@ -545,7 +590,9 @@ export class CronScheduler {
           const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
           job = submitted;
           if (controller.signal.aborted) {
-            await this.runtime.cancel(submitted.id).catch(() => false);
+            if (this.runtime.cancelForOwner) {
+              await this.runtime.cancelForOwner(submitted.id, schedule.ownerKeyId).catch(() => false);
+            }
             status = "cancelled";
             errorText = String(controller.signal.reason ?? "Scheduled execution cancelled");
             break;
@@ -568,7 +615,7 @@ export class CronScheduler {
           let result: JobRecord | undefined;
           let waitError: unknown;
           try {
-            result = await this.waitForJob(submitted.id, timeout.signal);
+            result = await this.waitForJob(submitted.id, schedule.ownerKeyId, timeout.signal);
           } catch (error) {
             waitError = error;
           } finally {
@@ -578,7 +625,7 @@ export class CronScheduler {
 
           if (waitError !== undefined) {
             // Abort the actual runtime job too; aborting the polling loop alone is not cancellation.
-            await this.runtime.cancel(submitted.id).catch(() => false);
+            if (this.runtime.cancelForOwner) await this.runtime.cancelForOwner(submitted.id, schedule.ownerKeyId).catch(() => false);
             if (controller.signal.aborted) {
               status = "cancelled";
               errorText = String(controller.signal.reason ?? waitError);
@@ -621,9 +668,10 @@ export class CronScheduler {
     }).catch(() => undefined);
     this.active.delete(schedule.id);
   }
-  private async waitForJob(id: string, signal: AbortSignal): Promise<JobRecord> {
+  private async waitForJob(id: string, ownerKeyId: string, signal: AbortSignal): Promise<JobRecord> {
+    if (!this.runtime.getForOwner) throw new Error("Owner-scoped job lookup is unavailable.");
     while (!signal.aborted) {
-      const record = await this.runtime.get(id);
+      const record = await this.runtime.getForOwner(id, ownerKeyId);
       if (!record) throw new Error("Scheduled runtime job disappeared");
       if (record.status === "completed" || record.status === "failed" || record.status === "cancelled") return record;
       await new Promise<void>((resolve, reject) => {

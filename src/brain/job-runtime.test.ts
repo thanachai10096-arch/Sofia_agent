@@ -997,3 +997,28 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime owner-bound accessors reject cross-owner job control", async () => {
+  const namespace = "job-runtime-owner-bound-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: false, state: "failed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({ task: "owner-bound job", ownerKeyId: "principal-a" });
+
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal((await runtime.getForOwner(submitted.id, "principal-a"))?.ownerKeyId, "principal-a");
+  assert.equal(await runtime.getForOwner(submitted.id, "principal-b"), undefined);
+  assert.equal(await runtime.cancelForOwner(submitted.id, "principal-b"), false);
+  await assert.rejects(
+    () => runtime.resumeForOwner(submitted.id, "principal-b"),
+    /unknown job/i,
+  );
+  assert.equal((await runtime.get(submitted.id))?.status, "failed");
+});

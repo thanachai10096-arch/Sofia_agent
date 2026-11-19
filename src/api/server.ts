@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { SofiaAgent } from "../agent/core.js";
 import type { AgentDependencies } from "../agent/types.js";
@@ -8,8 +9,8 @@ import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
-import type { RunRecord } from "./run-record-store.js";
-import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
+import { FileRunRecordStore, type RunRecord, type RunRecordStore } from "./run-record-store.js";
+import { CronScheduler, FileCronStore, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 
 interface ActiveRun {
@@ -140,12 +141,55 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try { usage.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
-  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  // Cron state is physically partitioned by the server-derived API-key owner ID.
+  // Migrate each owner's records from the legacy shared file before serving cron
+  // requests or recovering jobs; never accept a client-supplied namespace.
+  const cronSchedulers = new Map<string, CronScheduler>();
+  const legacyCronStore = deps.jobRuntime ? new FileCronStore(undefined, config.cronStoreRoot) : undefined;
+  const cronInitialization = (async () => {
+    if (!deps.jobRuntime || !legacyCronStore) return;
+    for (const token of Object.keys(config.apiKeys)) {
+      const ownerKeyId = createHash("sha256").update(token).digest("hex").slice(0, 32);
+      const store = new FileCronStore(ownerKeyId, config.cronStoreRoot);
+      await store.migrateOwnerFrom(legacyCronStore, ownerKeyId);
+      cronSchedulers.set(ownerKeyId, new CronScheduler(deps.jobRuntime, { store, maxConcurrent: 1 }));
+    }
+  })();
+  // Keep an initialization failure observable to awaited requests without
+  // allowing an early rejected promise to become an unhandled rejection.
+  void cronInitialization.catch(() => undefined);
+  const tickCronSchedulers = async (): Promise<void> => {
+    for (const scheduler of cronSchedulers.values()) await scheduler.tick();
+  };
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
-  const runStore = config.runStore;
+  const legacyRunStore = config.runStore;
+  if (legacyRunStore && !config.runStoreRoot && Object.keys(config.apiKeys).length > 1) {
+    throw new Error("runStoreRoot is required when a shared run store serves multiple API keys.");
+  }
+  const runStores = new Map<string, FileRunRecordStore>();
+  if (config.runStoreRoot !== undefined && !path.isAbsolute(config.runStoreRoot)) {
+    throw new Error("runStoreRoot must be an absolute path.");
+  }
+  if (config.runStoreRoot) {
+    for (const token of Object.keys(config.apiKeys)) {
+      const ownerKeyId = createHash("sha256").update(token).digest("hex").slice(0, 32);
+      const directoryKey = createHash("sha256").update("sofia-run-store:v1:").update(ownerKeyId).digest("hex");
+      runStores.set(ownerKeyId, new FileRunRecordStore(path.join(config.runStoreRoot, directoryKey)));
+    }
+  }
+  const runStoreForOwner = (ownerKeyId: string): RunRecordStore | undefined =>
+    runStores.get(ownerKeyId) ?? legacyRunStore;
+  const runStoreInitialization = (async () => {
+    if (!legacyRunStore) return;
+    for (const [ownerKeyId, store] of runStores) {
+      await store.migrateOwnerFrom(legacyRunStore, ownerKeyId);
+    }
+  })();
+  void runStoreInitialization.catch(() => undefined);
   const persist = (run: ActiveRun): Promise<void> => {
+    const runStore = runStoreForOwner(run.ownerKeyId);
     if (!runStore) return Promise.resolve();
     const record: RunRecord = {
       id: run.id, status: run.status,
@@ -157,12 +201,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     };
     return runStore.save(record);
   };
-  if (runStore) for (const record of runStore.loadAllSync()) {
+  const initialRunRecords = [
+    ...(legacyRunStore?.loadAllSync() ?? []),
+    ...[...runStores.values()].flatMap(store => store.loadAllSync()),
+  ];
+  for (const record of initialRunRecords) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
         !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string")) {
-      void runStore.remove(record.id); continue;
+      void runStoreForOwner(record.ownerKeyId)?.remove(record.id); continue;
     }
     const run: ActiveRun = {
       id: record.id, status: interrupted ? "failed" : record.status,
@@ -254,7 +302,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const prune = () => {
     const cutoff = Date.now() - retention;
     for (const [id, run] of runs) {
-      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
+      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); void runStoreForOwner(run.ownerKeyId)?.remove(id); }
     }
     for (const [key, entry] of idempotency) {
       if (!runs.has(entry.runId)) idempotency.delete(key);
@@ -294,6 +342,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
+      try { await runStoreInitialization; }
+      catch { return json(res, 503, { error: "run_store_initialization_failed" }, origin, config); }
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
@@ -349,6 +399,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
       if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
+      if (isCronRequest) {
+        try { await cronInitialization; }
+        catch { return json(res, 503, { error: "cron_store_initialization_failed" }, origin, config); }
+      }
+      const cronScheduler = isCronRequest ? cronSchedulers.get(auth.keyId) : undefined;
+      if (isCronRequest && !cronScheduler) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
         return json(res, 403, { error: "forbidden", requiredScope: "cron:read" }, origin, config);
       }
@@ -430,7 +486,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         // whose in-memory map has not seen a run accepted by the previous one.
         // Rehydrate from the shared persistent store, and refresh newer records
         // so status polling follows updates written by the original process.
-        const stored = runStore?.load?.(id);
+        const stored = runStoreForOwner(auth.keyId)?.loadForOwner?.(id, auth.keyId);
         if (stored && (!run || stored.updatedAt > run.updatedAt)) {
           run = {
             id: stored.id,
@@ -732,19 +788,20 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
-        const job = await deps.jobRuntime.get(jobId);
-        if (!job || job.ownerKeyId !== auth.keyId) {
-          return json(res, 404, { error: "job_not_found" }, origin, config);
+        if (!deps.jobRuntime.getForOwner || !deps.jobRuntime.resumeForOwner || !deps.jobRuntime.cancelForOwner) {
+          return json(res, 503, { error: "owner_scoped_job_access_unavailable" }, origin, config);
         }
+        const job = await deps.jobRuntime.getForOwner(jobId, auth.keyId);
+        if (!job) return json(res, 404, { error: "job_not_found" }, origin, config);
         if (req.method === "GET" && !action) {
           return json(res, 200, job, origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
+          try { return json(res, 202, await deps.jobRuntime.resumeForOwner(jobId, auth.keyId), origin, config); }
           catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
-          const cancelled = await deps.jobRuntime.cancel(jobId);
+          const cancelled = await deps.jobRuntime.cancelForOwner(jobId, auth.keyId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
         }
       }
@@ -792,17 +849,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       return json(res, 500, { error: "internal_error" }, origin, config);
     }
   });
-  if (cronScheduler) {
+  if (deps.jobRuntime) {
     server.on("listening", () => {
       void (async () => {
         try {
-          await cronScheduler.recover();
+          await cronInitialization;
+          for (const scheduler of cronSchedulers.values()) await scheduler.recover();
           if (cronClosed) return;
-          await cronScheduler.tick();
+          await tickCronSchedulers();
           if (cronClosed) return;
-          cronTimer = setInterval(() => { void cronScheduler.tick().catch(() => undefined); }, 1_000);
+          cronTimer = setInterval(() => { void tickCronSchedulers().catch(() => undefined); }, 1_000);
         } catch {
-          // Fail closed: do not dispatch scheduled work if recovery could not complete.
+          // Fail closed: do not dispatch scheduled work if migration or recovery could not complete.
         }
       })();
     });

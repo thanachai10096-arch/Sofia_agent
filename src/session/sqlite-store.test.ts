@@ -220,3 +220,42 @@ test("SQLite session storage rejects a directory as a database path", {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test("SQLite owner transcript migration copies only matching sessions and is retry-safe", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-session-owner-migration-"));
+  const legacy = await SqliteSessionStore.open(path.join(dir, "legacy.sqlite"));
+  const ownerOne = await SqliteSessionStore.open(path.join(dir, "owner-one.sqlite"));
+  const ownerTwo = await SqliteSessionStore.open(path.join(dir, "owner-two.sqlite"));
+  try {
+    legacy.save({ id: "owner-one:conversation-a", messages: ["legacy transcript"], updatedAt: 10 });
+    legacy.save({ id: "owner-two:conversation-b", messages: ["other tenant"], updatedAt: 20 });
+    legacy.save({ id: "owner-one-extra:conversation-c", messages: ["prefix collision"], updatedAt: 30 });
+    // Put the target owner beyond the first 500-row page to exercise full pagination.
+    for (let index = 0; index < 505; index += 1) {
+      legacy.save({ id: "aaa-foreign-" + String(index).padStart(4, "0"), messages: ["unrelated"], updatedAt: 0 });
+    }
+
+    const originalTimestamp = legacy.get("owner-one:conversation-a")?.updatedAt;
+    assert.equal(legacy.migrateOwnerTo("owner-one", ownerOne), 1);
+    assert.deepEqual(ownerOne.get("owner-one:conversation-a")?.messages, ["legacy transcript"]);
+    assert.equal(ownerOne.get("owner-one:conversation-a")?.updatedAt, originalTimestamp);
+    assert.equal(legacy.get("owner-one:conversation-a"), undefined);
+    assert.deepEqual(legacy.get("owner-two:conversation-b")?.messages, ["other tenant"]);
+    assert.deepEqual(legacy.get("owner-one-extra:conversation-c")?.messages, ["prefix collision"]);
+    assert.equal(legacy.migrateOwnerTo("owner-one", ownerOne), 0);
+
+    ownerOne.save({ id: "owner-one:conversation-a", messages: ["new destination transcript"], updatedAt: Date.now() + 1000 });
+    legacy.save({ id: "owner-one:conversation-a", messages: ["stale legacy transcript"], updatedAt: 1 });
+    assert.equal(legacy.migrateOwnerTo("owner-one", ownerOne), 1);
+    assert.deepEqual(ownerOne.get("owner-one:conversation-a")?.messages, ["new destination transcript"]);
+
+    assert.equal(legacy.migrateOwnerTo("owner-two", ownerTwo), 1);
+    assert.deepEqual(ownerTwo.get("owner-two:conversation-b")?.messages, ["other tenant"]);
+  } finally {
+    legacy.close();
+    ownerOne.close();
+    ownerTwo.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

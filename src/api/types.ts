@@ -45,6 +45,8 @@ export interface SofiaApiConfig {
   maxToolCallsPerKeyPerDay?: number;
   /** Optional durable quota store. Share its filesystem path across API processes only when the filesystem supports atomic exclusive file creation and rename. */
   usageStorePath?: string;
+  /** Optional root for owner-partitioned cron files; defaults to the configured Sofia cron state directory. */
+  cronStoreRoot?: string;
   /**
    * Allowed browser origins. If omitted or empty, cross-origin browser access is not granted.
    * Keep the master API key on a trusted server; do not ship it in a browser.
@@ -56,6 +58,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Root directory for physically partitioned API run records; each API owner gets a hashed subdirectory. */
+  runStoreRoot?: string;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;

@@ -77,8 +77,12 @@ function publicJobRecord(record: JobRecord): JobRecord {
 export interface JobRuntime {
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
+  /** Owner-bound accessors fail closed for jobs without a matching persisted owner. */
+  getForOwner?(id: string, ownerKeyId: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
+  resumeForOwner?(id: string, ownerKeyId: string, signal?: AbortSignal): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
+  cancelForOwner?(id: string, ownerKeyId: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
   markNotificationDelivered?(id: string): Promise<void>;
 }
@@ -386,6 +390,9 @@ class FileJobStateStore {
       const index = records.findIndex((item) => item.id === record.id);
       if (index >= 0) {
         const current = records[index]!;
+        // The authenticated owner is fixed at submission. A later write must
+        // never be able to transfer a durable job to another principal.
+        if (current.ownerKeyId !== record.ownerKeyId) return false;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
         records[index] = {
@@ -482,6 +489,12 @@ export class DurableJobRuntime implements JobRuntime {
     return publicJobRecord(hydrated);
   }
 
+  async getForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined> {
+    if (!ownerKeyId.trim()) return undefined;
+    const record = await this.get(id);
+    return record?.ownerKeyId === ownerKeyId ? record : undefined;
+  }
+
   async markNotificationDelivered(id: string): Promise<void> {
     const record = this.jobs.get(id) ?? await this.get(id);
     if (!record) return;
@@ -533,6 +546,20 @@ export class DurableJobRuntime implements JobRuntime {
     } finally {
       this.resuming.delete(id);
     }
+  }
+
+  async resumeForOwner(id: string, ownerKeyId: string, signal?: AbortSignal): Promise<JobRecord> {
+    const record = await this.getForOwner(id, ownerKeyId);
+    if (!record) throw new Error("Unknown job");
+    // Ownership is immutable after submission; resume() re-reads the canonical
+    // record before dispatch and this owner check prevents cross-principal access.
+    return this.resume(id, signal);
+  }
+
+  async cancelForOwner(id: string, ownerKeyId: string): Promise<boolean> {
+    const record = await this.getForOwner(id, ownerKeyId);
+    if (!record) return false;
+    return this.cancel(id);
   }
 
   async cancel(id: string): Promise<boolean> {

@@ -229,6 +229,64 @@ export class SqliteSessionStore {
     `).all(pattern, limit, offset) as Array<{ id: string }>).map((row) => row.id);
   }
 
+  private saveImported(session: Session): void {
+    if (!Number.isSafeInteger(session.updatedAt) || session.updatedAt < 0) {
+      throw new Error("Imported session timestamp must be a non-negative safe integer.");
+    }
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(
+        "INSERT INTO sessions(id, updated_at) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
+      ).run(session.id, session.updatedAt);
+      this.db.prepare("DELETE FROM session_messages WHERE session_id = ?").run(session.id);
+      if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(session.id);
+      const insertMessage = this.db.prepare(
+        "INSERT INTO session_messages(session_id, position, content) VALUES (?, ?, ?)",
+      );
+      const insertFts = this.ftsAvailable
+        ? this.db.prepare("INSERT INTO session_messages_fts(session_id, content) VALUES (?, ?)")
+        : undefined;
+      session.messages.forEach((message, position) => {
+        insertMessage.run(session.id, position, message);
+        insertFts?.run(session.id, message);
+      });
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+    restrictSqlitePermissions(this.filePath);
+  }
+
+  /**
+   * Copy one authenticated owner's legacy transcripts into a private database.
+   * Copy-before-delete makes an interrupted migration safe to retry. A newer
+   * destination transcript always wins over an older legacy copy.
+   */
+  migrateOwnerTo(ownerPrefix: string, destination: SqliteSessionStore): number {
+    if (!ownerPrefix || ownerPrefix.length > 256 || /[\x00-\x1f\x7f]/u.test(ownerPrefix)) {
+      throw new Error("Invalid session owner prefix.");
+    }
+    if (destination === this) throw new Error("Session migration source and destination must differ.");
+    const prefix = ownerPrefix.endsWith(":") ? ownerPrefix : ownerPrefix + ":";
+    const owned: Session[] = [];
+    for (let offset = 0;; offset += 500) {
+      const page = this.listSessions({ limit: 500, offset });
+      owned.push(...page.filter((session) => session.id.startsWith(prefix)));
+      if (page.length < 500) break;
+    }
+    let migrated = 0;
+    for (const session of owned) {
+      const current = destination.get(session.id);
+      if (!current || session.updatedAt > current.updatedAt) {
+        destination.saveImported({ id: session.id, messages: [...session.messages], updatedAt: session.updatedAt });
+      }
+      this.delete(session.id);
+      migrated += 1;
+    }
+    return migrated;
+  }
+
   delete(id: string): void {
     this.db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
     if (this.ftsAvailable) this.db.prepare("DELETE FROM session_messages_fts WHERE session_id = ?").run(id);

@@ -33,6 +33,8 @@ import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
+import fs from "node:fs";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { SecurityController } from "../security/controller.js";
 import { MemorySecurityAudit } from "../security/audit.js";
 import { EncryptedFileAudit } from "../security/persistent-audit.js";
@@ -40,6 +42,7 @@ import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { TenantResourceContext, TenantResourceResolver } from "../platform/tenant-resolver.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
@@ -118,7 +121,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   };
 }
 
-export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
+export function createSofiaAgentDependencies(
+  workspace=process.cwd(),
+  approval?:AgentDependencies["approval"],
+  options?: { userMemoryDirectory?: string; browserProfileDirectory?: string },
+):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
@@ -126,13 +133,33 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
-    process.env.SOFIA_BROWSER_HEADLESS === "false" && process.env.SOFIA_BROWSER_PROFILE_DIR?.trim()
-      ? new BrowserProfileSessionManager(new BrowserProfileStore(process.env.SOFIA_BROWSER_PROFILE_DIR), () => new PlaywrightBrowserRuntime())
+    process.env.SOFIA_BROWSER_HEADLESS === "false" && (options?.browserProfileDirectory ?? process.env.SOFIA_BROWSER_PROFILE_DIR)?.trim()
+      ? new BrowserProfileSessionManager(new BrowserProfileStore((options?.browserProfileDirectory ?? process.env.SOFIA_BROWSER_PROFILE_DIR)!), () => new PlaywrightBrowserRuntime())
       : undefined;
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
-  const userMemoryStore = new FileUserMemoryStore();
+  const userMemoryStore = new FileUserMemoryStore(options?.userMemoryDirectory);
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
+}
+
+/**
+ * Build a complete dependency bundle for one resolver-issued tenant context.
+ * All file-backed Brain stores, job state, audit records, browser profiles, and
+ * explicit user memory are rooted beneath that tenant's private workspace.
+ * The API host must still route each authenticated request to this bundle and
+ * persist the tenant identity with any queued work before enabling public tenancy.
+ */
+export function createSofiaAgentDependenciesForTenant(
+  resolver: TenantResourceResolver,
+  context: TenantResourceContext,
+  approval?: AgentDependencies["approval"],
+): AgentDependencies {
+  resolver.assertContext(context);
+  const workspace = path.resolve(context.workspaceRoot);
+  return createSofiaAgentDependencies(workspace, approval, {
+    userMemoryDirectory: path.join(workspace, ".sofia", "user-memory"),
+    browserProfileDirectory: path.join(workspace, ".sofia", "browser-profiles"),
+  });
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
@@ -144,4 +171,47 @@ export async function createSofiaAgentDependenciesWithSessions(
   const dependencies = createSofiaAgentDependencies(workspace, approval);
   const sessionStore = await SqliteSessionStore.open(databasePath);
   return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+}
+
+/**
+ * Create dependencies with a physically private transcript database for one
+ * server-derived API owner. Legacy shared transcripts for that owner are copied
+ * before deletion, so startup can safely retry an interrupted migration.
+ */
+export async function createSofiaAgentDependenciesWithOwnerSessions(
+  workspace: string,
+  ownerKeyId: string,
+  approval?: AgentDependencies["approval"],
+): Promise<AgentDependencies & { closeSessionStore: () => void }> {
+  if (!/^[a-f0-9]{32}$/u.test(ownerKeyId)) {
+    throw new Error("A server-derived 32-character owner key ID is required for session isolation.");
+  }
+  const tenantSessionDirectory = path.join(sofiaStateDirectory("sessions"), "tenants");
+  fs.mkdirSync(tenantSessionDirectory, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") {
+    const directoryStat = fs.lstatSync(tenantSessionDirectory);
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) {
+      throw new Error("Tenant session storage must be a real directory, not a symbolic link.");
+    }
+    const privateMode = directoryStat.mode & 0o700;
+    if ((directoryStat.mode & 0o777) !== privateMode) fs.chmodSync(tenantSessionDirectory, privateMode);
+  }
+  const databasePath = path.join(tenantSessionDirectory, ownerKeyId + ".sqlite");
+  const sessionStore = await SqliteSessionStore.open(databasePath);
+  try {
+    const legacyPath = path.join(sofiaStateDirectory("sessions"), "sessions.sqlite");
+    if (path.resolve(legacyPath) !== path.resolve(databasePath)) {
+      const legacyStore = await SqliteSessionStore.open(legacyPath);
+      try {
+        legacyStore.migrateOwnerTo(ownerKeyId, sessionStore);
+      } finally {
+        legacyStore.close();
+      }
+    }
+    const dependencies = createSofiaAgentDependencies(workspace, approval);
+    return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+  } catch (error) {
+    sessionStore.close();
+    throw error;
+  }
 }

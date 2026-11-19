@@ -6,7 +6,7 @@ import type { AgentRunStatus } from "./types.js";
 import type { AgentResult } from "../agent/types.js";
 
 export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; /** SHA-256 of owner-scoped idempotency key; never store the raw key. */ idempotencyId?:string; requestFingerprint?:string; }
-export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; load?(id:string):RunRecord|undefined; }
+export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; load?(id:string):RunRecord|undefined; loadForOwner?(id:string, ownerKeyId:string):RunRecord|undefined; }
 const SAFE_ID=/^[A-Za-z0-9-]{8,64}$/;
 const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
 const KINDS=new Set(["coding","debugging","research","analysis","vision","general"]);
@@ -61,6 +61,22 @@ export class FileRunRecordStore implements RunRecordStore {
   const filename=id+".json";
   try{const parsed:unknown=JSON.parse(readFileSync(this.file(id),"utf8"));return validRecord(parsed,filename)?parsed:undefined;}
   catch{return undefined;}
+ }
+ loadForOwner(id:string,ownerKeyId:string):RunRecord|undefined{
+  if(typeof ownerKeyId!=="string"||!/^[a-f0-9]{32}$/.test(ownerKeyId))return undefined;
+  const record=this.load(id);
+  return record?.ownerKeyId===ownerKeyId?record:undefined;
+ }
+
+ /** Copy one owner's records into this store before removing them from the legacy store. */
+ async migrateOwnerFrom(source: RunRecordStore, ownerKeyId: string): Promise<number> {
+  if (!/^[a-f0-9]{32}$/.test(ownerKeyId)) throw new Error("Invalid run-record migration owner.");
+  if (source === this) return 0;
+  const owned = source.loadAllSync().filter(record => record.ownerKeyId === ownerKeyId);
+  for (const record of owned) await this.save(record);
+  // Remove only after every destination write has completed successfully.
+  for (const record of owned) await source.remove(record.id);
+  return owned.length;
  }
  loadAllSync():RunRecord[]{
   const out:RunRecord[]=[];let names:string[];try{names=readdirSync(this.directory);}catch{return out;}

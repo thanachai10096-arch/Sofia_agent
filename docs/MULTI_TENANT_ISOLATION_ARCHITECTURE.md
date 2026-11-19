@@ -1,10 +1,10 @@
 # Multi-Tenant Isolation Architecture (RFC)
 
-Status: proposed architecture; **not implemented**. The current API must not be marketed or exposed as an isolated multi-tenant workspace service.
+Status: partially implemented foundations; **not production-ready multi-tenant isolation**. The current API must not be marketed or exposed as an isolated multi-tenant workspace service.
 
 ## 1. Current boundary
 
-The API derives an opaque principal ID from each bearer API key and scopes API run/job records, user memory, cron schedules, usage counters, and session IDs to that principal in their respective code paths. This is useful authorization, but it is not complete tenant isolation.
+The API derives an opaque principal ID from each bearer API key and scopes API run/job records, user memory, cron schedules, usage counters, and session IDs to that principal in their respective code paths. The single-key API entrypoint now stores transcripts in a separate SQLite database named by the server-derived owner ID and migrates that owner’s legacy transcripts on startup. This is useful defense in depth, but it is not complete tenant isolation.
 
 The current process constructs a single `AgentDependencies` instance from one operator-configured `SOFIA_WORKSPACE`. Brain runs currently share workspace-backed project memory, run snapshots, skill lifecycle/ledger, evolution state, local runtime, and desktop workspace root. Some of these stores are created inside the Brain factory but rooted at the same workspace. A principal ID passed to the Agent does not automatically partition those resources.
 
@@ -12,11 +12,12 @@ Client-supplied workspace paths are rejected by the API validation guard. Do not
 
 ## 1.1 Verified implementation inventory (repository audit)
 
-The following observations were verified against the current `main` implementation during this audit. They describe the present code, not the target architecture.
+The following observations were verified against this branch during the audit. They describe the present implementation, not the target architecture.
 
 | Component | Current implementation | Isolation consequence |
 |---|---|---|
 | API authentication | `src/api/server.ts` hashes the bearer token into `keyId` and attaches configured scopes | Distinct API keys receive distinct opaque principals; this does not itself partition runtime resources |
+| API transcripts | `createSofiaAgentDependenciesWithOwnerSessions` opens `SOFIA_STATE_DIR/sofia-agents-sessions/tenants/<keyId>.sqlite` for the single-key API entrypoint and migrates only `<keyId>:` records from the legacy shared SQLite database | Physical per-owner database files for the entrypoint; direct multi-key `createSofiaApi` hosts must still inject a correctly routed per-owner session store |
 | User memory | `FileUserMemoryStore` receives `auth.keyId` for API CRUD and hashes the user ID for its filename | API user-memory files are principal-scoped; this does not isolate project memory |
 | Project memory | `createBrainFactory` constructs one `FileProjectMemoryStore(workspace)`; store hashes only the project namespace | Runs using the same workspace share project memory and the persistent skill ledger |
 | Brain run snapshots | One `FileRunStore(workspace)` is captured by the Brain factory | Brain snapshots are namespaced by workspace, not by authenticated principal |
@@ -39,9 +40,11 @@ The branch now contains `src/platform/tenant-workspace.ts` with `createTenantWor
 
 Regression coverage is in `src/platform/tenant-workspace.test.ts` for deterministic separation, invalid inputs, and symlink escapes.
 
-**This is only an allocation primitive.** It is intentionally not connected to `createBrainFactory` yet: the current Brain factory, durable job runtime, API run store, shared tool registry, checkpoint manager, evolution engine, and background jobs still capture process-wide dependencies. Wiring only the workspace path would leave other stores and lifecycle operations cross-tenant. The next implementation step must introduce a per-principal dependency bundle and ensure queued jobs retain an immutable tenant identity through execution and recovery.
+**The workspace allocator and tenant dependency factory are foundations, not a complete request-routing implementation.** `createSofiaAgentDependenciesForTenant` now builds workspace-rooted dependencies, but API authentication does not yet select and lifecycle-manage one dependency bundle per tenant for every request. Queued-job recovery, messaging adapters, and shared host resources still require tenant-aware routing and immutable tenant identity.
 
 ### Safe interim operating mode
+
+The API entrypoint is configured with one `SOFIA_API_KEY` and now uses a physically separate transcript database outside the agent workspace for that owner, under `SOFIA_STATE_DIR/sofia-agents-sessions/tenants/` (or the OS temporary root when `SOFIA_STATE_DIR` is unset). Migration copies only session IDs beginning with the authenticated owner ID plus a colon, writes to the destination before deleting the legacy row, and is safe to retry after interruption. This does not yet provide a multi-key session-store router for arbitrary embedded `createSofiaApi` hosts, and it does not isolate the shared workspace, Brain stores, JobRuntime, or messaging adapters.
 
 Until a tenant-aware runtime factory and tenant-owned workspace roots exist:
 - treat the API deployment as a single trusted workspace/operator, even when API keys have separate run and user-memory records;

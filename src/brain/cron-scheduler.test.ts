@@ -9,6 +9,19 @@ import { pathToFileURL } from "node:url";
 import { CronScheduler, FileCronStore, nextCronOccurrence, type CronStore } from "./cron-scheduler.js";
 import type { JobRecord, JobRuntime } from "./job-runtime.js";
 
+
+function withOwnerScopedAccess(runtime: JobRuntime): JobRuntime {
+  return Object.assign(runtime, {
+    async getForOwner(id: string, ownerKeyId: string) {
+      const record = await runtime.get(id);
+      return record ? { ...record, ownerKeyId } : undefined;
+    },
+    async cancelForOwner(id: string, _ownerKeyId: string) {
+      return runtime.cancel(id);
+    },
+  });
+}
+
 test("stale lock is not automatically unlinked because that can delete a replacement owner lock", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-stale-lock-test-"));
   const namespace = "stale-lock-safety-test";
@@ -28,7 +41,7 @@ test("creating a schedule cannot assign it to another owner", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };
   const runtime = { async submit() { throw new Error("unused"); } } as unknown as JobRuntime;
-  const scheduler = new CronScheduler(runtime, { store });
+  const scheduler = new CronScheduler(withOwnerScopedAccess(runtime), { store });
   await assert.rejects(() => scheduler.create({
     name: "spoofed", task: "task", runAt: "2026-10-18T00:00:00.000Z", timeZone: "UTC", ownerKeyId: "bob",
   }, "alice"), /owner must match/i);
@@ -343,4 +356,72 @@ test("execution timeout cancels the runtime job and records failure", async () =
   assert.equal(cancelled, true);
   assert.equal(state.history[0].status, "failed");
   assert.match(state.history[0].error, /timed out/i);
+});
+
+test("cron recovery refuses to reconcile a job owned by another API principal", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let unscopedReads = 0;
+  const runtime = {
+    async submit() { throw new Error("recovery must not submit"); },
+    async get() { unscopedReads++; throw new Error("unscoped lookup must never be used"); },
+    async getForOwner(_id: string, _ownerKeyId: string) { return undefined; },
+    async cancel() { return true; },
+    async cancelForOwner() { return true; },
+    async list() { return []; },
+    async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store, now: () => new Date("2026-10-17T00:00:00.000Z") });
+  const schedule = await scheduler.create({
+    name: "tenant-recovery", task: "must remain isolated", cron: "* * * * *",
+    timeZone: "UTC", ownerKeyId: "owner-a",
+  }, "owner-a");
+  state.history.push({
+    id: "cross-owner-execution", scheduleId: schedule.id,
+    scheduledFor: "2026-10-16T23:59:00.000Z",
+    startedAt: "2026-10-16T23:59:00.000Z",
+    status: "running", jobId: "job-owned-by-someone-else", attempt: 1,
+  });
+
+  const result = await scheduler.recover();
+  assert.deepEqual(result, { reconciled: 1, monitoring: 0, indeterminate: 0 });
+  assert.equal(state.history[0].status, "failed");
+  assert.match(state.history[0].error, /not found/i);
+  assert.equal(unscopedReads, 0);
+});
+
+test("legacy cron migration partitions each owner and is safe to retry", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-tenant-migration-"));
+  try {
+    const legacy = new FileCronStore("legacy-shared-cron", root);
+    const alice = new FileCronStore("tenant-alice", root);
+    const bob = new FileCronStore("tenant-bob", root);
+    await legacy.transact(state => {
+      state.schedules.push(
+        { id: "alice-schedule", name: "a", task: "a", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "alice", status: "enabled", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", nextRunAt: "2026-01-01T00:01:00.000Z", consecutiveFailures: 0 },
+        { id: "bob-schedule", name: "b", task: "b", cron: "* * * * *", timeZone: "UTC", ownerKeyId: "bob", status: "enabled", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", nextRunAt: "2026-01-01T00:01:00.000Z", consecutiveFailures: 0 },
+      );
+      state.history.push(
+        { id: "alice-history", scheduleId: "alice-schedule", scheduledFor: "2026-01-01T00:01:00.000Z", startedAt: "2026-01-01T00:01:00.000Z", status: "completed", attempt: 1 },
+        { id: "bob-history", scheduleId: "bob-schedule", scheduledFor: "2026-01-01T00:01:00.000Z", startedAt: "2026-01-01T00:01:00.000Z", status: "completed", attempt: 1 },
+      );
+      state.audit.push(
+        { at: "2026-01-01T00:01:00.000Z", actor: "alice", action: "schedule.created", scheduleId: "alice-schedule" },
+        { at: "2026-01-01T00:01:00.000Z", actor: "bob", action: "schedule.created", scheduleId: "bob-schedule" },
+      );
+    });
+    assert.equal(await alice.migrateOwnerFrom(legacy, "alice"), 1);
+    assert.equal(await alice.migrateOwnerFrom(legacy, "alice"), 0);
+    assert.equal(await bob.migrateOwnerFrom(legacy, "bob"), 1);
+    const [aliceState, bobState, legacyState] = await Promise.all([
+      alice.transact(state => ({ schedules: state.schedules.map(x => x.id), history: state.history.map(x => x.id), audit: state.audit.map(x => x.scheduleId) })),
+      bob.transact(state => ({ schedules: state.schedules.map(x => x.id), history: state.history.map(x => x.id), audit: state.audit.map(x => x.scheduleId) })),
+      legacy.transact(state => ({ schedules: state.schedules.map(x => x.id), history: state.history.map(x => x.id), audit: state.audit.map(x => x.scheduleId) })),
+    ]);
+    assert.deepEqual(aliceState, { schedules: ["alice-schedule"], history: ["alice-history"], audit: ["alice-schedule"] });
+    assert.deepEqual(bobState, { schedules: ["bob-schedule"], history: ["bob-history"], audit: ["bob-schedule"] });
+    assert.deepEqual(legacyState, { schedules: [], history: [], audit: [] });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

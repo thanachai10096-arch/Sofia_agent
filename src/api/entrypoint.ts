@@ -1,8 +1,9 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
-import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
+import { createSofiaAgentDependenciesWithOwnerSessions } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
 import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.js";
@@ -20,7 +21,8 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+const apiOwnerKeyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
+const deps = await createSofiaAgentDependenciesWithOwnerSessions(workspace, apiOwnerKeyId);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -77,8 +79,8 @@ if (discordConfigured) {
           );
           return;
         }
-        const job = await deps.jobRuntime.get(argument);
-        if (!job || job.ownerKeyId !== principalId) {
+        const job = await deps.jobRuntime.getForOwner?.(argument, principalId);
+        if (!job) {
           await discordTransport?.sendMessage(message.channelId, "Job not found or not accessible to this Discord user.", undefined, message.id);
           return;
         }
@@ -92,6 +94,17 @@ if (discordConfigured) {
           return;
         }
         if (command === "/resume") {
+          // Custom JobRuntime implementations may not expose owner-scoped resume.
+          // Fail closed instead of relying on a non-null assertion at runtime.
+          if (!deps.jobRuntime.resumeForOwner) {
+            await discordTransport?.sendMessage(
+              message.channelId,
+              "Owner-scoped job resume is unavailable on this server.",
+              undefined,
+              message.id,
+            );
+            return;
+          }
           if (!job.snapshot || job.status === "completed" || job.status === "cancelled" || job.status === "running") {
             await discordTransport?.sendMessage(
               message.channelId,
@@ -102,7 +115,7 @@ if (discordConfigured) {
             return;
           }
           await discordTransport?.sendMessage(message.channelId, "Resume requested for job " + job.id + ".", undefined, message.id);
-          void deps.jobRuntime.resume(job.id).then(async (resumed) => {
+          void deps.jobRuntime.resumeForOwner(job.id, principalId).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
             await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
@@ -114,7 +127,7 @@ if (discordConfigured) {
           });
           return;
         }
-        const cancelled = await deps.jobRuntime.cancel(job.id);
+        const cancelled = await deps.jobRuntime.cancelForOwner?.(job.id, principalId) ?? false;
         await discordTransport?.sendMessage(
           message.channelId,
           cancelled ? "Cancellation requested for job " + job.id + "." : "Job " + job.id + " is already terminal or cannot be cancelled.",
@@ -208,6 +221,7 @@ const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
+  runStoreRoot: path.join(runStoreDirectory, "tenants"),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
