@@ -25,6 +25,8 @@ interface HelperReply {
   workspacePath?: string;
   quotaBytes?: number;
   quotaInodes?: number;
+  filesystemType?: string;
+  projectQuotaEnabled?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -34,13 +36,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** Parse the deliberately small host-helper response schema; unknown fields fail closed. */
 export function parseLinuxQuotaHelperReply(stdout: string): HelperReply {
   const parsed: unknown = JSON.parse(stdout);
-  const allowedReplyKeys = new Set(["ok", "runId", "workspacePath", "quotaBytes", "quotaInodes"]);
+  const allowedReplyKeys = new Set(["ok", "runId", "workspacePath", "quotaBytes", "quotaInodes", "filesystemType", "projectQuotaEnabled"]);
   if (!isRecord(parsed) || parsed.ok !== true ||
       Object.keys(parsed).some((key) => !allowedReplyKeys.has(key)) ||
-      typeof parsed.runId !== "string" ||
+      (parsed.runId !== undefined && typeof parsed.runId !== "string") ||
       (parsed.workspacePath !== undefined && typeof parsed.workspacePath !== "string") ||
       (parsed.quotaBytes !== undefined && (!Number.isSafeInteger(parsed.quotaBytes) || parsed.quotaBytes < 1)) ||
-      (parsed.quotaInodes !== undefined && (!Number.isSafeInteger(parsed.quotaInodes) || parsed.quotaInodes < 1))) {
+      (parsed.quotaInodes !== undefined && (!Number.isSafeInteger(parsed.quotaInodes) || parsed.quotaInodes < 1)) ||
+      (parsed.filesystemType !== undefined && typeof parsed.filesystemType !== "string") ||
+      (parsed.projectQuotaEnabled !== undefined && typeof parsed.projectQuotaEnabled !== "boolean")) {
     throw new Error("Quota helper returned an unexpected or malformed response.");
   }
   return parsed as HelperReply;
@@ -155,6 +159,18 @@ export class LinuxQuotaWorkspaceProvisioner {
       });
       child.stdin.end(JSON.stringify(payload));
     });
+  }
+
+  async healthCheck(): Promise<void> {
+    const root = await realpath(this.workspaceRoot);
+    const rootInfo = await lstat(root);
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) {
+      throw new Error("Quota workspace root must be a real directory.");
+    }
+    const reply = await this.invoke({ operation: "probe", workspaceRoot: root });
+    if (reply.filesystemType !== "xfs" || reply.projectQuotaEnabled !== true) {
+      throw new Error("Quota helper did not verify an XFS filesystem with project quota enforcement enabled.");
+    }
   }
 
   async createWorkspace(): Promise<string> {
