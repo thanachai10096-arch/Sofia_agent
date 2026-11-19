@@ -220,6 +220,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const timer = setTimeout(() => abortRun(run, new Error("Run timed out.")), requestTimeoutMs);
       try {
         const result = await agent.run({
+          runId: run.id,
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
@@ -526,6 +527,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           run.status = "running";
           const result = await agent.run({
+            runId,
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
@@ -649,6 +651,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         try {
           const result = await agent.run({
+            runId,
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
