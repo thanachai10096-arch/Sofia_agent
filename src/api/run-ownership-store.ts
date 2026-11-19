@@ -27,6 +27,12 @@ if not bound then
   bound = redis.call('GET', KEYS[3])
   if bound ~= ARGV[1] then return -1 end
 end
+-- A same-tenant reclaim may request a longer lease than the previous one.
+-- Extend, but never shorten, the existing binding retention window.
+local bindingTtl = redis.call('PTTL', KEYS[3])
+if bindingTtl < tonumber(ARGV[5]) then
+  redis.call('PEXPIRE', KEYS[3], ARGV[5])
+end
 local generation = redis.call('INCR', KEYS[2])
 redis.call('HSET', KEYS[1],
   'principalId', ARGV[1],
