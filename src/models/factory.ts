@@ -64,30 +64,30 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       ...await dependencies.evidenceVerifier.verify(candidate, provenance),
     ];
     const previous = skillLifecycle.active(candidate.skill.id);
-    if (previous) {
-      const baselineChecks = previous.evaluation?.checks;
-      if (!baselineChecks?.length) {
-        checks.push({ name: "skill-regression-benchmark", passed: false, detail: "Previous active Skill has no persisted evaluation baseline." });
-      } else {
-        try {
-          const benchmark = compareSkillRegressionBenchmark({
-            baseline: baselineChecks.filter((check) => check.name !== "skill-regression-benchmark" && check.name !== "skill-benchmark-history").map((check) => ({ name: check.name, passed: check.passed })),
-            candidate: checks.map((check) => ({ name: check.name, passed: check.passed })),
-          });
-          checks.push({
-            name: "skill-regression-benchmark",
-            passed: benchmark.passed,
-            detail: benchmark.passed
-              ? "Candidate preserves all prior benchmark checks and introduces no failing checks."
-              : "Regression benchmark blocked promotion: " + benchmark.regressions.join(", "),
-          });
-        } catch (error) {
-          checks.push({
-            name: "skill-regression-benchmark",
-            passed: false,
-            detail: error instanceof Error ? error.message : "Regression benchmark failed unexpectedly.",
-          });
-        }
+    const historicalBaseline = previous ? undefined
+      : skillBenchmarkHistory.list(candidate.skill.id).filter((record) => record.passed).at(-1);
+    const baselineChecks = previous?.evaluation?.checks ?? historicalBaseline?.checks;
+    if (previous && !baselineChecks?.length) {
+      checks.push({ name: "skill-regression-benchmark", passed: false, detail: "Previous active Skill has no persisted evaluation baseline." });
+    } else if (baselineChecks?.length) {
+      try {
+        const benchmark = compareSkillRegressionBenchmark({
+          baseline: baselineChecks.filter((check) => check.name !== "skill-regression-benchmark" && check.name !== "skill-benchmark-history").map((check) => ({ name: check.name, passed: check.passed })),
+          candidate: checks.map((check) => ({ name: check.name, passed: check.passed })),
+        });
+        checks.push({
+          name: "skill-regression-benchmark",
+          passed: benchmark.passed,
+          detail: benchmark.passed
+            ? "Candidate preserves all prior benchmark checks and introduces no failing checks."
+            : "Regression benchmark blocked promotion: " + benchmark.regressions.join(", "),
+        });
+      } catch (error) {
+        checks.push({
+          name: "skill-regression-benchmark",
+          passed: false,
+          detail: error instanceof Error ? error.message : "Regression benchmark failed unexpectedly.",
+        });
       }
     } else {
       checks.push({
@@ -108,7 +108,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         evaluatedAt: new Date().toISOString(),
         passed: checks.every((check) => check.passed),
         checks,
-        ...(previous ? { baselineVersion: previous.package.version } : {}),
+        ...((previous?.package.version ?? historicalBaseline?.skillVersion) ? { baselineVersion: previous?.package.version ?? historicalBaseline?.skillVersion } : {}),
         ...(provenance.runId ? { runId: provenance.runId } : {}),
       });
     } catch (error) {
