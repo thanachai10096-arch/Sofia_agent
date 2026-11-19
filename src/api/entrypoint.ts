@@ -27,7 +27,7 @@ if (rawApiKeys) {
     throw new Error("SOFIA_API_KEYS_JSON must be a JSON object mapping API keys to scope arrays.");
   }
   for (const [key, value] of Object.entries(parsed)) {
-    if (!key.trim() || key.length > 512 || /[\\x00-\\x20\\x7f]/u.test(key) ||
+    if (!key.trim() || key.length > 512 || /[\x00-\x20\x7f]/u.test(key) ||
         !Array.isArray(value) || value.length === 0 ||
         !value.every((scope) => typeof scope === "string" && /^[a-z][a-z0-9:_-]{0,63}$/u.test(scope))) {
       throw new Error("SOFIA_API_KEYS_JSON contains an invalid API key or scope list.");
