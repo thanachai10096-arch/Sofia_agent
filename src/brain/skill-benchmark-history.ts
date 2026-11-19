@@ -30,6 +30,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function validateCapability(value: unknown, checks: unknown[]): value is SkillCapabilityMetrics {
+  if (!isRecord(value) ||
+      typeof value.score !== "number" || !Number.isFinite(value.score) || value.score < 0 || value.score > 100 ||
+      typeof value.passRate !== "number" || !Number.isFinite(value.passRate) || value.passRate < 0 || value.passRate > 1 ||
+      typeof value.baselineCoverage !== "number" || !Number.isFinite(value.baselineCoverage) || value.baselineCoverage < 0 || value.baselineCoverage > 1 ||
+      !Number.isSafeInteger(value.passedChecks) || (value.passedChecks as number) < 0 ||
+      !Number.isSafeInteger(value.totalChecks) || (value.totalChecks as number) <= 0 ||
+      (value.passedChecks as number) > (value.totalChecks as number) ||
+      Math.abs(value.passRate - (value.passedChecks as number) / (value.totalChecks as number)) > 0.0001 ||
+      Math.abs(value.score - Math.round(value.passRate * value.baselineCoverage * 10_000) / 100) > 0.01 ||
+      !Number.isSafeInteger(value.baselineChecks) || (value.baselineChecks as number) < 0 ||
+      !Array.isArray(value.missingBaselineChecks) ||
+      !value.missingBaselineChecks.every((name) => typeof name === "string" && name.trim().length > 0 && name.length <= 200) ||
+      new Set(value.missingBaselineChecks).size !== value.missingBaselineChecks.length ||
+      value.missingBaselineChecks.length > (value.baselineChecks as number) ||
+      !Array.isArray(value.failedChecks) ||
+      !value.failedChecks.every((name) => typeof name === "string" && name.trim().length > 0 && name.length <= 200) ||
+      new Set(value.failedChecks).size !== value.failedChecks.length ||
+      value.failedChecks.length !== (value.totalChecks as number) - (value.passedChecks as number)) return false;
+
+  const expectedCoverage = value.baselineChecks === 0 ? 1
+    : ((value.baselineChecks as number) - value.missingBaselineChecks.length) / (value.baselineChecks as number);
+  if (Math.abs(value.baselineCoverage - expectedCoverage) > 0.0001) return false;
+
+  const failedNames = new Set(value.failedChecks as string[]);
+  const recordChecks = checks.filter(isRecord);
+  return [...failedNames].every((name) => recordChecks.some((check) =>
+    check.name === name && check.passed === false));
+}
+
 function validateRecord(value: unknown): SkillBenchmarkHistoryRecord {
   if (!isRecord(value) ||
       typeof value.id !== "string" || !/^[0-9a-f-]{36}$/i.test(value.id) ||
@@ -43,19 +73,8 @@ function validateRecord(value: unknown): SkillBenchmarkHistoryRecord {
         (check.detail === undefined || typeof check.detail === "string" && check.detail.length <= 1000)) ||
       new Set(value.checks.map((check) => (check as {name:string}).name.trim())).size !== value.checks.length ||
       (value.baselineVersion !== undefined && (typeof value.baselineVersion !== "string" || value.baselineVersion.length > 100)) ||
-      !isRecord(value.capability) ||
-      typeof value.capability.score !== "number" || !Number.isFinite(value.capability.score) || value.capability.score < 0 || value.capability.score > 100 ||
-      typeof value.capability.passRate !== "number" || !Number.isFinite(value.capability.passRate) || value.capability.passRate < 0 || value.capability.passRate > 1 ||
-      typeof value.capability.baselineCoverage !== "number" || !Number.isFinite(value.capability.baselineCoverage) || value.capability.baselineCoverage < 0 || value.capability.baselineCoverage > 1 ||
-      !Number.isSafeInteger(value.capability.passedChecks) || value.capability.passedChecks < 0 ||
-      !Number.isSafeInteger(value.capability.totalChecks) || value.capability.totalChecks <= 0 ||
-      value.capability.passedChecks > value.capability.totalChecks ||
-      Math.abs(value.capability.passRate - value.capability.passedChecks / value.capability.totalChecks) > 0.0001 ||
-      Math.abs(value.capability.score - Math.round(value.capability.passRate * value.capability.baselineCoverage * 10_000) / 100) > 0.01 ||
-      !Number.isSafeInteger(value.capability.baselineChecks) || value.capability.baselineChecks < 0 ||
-      !Array.isArray(value.capability.missingBaselineChecks) || !value.capability.missingBaselineChecks.every((name) => typeof name === "string") ||
-      value.capability.missingBaselineChecks.length > value.capability.baselineChecks ||
-      !Array.isArray(value.capability.failedChecks) || !value.capability.failedChecks.every((name) => typeof name === "string") ||
+      !validateCapability(value.capability, value.checks) ||
+
       (value.runId !== undefined && (typeof value.runId !== "string" || value.runId.length > 500)) ||
       (Array.isArray(value.checks) && typeof value.passed === "boolean" &&
         value.passed !== value.checks.every((check) => isRecord(check) && check.passed === true))) {
