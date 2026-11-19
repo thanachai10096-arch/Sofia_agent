@@ -227,13 +227,33 @@ const server = createSofiaApi(deps, {
 });
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
-server.on("close", () => {
-  // Close the complete dependency bundle: durable jobs, browser profiles,
-  // and the owner-scoped SQLite session store.
-  void Promise.resolve(deps.close?.()).catch(() => {
-    console.error("Sofia dependency shutdown failed.");
-  });
-});
+let shutdownPromise: Promise<void> | undefined;
+const shutdown = (): Promise<void> => {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = (async () => {
+    discordAbort.abort();
+    if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
+
+    // Stop external intake before closing the Agent so no integration can enqueue
+    // fresh work while the durable runtime and its stores are shutting down.
+    const integrationStops = await Promise.allSettled([
+      Promise.resolve().then(() => discordTransport?.stop()),
+      Promise.resolve().then(() => discordGatewayTransport?.stop()),
+      Promise.resolve().then(() => telegramRuntime?.stop()),
+    ]);
+    if (integrationStops.some((result) => result.status === "rejected")) {
+      console.error("One or more messaging integrations did not stop cleanly.");
+    }
+
+    // Let in-flight HTTP requests drain before closing their shared dependencies.
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+    await deps.close?.();
+  })();
+  return shutdownPromise;
+};
+
 server.listen(port, "0.0.0.0", () => {
   console.log("Sofia Agent API listening on port " + port);
   void telegramRuntime?.start().catch((error) => {
@@ -242,11 +262,9 @@ server.listen(port, "0.0.0.0", () => {
 });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    discordAbort.abort();
-    if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
-    void discordTransport?.stop();
-    void discordGatewayTransport?.stop();
-    void telegramRuntime?.stop().catch(() => console.error("Telegram integration shutdown failed."));
-    server.close();
+    void shutdown().catch(() => {
+      console.error("Sofia shutdown failed.");
+      process.exitCode = 1;
+    });
   });
 }
