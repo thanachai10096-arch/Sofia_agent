@@ -78,6 +78,8 @@ export interface ToolExecutionContext {
   principalId?: string | undefined;
   signal: AbortSignal;
   requireApproval: boolean;
+  /** Set only by the server-side capability guard after a valid delegated grant. */
+  delegatedCapabilityId?: string;
   notifyApproval(waiting: boolean): void;
 }
 
