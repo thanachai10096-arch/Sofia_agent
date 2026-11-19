@@ -3,8 +3,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { SqliteApprovalDecisionStore } from "./sqlite-approval-store.js";
+import { assertSqliteRuntimeSupported, SqliteApprovalDecisionStore } from "./sqlite-approval-store.js";
 import type { ApprovalRecord } from "./approval-broker.js";
+
+test("SQLite runtime guard rejects unsupported Node versions with a migration path", () => {
+  assert.throws(() => assertSqliteRuntimeSupported("20.19.0"), /Node\.js 22\.5 or newer.*SOFIA_APPROVAL_STORE=redis/);
+  assert.throws(() => assertSqliteRuntimeSupported("22.4.1"), /Node\.js 22\.5 or newer/);
+  assert.doesNotThrow(() => assertSqliteRuntimeSupported("22.5.0"));
+  assert.doesNotThrow(() => assertSqliteRuntimeSupported("24.0.0"));
+  assert.doesNotThrow(() => assertSqliteRuntimeSupported("23.1.0"));
+});
 
 function record(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
   return {
