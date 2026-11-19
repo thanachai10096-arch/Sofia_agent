@@ -53,6 +53,40 @@ function setup() {
   };
 }
 
+test("transaction finalization is single-use and bound to unchanged checkout evidence", async () => {
+  let html = "<p>Acme Store</p><p>USD $42.50</p><p>Canvas backpack</p>";
+  let clicks = 0;
+  const runtime: BrowserRuntime = { launch: async () => ({ id: "tx-session", newPage: async () => ({
+    id: "tx-page", url: async () => "https://shop.example/checkout", title: async () => "Checkout", content: async () => html,
+    goto: async () => {}, click: async () => { clicks++; }, type: async () => {}, select: async () => {}, scroll: async () => {},
+    wait: async () => {}, press: async () => {}, back: async () => {}, forward: async () => {}, reload: async () => {}, screenshot: async () => "", close: async () => {}
+  }), close: async () => {} }) };
+  const tools = createBrowserTools(runtime), get = (name: string) => tools.find((item) => item.name === name)!;
+  await get("browser.open").execute({}, {} as never);
+  const inspected = await get("browser.transaction.inspect").execute({ pageId: "tx-page", recipient: "Acme Store", amount: "$42.50", currency: "USD", items: ["Canvas backpack"] }, {} as never) as { verified: boolean; challengeId: string };
+  assert.equal(inspected.verified, true);
+  await get("browser.transaction.finalize").execute({ pageId: "tx-page", url: "https://shop.example/checkout", challengeId: inspected.challengeId, selector: "button.place-order" }, {} as never);
+  assert.equal(clicks, 1);
+  await assert.rejects(get("browser.transaction.finalize").execute({ pageId: "tx-page", url: "https://shop.example/checkout", challengeId: inspected.challengeId, selector: "button.place-order" }, {} as never), /missing, expired, or already used/i);
+  assert.equal(clicks, 1);
+});
+
+test("transaction finalization rejects changed checkout content", async () => {
+  let html = "<p>Acme Store</p><p>USD $42.50</p>";
+  let clicks = 0;
+  const runtime: BrowserRuntime = { launch: async () => ({ id: "tx-change-session", newPage: async () => ({
+    id: "tx-change-page", url: async () => "https://shop.example/checkout", title: async () => "Checkout", content: async () => html,
+    goto: async () => {}, click: async () => { clicks++; }, type: async () => {}, select: async () => {}, scroll: async () => {},
+    wait: async () => {}, press: async () => {}, back: async () => {}, forward: async () => {}, reload: async () => {}, screenshot: async () => "", close: async () => {}
+  }), close: async () => {} }) };
+  const tools = createBrowserTools(runtime), get = (name: string) => tools.find((item) => item.name === name)!;
+  await get("browser.open").execute({}, {} as never);
+  const inspected = await get("browser.transaction.inspect").execute({ pageId: "tx-change-page", recipient: "Acme Store", amount: "$42.50", currency: "USD" }, {} as never) as { challengeId: string };
+  html += "<p>USD $99.00</p>";
+  await assert.rejects(get("browser.transaction.finalize").execute({ pageId: "tx-change-page", url: "https://shop.example/checkout", challengeId: inspected.challengeId, selector: "button.pay" }, {} as never), /page changed after inspection/i);
+  assert.equal(clicks, 0);
+});
+
 test("browser.close closes only the requested page when pageId is provided", async () => {
   const harness = setup();
   const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
