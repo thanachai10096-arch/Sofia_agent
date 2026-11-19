@@ -36,6 +36,12 @@ export interface CapabilityInvocation {
   merchantId?: string;
 }
 
+/** Trusted server-side ledger snapshot; never accept this value from model/user tool arguments. */
+export interface SpendingSnapshot {
+  currency: string;
+  spentTodayMinor: number;
+}
+
 export type CapabilityDecision =
   | { allowed: true; requiresApproval: boolean; reason: string }
   | { allowed: false; requiresApproval: false; reason: string };
@@ -95,6 +101,7 @@ export function authorizeCapability(
   authority: DelegatedAuthority | undefined,
   invocation: CapabilityInvocation,
   now = Date.now(),
+  spending?: SpendingSnapshot,
 ): CapabilityDecision {
   const capability = registry.get(invocation.capabilityId);
   if (!capability) return { allowed: false, requiresApproval: false, reason: "Capability is not registered." };
@@ -116,6 +123,13 @@ export function authorizeCapability(
     }
     if (!Number.isSafeInteger(authority.maxPerDayMinor) || authority.maxPerDayMinor! <= 0) {
       return { allowed: false, requiresApproval: false, reason: "A positive daily spending limit is required." };
+    }
+    if (!spending || spending.currency !== authority.currency ||
+        !Number.isSafeInteger(spending.spentTodayMinor) || spending.spentTodayMinor < 0) {
+      return { allowed: false, requiresApproval: false, reason: "A trusted same-currency daily spending snapshot is required." };
+    }
+    if (spending.spentTodayMinor + invocation.amountMinor! > authority.maxPerDayMinor!) {
+      return { allowed: false, requiresApproval: false, reason: "Transaction exceeds the remaining delegated daily budget." };
     }
     if (!invocation.merchantId || !authority.allowedMerchants?.includes(invocation.merchantId)) {
       return { allowed: false, requiresApproval: false, reason: "Merchant is not on the delegated allowlist." };
