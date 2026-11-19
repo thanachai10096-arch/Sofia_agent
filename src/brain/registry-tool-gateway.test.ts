@@ -4,7 +4,7 @@ import { RegistryToolGateway } from "./registry-tool-gateway.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { createBuiltinTools } from "../tools/builtin.js";
-import { defaultPolicy } from "../security/policy.js";
+import { defaultPolicy, type ExecutionPolicy } from "../security/policy.js";
 import { SecurityController } from "../security/controller.js";
 import type { SecurityAuditEvent, SecurityAuditSink } from "../security/audit.js";
 import { MapToolRegistry } from "../tools/types.js";
@@ -827,4 +827,43 @@ test("tool evidence ID is empty when durable audit readback is missing", async (
   assert.equal(result.ok, true);
   assert.equal(result.evidenceId, "");
   assert.match(result.warnings?.[0] ?? "", /persisted and read back/i);
+});
+
+
+test("approval is invalidated when execution policy changes while awaiting approval", async () => {
+  let executions = 0;
+  let approvalReached!: () => void;
+  const reached = new Promise<void>((resolve) => { approvalReached = resolve; });
+  let releaseApproval!: (approved: boolean) => void;
+  const decision = new Promise<boolean>((resolve) => { releaseApproval = resolve; });
+  const policy: ExecutionPolicy = { ...defaultPolicy, maxRisk: "high" };
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Write tool whose policy may change during approval",
+    inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+    effects: ["write"] as const,
+    async execute() { executions += 1; return { committed: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    policy,
+    async () => { approvalReached(); return decision; },
+  );
+  const execution = gateway.execute(
+    { tool: "custom.write", input: { value: "approved-before-policy-change" } },
+    {
+      runId: "approval-policy-drift",
+      principalId: "policy-drift-principal",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+  await reached;
+  policy.maxRisk = "low";
+  releaseApproval(true);
+  const result = await execution;
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /policy or tool configuration changed/i);
+  assert.equal(executions, 0, "policy drift must block the side effect");
 });
