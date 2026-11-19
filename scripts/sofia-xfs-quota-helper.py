@@ -150,6 +150,12 @@ def load_allocations(state_root):
             fail("allocation state contains an invalid or duplicate project ID")
         if not isinstance(entry.get("workspace"), str):
             fail("allocation state contains an invalid workspace path")
+        if type(entry.get("bytes")) is not int or entry["bytes"] < 1024 * 1024:
+            fail("allocation state contains an invalid byte quota")
+        if entry.get("inodes") != INODE_LIMIT or type(entry.get("inodes")) is not int:
+            fail("allocation state contains an invalid inode quota")
+        if entry.get("status") not in {"allocating", "active", "needs_recovery"}:
+            fail("allocation state contains an invalid lifecycle status")
         seen_ids.add(project_id)
     return data
 
@@ -249,7 +255,7 @@ def dispose(root, state_root, request, abort=False):
     entry = allocations.get(run_id)
     if entry is None:
         return {"ok": True, "runId": run_id}
-    if not isinstance(entry, dict) or set(entry) - {"project_id", "workspace", "bytes", "inodes", "needs_recovery", "status"}:
+    if not isinstance(entry, dict) or set(entry) - {"project_id", "workspace", "bytes", "inodes", "status"}:
         fail("allocation record is malformed")
     workspace = root / ("run-" + run_id)
     if entry.get("workspace") != str(workspace) or type(entry.get("project_id")) is not int:
