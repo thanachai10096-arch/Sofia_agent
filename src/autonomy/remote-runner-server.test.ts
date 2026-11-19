@@ -20,6 +20,7 @@ function testWorkspaceProvisioner() {
     async disposeWorkspace(workspacePath: string) {
       await rm(workspacePath, { recursive: true, force: true });
     },
+    async healthCheck() {},
   };
 }
 
@@ -197,6 +198,7 @@ test("remote runner becomes unready and refuses new work after quota cleanup fai
       await baseProvisioner.disposeWorkspace(workspacePath);
       throw new Error("host quota release failed");
     },
+    healthCheck: () => baseProvisioner.healthCheck(),
   };
   const sandbox: Sandbox = {
     isolation: "container",
