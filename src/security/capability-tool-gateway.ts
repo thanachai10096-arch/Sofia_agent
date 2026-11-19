@@ -9,6 +9,7 @@ import {
   CapabilityRegistry,
   type DelegatedAuthority,
 } from "./capability-registry.js";
+import { riskFor, type RiskLevel } from "./guard.js";
 
 /**
  * Adds principal-bound capability authorization in front of the existing Brain
@@ -20,7 +21,7 @@ export class CapabilityGuardToolGateway implements ToolGateway {
     private readonly inner: ToolGateway,
     private readonly registry: CapabilityRegistry,
     private readonly resolveAuthority: (principalId: string) => Promise<DelegatedAuthority | undefined>,
-    private readonly capabilityIdForTool: (toolName: string) => string = toolName => toolName,
+    private readonly capabilityIdForTool: (toolName: string) => string | undefined = toolName => toolName,
   ) {}
 
   listTools(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[] }> {
@@ -41,6 +42,33 @@ export class CapabilityGuardToolGateway implements ToolGateway {
     }
 
     const capabilityId = this.capabilityIdForTool(call.tool);
+    if (!capabilityId) {
+      return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "No explicit capability mapping exists for this tool." } };
+    }
+    const capability = this.registry.get(capabilityId);
+    if (!capability) {
+      return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Mapped capability is not registered." } };
+    }
+    const actualRisk = riskFor(descriptor.effects, call.input);
+    const riskOrder: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+    if (riskOrder[capability.risk] < riskOrder[actualRisk]) {
+      return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Capability risk is lower than the registered tool action risk." } };
+    }
+    const has = (effect: string) => descriptor.effects.includes(effect as typeof descriptor.effects[number]);
+    const compatible =
+      (capability.effect === "read" && !has("write") && !has("shell") && !has("destructive")) ||
+      (capability.effect === "local_write" && has("write") && !has("network") && !has("browser") && !has("shell") && !has("destructive")) ||
+      (capability.effect === "external_side_effect" && (has("network") || has("browser")) && !has("shell") && !has("destructive")) ||
+      capability.effect === "financial";
+    if (!compatible) {
+      return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Capability effect does not match the registered tool effects." } };
+    }
+    if (capability.transport === "browser" && !has("browser")) {
+      return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Browser capability is mapped to a non-browser tool." } };
+    }
+    if (capability.transport === "desktop" && !call.tool.startsWith("desktop.")) {
+      return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Desktop capability is mapped to a non-desktop tool." } };
+    }
     const authority = await this.resolveAuthority(context.principalId);
     const input = call.input as Record<string, unknown>;
     const decision = authorizeCapability(
@@ -59,8 +87,7 @@ export class CapabilityGuardToolGateway implements ToolGateway {
       return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: decision.reason } };
     }
 
-    const capability = this.registry.get(capabilityId);
-    if (capability?.effect === "financial") {
+    if (capability.effect === "financial") {
       return {
         ok: false,
         data: null,
