@@ -42,6 +42,39 @@ test("research loop autonomously researches, experiments in sandbox and records 
   assert.equal(notes, 1);
 });
 
+test("a failed sandbox experiment is retained as negative evidence, not a successful learning cycle", async () => {
+  const report = await runIndependentResearchLoop({
+    adapters: adapters({
+      experiment: async () => ({ passed: false, summary: "The candidate regressed the benchmark.", benchmarkBefore: 0.9, benchmarkAfter: 0.72, safetyIncidents: 0, artifactVersion: "candidate-2", rollbackAvailable: true }),
+    }),
+    signal: new AbortController().signal,
+    principalId: "tenant-user-1",
+    sandboxAvailable: true,
+    budgetContext: validBudget,
+    maxCycles: 1,
+  });
+  assert.equal(report.cycles[0]?.status, "experiment-failed");
+  assert.match(report.cycles[0]?.reason ?? "", /negative evidence/i);
+  assert.equal(report.cycles[0]?.evidence?.passed, false);
+});
+
+test("research loop rejects malformed source identifiers and experiment evidence", async () => {
+  await assert.rejects(() => runIndependentResearchLoop({
+    adapters: adapters({
+      researchLocally: async () => ({ summary: "finding", sourceIds: [42 as unknown as string], confidence: 0.8 }),
+    }),
+    signal: new AbortController().signal,
+    principalId: "tenant-user-1", sandboxAvailable: false, budgetContext: () => ({}), maxCycles: 1,
+  }), /invalid finding evidence/i);
+  await assert.rejects(() => runIndependentResearchLoop({
+    adapters: adapters({
+      experiment: async () => ({ passed: "yes" as unknown as boolean, summary: "bad", benchmarkBefore: 0.8, benchmarkAfter: 0.9, safetyIncidents: 0, rollbackAvailable: true }),
+    }),
+    signal: new AbortController().signal,
+    principalId: "tenant-user-1", sandboxAvailable: true, budgetContext: validBudget, maxCycles: 1,
+  }), /invalid benchmark or safety evidence/i);
+});
+
 test("missing sandbox or budget attestation never runs experiment but still records research", async () => {
   let experiments = 0;
   let notes = 0;
