@@ -110,3 +110,46 @@ test("principal workspace resolver rejects a symlink root", async (t) => {
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test("named mutable-state directories stay inside their principal workspace", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-stores-"));
+  try {
+    const resolver = new PrincipalWorkspaceResolver(path.join(temp, "workspaces"));
+    const aliceMemory = await resolver.resolveStoreDirectory("tenant:alice", "memory");
+    const aliceJobs = await resolver.resolveStoreDirectory("tenant:alice", "jobs");
+    const bobMemory = await resolver.resolveStoreDirectory("tenant:bob", "memory");
+    assert.notEqual(aliceMemory, aliceJobs);
+    assert.notEqual(aliceMemory, bobMemory);
+    assert.equal(path.basename(aliceMemory), "memory");
+    assert.equal(path.basename(path.dirname(aliceMemory)), ".sofia");
+    await assert.rejects(resolver.resolveStoreDirectory("tenant:alice", "../bob"), /store names/i);
+    await assert.rejects(resolver.resolveStoreDirectory("tenant:alice", "/tmp/escape"), /store names/i);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("named mutable-state directory refuses an existing symlink", async (t) => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-store-link-"));
+  try {
+    const root = path.join(temp, "workspaces");
+    const outside = path.join(temp, "outside");
+    await mkdir(outside);
+    const resolver = new PrincipalWorkspaceResolver(root);
+    const workspace = await resolver.resolve("tenant:alice");
+    const stateRoot = path.join(workspace, ".sofia");
+    await mkdir(stateRoot);
+    try {
+      await symlink(outside, path.join(stateRoot, "memory"), "dir");
+    } catch (error) {
+      if (["EPERM", "EACCES", "ENOTSUP"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+        t.skip("Symlink creation is unavailable in this environment.");
+        return;
+      }
+      throw error;
+    }
+    await assert.rejects(resolver.resolveStoreDirectory("tenant:alice", "memory"), /real directory|symbolic link/i);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
