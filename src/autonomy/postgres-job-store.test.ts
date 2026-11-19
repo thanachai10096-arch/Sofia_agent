@@ -123,3 +123,16 @@ test("PostgreSQL recovery only requeues expired running leases and bounds exhaus
   assert.match(pool.calls[0].sql, /CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END/);
   assert.equal(pool.calls[0].values, undefined);
 });
+
+test("PostgreSQL worker cancellation is conditional on the current unexpired lease owner", async () => {
+  const pool = new RecordingPool();
+  const store = createStore(pool);
+
+  await assert.rejects(() => store.cancelOwned("tenant-a", "job-id", "stale-worker"), /Autonomy job not found/);
+  assert.match(pool.calls[0].sql, /status='running'/);
+  assert.match(pool.calls[0].sql, /lease_worker_id=\$3/);
+  assert.match(pool.calls[0].sql, /lease_expires_at > now\(\)/);
+  assert.deepEqual(pool.calls[0].values, ["tenant-a", "job-id", "stale-worker"]);
+  assert.match(pool.calls[1].sql, /WHERE principal_id=\$1 AND id=\$2/);
+});
+
