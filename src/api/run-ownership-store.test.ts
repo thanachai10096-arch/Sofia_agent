@@ -106,6 +106,31 @@ test("Upstash lease adapter rejects invalid identifiers and durations", async ()
   await assert.rejects(store.renew(lease(), 10), /lease/u);
 });
 
+
+test("renew, assert, and release reject malformed or forged lease identities before Redis access", async () => {
+  let calls = 0;
+  const store = new UpstashRunOwnershipStore({
+    url: "https://redis.example.com", token: "test-token",
+    fetchImpl: async () => { calls += 1; return response(1); },
+  });
+  await assert.rejects(store.renew(lease({ generation: 0 }), 15_000), /generation/u);
+  await assert.rejects(store.assertCurrent(lease({ principalId: " tenant-alpha" })), /principal ID/u);
+  await assert.rejects(store.release(lease({ instanceId: "../worker" })), /instance ID/u);
+  await assert.rejects(store.assertCurrent(lease({ token: "short" })), /token/u);
+  await assert.rejects(store.release(lease({ runId: "../unsafe" })), /run ID/u);
+  assert.equal(calls, 0);
+});
+
+test("claim rejects non-canonical principal identifiers before contacting Redis", async () => {
+  let calls = 0;
+  const store = new UpstashRunOwnershipStore({
+    url: "https://redis.example.com", token: "test-token",
+    fetchImpl: async () => { calls += 1; return response(1); },
+  });
+  await assert.rejects(store.claim({ ...input, principalId: " tenant-alpha " }), /principal ID/u);
+  assert.equal(calls, 0);
+});
+
 test("Upstash lease adapter fails closed and never exposes its bearer token", async () => {
   const store = new UpstashRunOwnershipStore({
     url: "https://redis.example.com",
