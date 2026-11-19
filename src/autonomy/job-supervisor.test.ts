@@ -243,3 +243,53 @@ test("supervisor fails closed when kill-switch authority returns an invalid valu
   }
 });
 
+test("supervisor forwards host shutdown to active research and cancels the job", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-active-abort-"));
+  try {
+    const store = new FileAutonomyJobStore("active-abort-test", root);
+    const job = await store.enqueue({ principalId: "tenant-1", kind: "research", payload: {} });
+    const host = new AbortController();
+    let signalObserved: AbortSignal | undefined;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: {
+        runResearch: async (request) => {
+          signalObserved = request.signal;
+          markStarted();
+          await new Promise<void>((resolve) => {
+            if (request.signal.aborted) resolve();
+            else request.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return { completed: false, stoppedBy: "aborted", cycles: [] };
+        },
+      },
+      resolveAdapters: async () => ({
+        observe: async () => ({ signal: "x", sourceIds: [] }),
+        identifyGaps: async () => [],
+        researchLocally: async () => ({ summary: "x", sourceIds: [], confidence: 1 }),
+        formulateHypothesis: async () => ({ statement: "x", successMetric: "x" }),
+        experiment: async () => ({ passed: true, summary: "x", benchmarkBefore: 0, benchmarkAfter: 1, safetyIncidents: 0, rollbackAvailable: true }),
+        recordLearning: async () => undefined,
+      }),
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+      isKilled: async () => false,
+      leaseMs: 3_000,
+    });
+
+    const running = supervisor.runNext("worker-1", host.signal);
+    await started;
+    assert.ok(signalObserved);
+    assert.equal(signalObserved.aborted, false);
+    host.abort(new Error("operator requested stop"));
+    const result = await running;
+    assert.equal(signalObserved.aborted, true);
+    assert.equal(result?.id, job.id);
+    assert.equal(result?.status, "cancelled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
