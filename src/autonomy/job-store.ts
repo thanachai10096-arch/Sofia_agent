@@ -51,6 +51,16 @@ const queues = new Map<string, Promise<void>>();
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const terminal = (status: AutonomyJobStatus) => status === "completed" || status === "failed" || status === "cancelled";
 
+function validateCheckpoint(checkpoint: { nextCycle: number; cycles: unknown[] }): void {
+  if (!Number.isSafeInteger(checkpoint.nextCycle) || checkpoint.nextCycle < 2 ||
+      !Array.isArray(checkpoint.cycles) || checkpoint.cycles.length > 100 ||
+      checkpoint.cycles.length !== checkpoint.nextCycle - 1 ||
+      checkpoint.cycles.some((cycle, index) => !cycle || typeof cycle !== "object" ||
+        (cycle as { cycle?: unknown }).cycle !== index + 1)) {
+    throw new Error("Research checkpoint must contain a contiguous, completed cycle history.");
+  }
+}
+
 function validPrincipal(principalId: string): string {
   const value = principalId.trim();
   if (!value) throw new Error("Authenticated principal identity is required.");
@@ -220,14 +230,15 @@ export class FileAutonomyJobStore implements AutonomyJobStore {
   }
 
   async saveCheckpoint(principalId: string, jobId: string, workerId: string, checkpoint: { nextCycle: number; cycles: unknown[] }): Promise<AutonomyJob> {
-    if (!Number.isSafeInteger(checkpoint.nextCycle) || checkpoint.nextCycle < 1 ||
-        !Array.isArray(checkpoint.cycles) || checkpoint.cycles.length > 100) {
-      throw new Error("Invalid autonomy research checkpoint.");
-    }
+    validateCheckpoint(checkpoint);
     const encoded = JSON.stringify(checkpoint);
     if (Buffer.byteLength(encoded, "utf8") > 2 * 1024 * 1024) throw new Error("Research checkpoint exceeds 2 MiB.");
     return this.serialize(async () => {
       const job = await this.owned(principalId, jobId, workerId);
+      const expectedNextCycle = (job.checkpoint?.nextCycle ?? 1) + 1;
+      if (checkpoint.nextCycle !== expectedNextCycle) {
+        throw new Error("Research checkpoint must advance exactly one completed cycle.");
+      }
       job.checkpoint = { ...checkpoint, updatedAt: new Date().toISOString() };
       job.updatedAt = new Date().toISOString();
       await this.write(job);
