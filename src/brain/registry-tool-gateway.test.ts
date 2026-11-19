@@ -8,7 +8,55 @@ import { createBuiltinTools } from "../tools/builtin.js";
 import { defaultPolicy } from "../security/policy.js";
 import { SecurityController } from "../security/controller.js";
 import type { SecurityAuditEvent, SecurityAuditSink } from "../security/audit.js";
+import { findIndeterminateExecutions } from "../security/audit.js";
 import { MapToolRegistry } from "../tools/types.js";
+
+test("receipt reconciliation flags orphaned and mismatched executions without replaying them", () => {
+  const started = (id: string, actionHash = "action-hash"): SecurityAuditEvent => ({
+    id,
+    at: "2026-11-19T00:00:00.000Z",
+    runId: "run-1",
+    principalId: "owner-1",
+    toolName: "workspace.write_file",
+    actionHash,
+    risk: "low",
+    decision: "execution_started",
+  });
+  const startCompleted = started("start-completed");
+  const startFailed = started("start-failed");
+  const orphan = started("start-orphan");
+  const mismatched = started("start-mismatched");
+  const events: SecurityAuditEvent[] = [
+    startCompleted,
+    startFailed,
+    orphan,
+    mismatched,
+    {
+      ...startCompleted,
+      id: "completed",
+      relatedEventId: startCompleted.id,
+      decision: "completed",
+    },
+    {
+      ...startFailed,
+      id: "failed",
+      relatedEventId: startFailed.id,
+      decision: "failed",
+    },
+    {
+      ...mismatched,
+      id: "wrong-action-terminal",
+      relatedEventId: mismatched.id,
+      actionHash: "different-action",
+      decision: "completed",
+    },
+  ];
+
+  assert.deepEqual(
+    findIndeterminateExecutions(events).map((event) => event.id).sort(),
+    ["start-mismatched", "start-orphan"],
+  );
+});
 
 function runtime(): WorkspaceRuntime {
   const files = new Map<string, string>([["src/app.ts", "const x = 1;"]]);
