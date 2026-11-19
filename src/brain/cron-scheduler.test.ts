@@ -47,6 +47,40 @@ test("schedule quota is enforced atomically per owner", async () => {
   assert.equal(state.schedules.length, 2);
 });
 
+test("scheduled jobs preserve explicit API scopes and default to no capabilities", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(operation) { return operation(state); } };
+  let submitted: Record<string, unknown> | undefined;
+  const runtime = {
+    async submit(input: Record<string, unknown>) {
+      submitted = input;
+      return { id: "scoped-job", status: "completed", task: String(input.task) } as JobRecord;
+    },
+    async get() { return { id: "scoped-job", status: "completed", task: "scoped task" } as JobRecord; },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const created = await scheduler.create({
+    name: "scoped", task: "scoped task", runAt: "2026-10-17T00:01:00.000Z",
+    timeZone: "UTC", ownerKeyId: "alice",
+    toolScopes: ["agent:run", "tool:write"],
+    desktopCapabilities: ["workspace:read"],
+  }, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await scheduler.tick();
+  for (let i = 0; i < 30 && !submitted; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.deepEqual(submitted?.toolScopes, ["agent:run", "tool:write"]);
+  assert.deepEqual(submitted?.desktopCapabilities, ["workspace:read"]);
+  assert.deepEqual(created.toolScopes, ["agent:run", "tool:write"]);
+
+  const noGrant = await scheduler.create({
+    name: "no-grant", task: "safe task", runAt: "2026-10-17T00:02:00.000Z",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  assert.deepEqual(noGrant.toolScopes, []);
+  assert.deepEqual(noGrant.desktopCapabilities, []);
+});
+
 test("cron next occurrence respects timezone offset and weekday", () => {
   const next = nextCronOccurrence("0 9 * * 1-5", "Asia/Bangkok", new Date("2026-10-16T03:00:00.000Z"));
   assert.equal(next.toISOString(), "2026-10-19T02:00:00.000Z");
