@@ -70,7 +70,8 @@ export class TenantDependencyRegistry {
           continue;
         }
         try {
-          await result.value.closeBrowserProfiles?.();
+          if (result.value.close) await result.value.close();
+          else await result.value.closeBrowserProfiles?.();
         } catch (error) {
           failures.push(error);
         }
