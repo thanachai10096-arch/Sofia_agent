@@ -188,6 +188,56 @@ test("remote runner readiness reflects Docker daemon and preloaded image health"
 });
 
 
+test("remote runner becomes unready and refuses new work after quota cleanup failure", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-runner-quota-cleanup-test-"));
+  const baseProvisioner = testWorkspaceProvisioner();
+  const provisioner = {
+    createWorkspace: () => baseProvisioner.createWorkspace(),
+    async disposeWorkspace() {
+      throw new Error("host quota release failed");
+    },
+  };
+  const sandbox: Sandbox = {
+    isolation: "container",
+    async run() { return { stdout: "ran", stderr: "", code: 0 }; },
+    async healthCheck() {},
+  };
+  const server = createRemoteSandboxRunnerServer({
+    token: TOKEN,
+    sandbox,
+    workspaceProvisioner: provisioner,
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const endpoint = "http://127.0.0.1:" + address.port;
+  const project = path.join(root, "project");
+  await mkdir(project, { recursive: true });
+  await writeFile(path.join(project, "input.txt"), "safe");
+  try {
+    const client = new RemoteSandbox({ endpoint, token: TOKEN });
+    await client.run("true", [], {
+      timeoutMs: 5_000,
+      maxOutputBytes: 8_192,
+      allowNetwork: false,
+      workspaceRoot: project,
+    });
+    // Wait for the server's finally block to latch the cleanup fault.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal((await fetch(endpoint + "/readyz")).status, 503);
+    const rejected = await fetch(endpoint + "/v1/sandbox/execute", {
+      method: "POST",
+      headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(rejected.status, 503);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("remote runner rejects unknown protocol fields and bounds HTTP connection lifetimes", async () => {
   const sandbox: Sandbox = {
     isolation: "container",
