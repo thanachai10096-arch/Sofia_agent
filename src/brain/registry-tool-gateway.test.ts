@@ -556,3 +556,74 @@ test("browser typing content is redacted from security audit events", async () =
   assert.equal(serialized.includes("user-password-should-not-leak"), false);
   assert.equal(serialized.includes("[REDACTED USER-ENTERED CONTENT]"), true);
 });
+
+
+test("per-tool maxRisk ceiling is enforced before execution", async () => {
+  let executed = false;
+  const policy = { ...defaultPolicy, permissions: { "workspace.write_file": { maxRisk: "low" as const } } };
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file", description: "Write a file",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() { executed = true; return { ok: true }; },
+  }]);
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy, async () => true);
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "safe.txt", content: "safe" } },
+    { runId: "tool-risk-ceiling", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /risk exceeds/i);
+  assert.equal(executed, false);
+});
+
+test("stricter per-tool risk ceiling applied during approval wait blocks execution", async () => {
+  const policy = { ...defaultPolicy, permissions: { "workspace.write_file": { maxRisk: "high" as const } } };
+  let releaseApproval!: (approved: boolean) => void;
+  let announceApproval!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { announceApproval = resolve; });
+  const approvalDecision = new Promise<boolean>((resolve) => { releaseApproval = resolve; });
+  let executed = false;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file", description: "Write after approval",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() { executed = true; return { ok: true }; },
+  }]);
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy, async () => {
+    announceApproval(); return approvalDecision;
+  });
+  const execution = gateway.execute(
+    { tool: "workspace.write_file", input: { path: "safe.txt", content: "safe" } },
+    { runId: "tool-risk-revocation", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  await approvalReached;
+  policy.permissions["workspace.write_file"] = { maxRisk: "low" };
+  releaseApproval(true);
+  const result = await execution;
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /risk now exceeds/i);
+  assert.equal(executed, false);
+});
+
+test("browser navigation enforces the configured host allowlist", async () => {
+  let navigated = false;
+  const registry = new MapToolRegistry([{
+    name: "browser.goto", description: "Navigate to a page",
+    inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" } }, required: ["pageId", "url"] },
+    async execute() { navigated = true; return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowNetwork: true, allowedHosts: ["example.com"] };
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy);
+  const blocked = await gateway.execute(
+    { tool: "browser.goto", input: { pageId: "p1", url: "https://evil.example/" } },
+    { runId: "browser-host-block", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error?.message ?? "", /not allowlisted/i);
+  assert.equal(navigated, false);
+  const allowed = await gateway.execute(
+    { tool: "browser.goto", input: { pageId: "p1", url: "https://docs.example.com/" } },
+    { runId: "browser-host-allow", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(allowed.ok, true);
+  assert.equal(navigated, true);
+});
