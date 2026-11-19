@@ -324,6 +324,7 @@ test("API refuses a shared persistent run store when multiple API keys are confi
 
 test("API runs use a distinct dependency bundle for each authenticated owner", async () => {
   const createdOwners: string[] = [];
+  const generatedOwners: string[] = [];
   const closedOwners: string[] = [];
   const server = createSofiaApi({
     provider: { generate: async () => ({ text: "shared fallback must not run" }) },
