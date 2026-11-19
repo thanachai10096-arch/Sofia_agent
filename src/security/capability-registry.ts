@@ -144,3 +144,54 @@ export function authorizeCapability(
     ? "Within delegated scope; obtain the required human approval before execution."
     : "Within delegated scope and may execute autonomously." };
 }
+
+
+export interface DelegatedSpendLedger {
+  /**
+   * Must atomically check the principal's current-day total against dailyLimitMinor
+   * and reserve amountMinor under idempotencyKey. A database transaction or
+   * equivalent compare-and-set is required; a read-then-write implementation is unsafe.
+   */
+  reserve(input: {
+    principalId: string;
+    currency: string;
+    amountMinor: number;
+    dailyLimitMinor: number;
+    idempotencyKey: string;
+  }): Promise<"reserved" | "already_reserved" | "limit_exceeded">;
+}
+
+/**
+ * Final server-side spending gate. Call only after authorizeCapability has
+ * allowed the invocation and before contacting the merchant/payment provider.
+ * The ledger implementation must provide atomic reservation across workers.
+ */
+export async function reserveDelegatedSpend(
+  ledger: DelegatedSpendLedger,
+  authority: DelegatedAuthority,
+  invocation: CapabilityInvocation,
+  idempotencyKey: string,
+): Promise<{ reserved: boolean; duplicate: boolean; reason: string }> {
+  if (!/^([A-Za-z0-9._:-]){16,200}$/.test(idempotencyKey)) {
+    return { reserved: false, duplicate: false, reason: "A stable transaction idempotency key is required." };
+  }
+  if (authority.principalId !== invocation.principalId ||
+      !authority.currency || invocation.currency !== authority.currency ||
+      !Number.isSafeInteger(invocation.amountMinor) || (invocation.amountMinor ?? 0) <= 0 ||
+      !Number.isSafeInteger(authority.maxPerDayMinor) || (authority.maxPerDayMinor ?? 0) <= 0) {
+    return { reserved: false, duplicate: false, reason: "Invalid principal, currency, amount, or daily limit." };
+  }
+  if (!invocation.merchantId || !authority.allowedMerchants?.includes(invocation.merchantId)) {
+    return { reserved: false, duplicate: false, reason: "Merchant is not on the delegated allowlist." };
+  }
+  const result = await ledger.reserve({
+    principalId: authority.principalId,
+    currency: authority.currency,
+    amountMinor: invocation.amountMinor!,
+    dailyLimitMinor: authority.maxPerDayMinor!,
+    idempotencyKey,
+  });
+  if (result === "limit_exceeded") return { reserved: false, duplicate: false, reason: "Atomic daily budget reservation was denied." };
+  if (result === "already_reserved") return { reserved: true, duplicate: true, reason: "This transaction was already reserved; do not submit it again." };
+  return { reserved: true, duplicate: false, reason: "Spending budget atomically reserved; provider submission may proceed after approval." };
+}
