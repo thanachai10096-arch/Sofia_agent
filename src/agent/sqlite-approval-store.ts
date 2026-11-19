@@ -49,6 +49,10 @@ export class SqliteApprovalStore implements TransactionalApprovalStore {
       }
     }
 
+    const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+    if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 5)) {
+      throw new Error("SqliteApprovalStore requires Node.js 22.5 or newer (node:sqlite).");
+    }
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
     try {
