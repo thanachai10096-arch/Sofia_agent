@@ -600,3 +600,42 @@ test("API fails closed when interrupted Run persistence fails during startup rec
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API fails closed when corrupt persisted Run cleanup fails during startup recovery", async () => {
+  const ownerKey = "corrupt-run-cleanup-owner-key";
+  const broker = new ApprovalBroker({ store: new InMemoryApprovalDecisionStore() });
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    approvalBroker: broker,
+  }, {
+    apiKeys: { [ownerKey]: ["approval:manage"] },
+    runStore: {
+      async save() {},
+      async remove() { throw new Error("simulated corrupt Run cleanup failure"); },
+      loadAllSync: () => [{
+        id: "corrupt-run-record",
+        status: "invalid-status",
+        createdAt: Date.now() - 5_000,
+        updatedAt: Date.now() - 1_000,
+        ownerKeyId: "a".repeat(32),
+        desktopCapabilities: [],
+      } as never],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const inbox = await fetch("http://127.0.0.1:" + address.port + "/v1/approvals", {
+      headers: { authorization: "Bearer " + ownerKey },
+    });
+    assert.equal(inbox.status, 503);
+    assert.deepEqual(await inbox.json(), { error: "approval_recovery_unavailable" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
