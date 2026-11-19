@@ -403,3 +403,69 @@ test("API approval decision gates the actual effectful tool execution", async ()
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API restart recovery cancels orphaned approvals before exposing or accepting decisions", async () => {
+  const ownerKey = "restart-recovery-owner-key";
+  const ownerId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
+  const broker = new ApprovalBroker({ store: new InMemoryApprovalDecisionStore(), pollIntervalMs: 25 });
+  const controller = new AbortController();
+  const waiting = broker.handle({
+    runId: "interrupted-run-01",
+    principalId: ownerId,
+    toolName: "workspace.write_file",
+    input: { path: "restart.txt", content: "must not execute" },
+    actionHash: "d".repeat(64),
+    risk: "high",
+    signal: controller.signal,
+  });
+  const [pending] = await broker.listPending(ownerId);
+  assert.ok(pending);
+
+  const persistedRun = {
+    id: "interrupted-run-01",
+    status: "running" as const,
+    createdAt: Date.now() - 5_000,
+    updatedAt: Date.now() - 1_000,
+    ownerKeyId: ownerId,
+    desktopCapabilities: [],
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    approvalBroker: broker,
+  }, {
+    apiKeys: { [ownerKey]: ["approval:manage"] },
+    runStore: {
+      async save() {},
+      async remove() {},
+      loadAllSync: () => [persistedRun],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  try {
+    const inbox = await fetch(base + "/v1/approvals", {
+      headers: { authorization: "Bearer " + ownerKey },
+    });
+    assert.equal(inbox.status, 200);
+    assert.deepEqual((await inbox.json() as { approvals: unknown[] }).approvals, []);
+    assert.equal((await broker.get(pending.id))?.status, "cancelled");
+
+    const decision = await fetch(base + "/v1/approvals/" + pending.id + "/approve", {
+      method: "POST",
+      headers: { authorization: "Bearer " + ownerKey, "content-type": "application/json" },
+      body: JSON.stringify({ actionHash: pending.actionHash }),
+    });
+    assert.equal(decision.status, 409, "a stale approval must not be accepted after restart recovery");
+    assert.equal(await broker.approve(pending.id, pending.actionHash, ownerId), false);
+  } finally {
+    controller.abort(new Error("test cleanup"));
+    await waiting;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
