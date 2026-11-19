@@ -47,19 +47,6 @@ test("legacy agent preserves a trusted host-assigned run ID for approval cancell
 
 test("Brain mode preserves the trusted host run ID for approval cancellation", async () => {
   let factoryRunId: string | undefined;
-  const fakeBrain = {
-    runId: "brain-internal-run",
-    async run() {
-      return {
-        completed: true,
-        summary: "Brain task completed.",
-        changedFiles: [],
-        verification: { passed: true },
-        usage: { steps: 1 },
-      };
-    },
-  } as unknown as import("../src/brain/executor.js").SofiaBrain;
-
   const agent = new SofiaAgent({
     provider: { async generate() { return { text: "unused" }; } },
     router: new ModelRouter([
@@ -68,13 +55,24 @@ test("Brain mode preserves the trusted host run ID for approval cancellation", a
     reviewer: { async review() { return { approved: true, reason: "unused" }; } },
     brainFactory: (options) => {
       factoryRunId = options.runId;
-      return fakeBrain;
+      return {
+        runId: options.runId ?? "unexpected-random-run",
+        async run() {
+          return {
+            completed: true,
+            summary: "Brain task completed.",
+            changedFiles: [],
+            verification: { passed: true },
+            usage: { steps: 1 },
+          };
+        },
+      } as unknown as import("../src/brain/executor.js").SofiaBrain;
     },
   });
 
   const result = await agent.run({ task: "complete a Brain task", runId: "api-brain-run-456" });
   assert.equal(factoryRunId, "api-brain-run-456");
-  assert.equal(result.runId, "brain-internal-run");
+  assert.equal(result.runId, "api-brain-run-456");
 });
 
 test("security kill switch aborts active model calls and blocks new runs", async () => {
