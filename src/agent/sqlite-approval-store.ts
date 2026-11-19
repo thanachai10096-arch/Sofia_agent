@@ -5,6 +5,14 @@ import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
+/** Fail with an actionable message before importing node:sqlite on unsupported runtimes. */
+export function assertSqliteRuntimeSupported(version = process.versions.node): void {
+  const [major = 0, minor = 0] = version.split(".").map((part) => Number.parseInt(part, 10));
+  if (!Number.isFinite(major) || !Number.isFinite(minor) || major < 22 || (major === 22 && minor < 5)) {
+    throw new Error("SQLite approval storage requires Node.js 22.5 or newer. Upgrade Node.js or configure SOFIA_APPROVAL_STORE=redis.");
+  }
+}
+
 /**
  * SQLite-backed approval store for processes sharing the same SQLite-compatible
  * filesystem. Use a network database adapter for multi-host deployments where
@@ -14,6 +22,7 @@ export class SqliteApprovalDecisionStore implements ApprovalDecisionStore {
   private constructor(private readonly db: SqliteDatabase, private readonly filePath: string) {}
 
   static async open(filePath = path.join(sofiaStateDirectory("approvals"), "approvals.sqlite")): Promise<SqliteApprovalDecisionStore> {
+    assertSqliteRuntimeSupported();
     const absolutePath = filePath === ":memory:" ? filePath : path.resolve(filePath);
     if (absolutePath !== ":memory:") {
       fs.mkdirSync(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
