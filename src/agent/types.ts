@@ -43,7 +43,7 @@ export interface AgentDependencies {
  tools?:ToolRegistry;
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
- brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
+ brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;runId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;
