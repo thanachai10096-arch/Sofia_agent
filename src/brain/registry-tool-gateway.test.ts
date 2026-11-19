@@ -515,3 +515,44 @@ test("global tool kill policy revocation while awaiting approval prevents execut
   assert.match(result.error?.message ?? "", /disabled/i);
   assert.equal(executions, 0);
 });
+
+
+test("browser interactions are approval-gated without misclassifying page actions as network requests", async () => {
+  let clicked = false;
+  const registry = new MapToolRegistry([{
+    name: "browser.click", description: "Click a page control",
+    inputSchema: { type: "object", properties: { pageId: { type: "string" }, selector: { type: "string" } }, required: ["pageId", "selector"] },
+    async execute() { clicked = true; return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowBrowser: true, allowNetwork: false };
+  let approvals = 0;
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy, async () => { approvals++; return true; });
+  assert.deepEqual(gateway.describe("browser.click")?.effects, ["browser"]);
+  const result = await gateway.execute(
+    { tool: "browser.click", input: { pageId: "page-1", selector: "button" } },
+    { runId: "browser-click-approval", principalId: "test-user", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(approvals, 1);
+  assert.equal(clicked, true);
+});
+
+test("browser typing content is redacted from security audit events", async () => {
+  const events: SecurityAuditEvent[] = [];
+  const audit: SecurityAuditSink = { record(event) { events.push(event); } };
+  const registry = new MapToolRegistry([{
+    name: "browser.type", description: "Type into a page field",
+    inputSchema: { type: "object", properties: { pageId: { type: "string" }, selector: { type: "string" }, text: { type: "string" } }, required: ["pageId", "selector", "text"] },
+    async execute() { return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowBrowser: true };
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy, async () => true, undefined, undefined, audit);
+  const result = await gateway.execute(
+    { tool: "browser.type", input: { pageId: "page-1", selector: "input[type=password]", text: "user-password-should-not-leak" } },
+    { runId: "browser-type-redaction", principalId: "test-user", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  assert.equal(result.ok, true);
+  const serialized = JSON.stringify(events);
+  assert.equal(serialized.includes("user-password-should-not-leak"), false);
+  assert.equal(serialized.includes("[REDACTED USER-ENTERED CONTENT]"), true);
+});
