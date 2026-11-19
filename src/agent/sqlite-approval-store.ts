@@ -32,46 +32,56 @@ export class SqliteApprovalStore implements TransactionalApprovalStore {
 
   static async open(filePath: string): Promise<SqliteApprovalStore> {
     if (!filePath.trim()) throw new Error("Approval database path must not be empty.");
-    const absolutePath = path.resolve(filePath);
-    fs.mkdirSync(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
-    try {
-      const stat = fs.lstatSync(absolutePath);
-      if (!stat.isFile() || stat.isSymbolicLink()) {
-        throw new Error("Approval database path must be a regular file, not a symbolic link.");
+    const inMemory = filePath === ":memory:";
+    const absolutePath = inMemory ? ":memory:" : path.resolve(filePath);
+    if (!inMemory) {
+      fs.mkdirSync(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
+      try {
+        const stat = fs.lstatSync(absolutePath);
+        if (!stat.isFile() || stat.isSymbolicLink()) {
+          throw new Error("Approval database path must be a regular file, not a symbolic link.");
+        }
+        if (process.platform !== "win32") fs.chmodSync(absolutePath, stat.mode & 0o600);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        const fd = fs.openSync(absolutePath, "wx", 0o600);
+        fs.closeSync(fd);
       }
-      if (process.platform !== "win32") fs.chmodSync(absolutePath, stat.mode & 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      const fd = fs.openSync(absolutePath, "wx", 0o600);
-      fs.closeSync(fd);
     }
 
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
     try {
       db.exec("PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;");
-      const version = Number(db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
-      if (version > 1) throw new Error("Approval database schema is newer than this Sofia Agent supports.");
-      if (version === 0) {
-        db.exec(`
-          BEGIN IMMEDIATE;
-          CREATE TABLE approvals (
-            id TEXT PRIMARY KEY NOT NULL,
-            run_id TEXT NOT NULL,
-            principal_id TEXT NOT NULL,
-            tool_name TEXT NOT NULL,
-            action_hash TEXT NOT NULL,
-            risk TEXT NOT NULL,
-            status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected','expired','cancelled','interrupted')),
-            created_at INTEGER NOT NULL,
-            expires_at INTEGER NOT NULL,
-            settled_at INTEGER
-          );
-          CREATE INDEX approvals_owner_created_idx ON approvals(principal_id, created_at DESC, id);
-          CREATE INDEX approvals_owner_pending_idx ON approvals(principal_id, status, expires_at);
-          PRAGMA user_version = 1;
-          COMMIT;
-        `);
+      // Re-read the schema version after acquiring the write lock. Two workers
+      // may initialize the same empty database at the same time.
+      db.exec("BEGIN IMMEDIATE;");
+      try {
+        const version = Number(db.prepare("PRAGMA user_version").get()?.user_version ?? 0);
+        if (version > 1) throw new Error("Approval database schema is newer than this Sofia Agent supports.");
+        if (version === 0) {
+          db.exec(`
+            CREATE TABLE approvals (
+              id TEXT PRIMARY KEY NOT NULL,
+              run_id TEXT NOT NULL,
+              principal_id TEXT NOT NULL,
+              tool_name TEXT NOT NULL,
+              action_hash TEXT NOT NULL,
+              risk TEXT NOT NULL,
+              status TEXT NOT NULL CHECK (status IN ('pending','approved','rejected','expired','cancelled','interrupted')),
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER NOT NULL,
+              settled_at INTEGER
+            );
+            CREATE INDEX approvals_owner_created_idx ON approvals(principal_id, created_at DESC, id);
+            CREATE INDEX approvals_owner_pending_idx ON approvals(principal_id, status, expires_at);
+            PRAGMA user_version = 1;
+          `);
+        }
+        db.exec("COMMIT;");
+      } catch (error) {
+        db.exec("ROLLBACK;");
+        throw error;
       }
       const store = new SqliteApprovalStore(db, absolutePath);
       store.restrictPermissions();
