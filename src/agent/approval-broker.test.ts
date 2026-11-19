@@ -113,3 +113,25 @@ test("in-memory approval store enforces the per-principal pending cap", async ()
   }), /Too many pending approval requests/);
   assert.equal((await store.listPending("principal-1")).length, 50);
 });
+
+
+test("approval broker cancels only pending approvals belonging to a recovered interrupted run", async () => {
+  const store = new InMemoryApprovalDecisionStore();
+  const broker = new ApprovalBroker({ store, pollIntervalMs: 25 });
+  const first = new AbortController();
+  const second = new AbortController();
+  const firstWait = broker.handle({ runId: "interrupted-run", principalId: "owner-1", toolName: "write_file", input: { path: "a" }, actionHash: "a".repeat(64), risk: "medium", signal: first.signal });
+  const secondWait = broker.handle({ runId: "live-run", principalId: "owner-1", toolName: "write_file", input: { path: "b" }, actionHash: "b".repeat(64), risk: "medium", signal: second.signal });
+  let records = await broker.listPending("owner-1");
+  for (let attempt = 0; attempt < 20 && records.length !== 2; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    records = await broker.listPending("owner-1");
+  }
+  assert.equal(records.length, 2);
+  assert.equal(await broker.cancelRun("interrupted-run", "owner-1"), 1);
+  assert.equal((await broker.get(records.find((record) => record.runId === "interrupted-run")!.id))?.status, "cancelled");
+  assert.equal((await broker.listPending("owner-1")).length, 1, "a different active run must remain pending");
+  assert.equal(await broker.cancelRun("interrupted-run", "other-owner"), 0);
+  first.abort(); second.abort();
+  await Promise.all([firstWait, secondWait]);
+});

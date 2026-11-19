@@ -157,6 +157,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     };
     return runStore.save(record);
   };
+  const interruptedRuns: Array<{ runId: string; principalId: string }> = [];
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
@@ -164,6 +165,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string")) {
       void runStore.remove(record.id); continue;
     }
+    if (interrupted) interruptedRuns.push({ runId: record.id, principalId: record.ownerKeyId });
     const run: ActiveRun = {
       id: record.id, status: interrupted ? "failed" : record.status,
       ...(record.result ? { result: record.result as unknown as AgentRunResponse["result"] } : {}),
@@ -176,6 +178,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     };
     runs.set(run.id, run); if (interrupted) void persist(run).catch(() => undefined);
   }
+  // Cancel approvals from runs recovered as interrupted before serving the approval inbox.
+  const approvalRecovery = deps.approvalBroker
+    ? Promise.all(interruptedRuns.map(({ runId, principalId }) => deps.approvalBroker!.cancelRun(runId, principalId)))
+    : Promise.resolve([]);
   const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   // Rehydrate replay protection from durable run records after a server restart.
   for (const run of runs.values()) {
@@ -349,6 +355,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const isApprovalRequest = requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/");
       if (isApprovalRequest) {
+        try { await approvalRecovery; } catch {
+          return json(res, 503, { error: "approval_recovery_unavailable" }, origin, config);
+        }
         if (!auth.scopes.includes("approval:manage")) {
           return json(res, 403, { error: "forbidden", requiredScope: "approval:manage" }, origin, config);
         }
