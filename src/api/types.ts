@@ -1,4 +1,4 @@
-import type { AgentResult } from "../agent/types.js";
+import type { AgentDependencies, AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 
@@ -40,6 +40,8 @@ export interface ApiAuth {
 
 export interface SofiaApiConfig {
   apiKeys: Record<string, string[]>;
+  /** Resolve isolated dependencies using only the principal ID derived from successful API-key authentication. */
+  resolvePrincipalDependencies?: (authenticatedPrincipalId: string) => Promise<AgentDependencies>;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
