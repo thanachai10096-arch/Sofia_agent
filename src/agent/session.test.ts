@@ -163,3 +163,35 @@ test("user-memory retrieval failure does not prevent a normal agent run", async 
   assert.match(contexts[0] ?? "", /Keep the existing task context/);
   assert.doesNotMatch(contexts[0] ?? "", /Relevant user memory/);
 });
+
+
+test("SofiaAgent scopes identical session labels to different authenticated principals", async () => {
+  const sessions = new MemorySessionStore();
+  const contexts = new Map<string, string[]>();
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async (request) => {
+        const owner = request.task.startsWith("owner-a") ? "owner-a" : "owner-b";
+        const values = contexts.get(owner) ?? [];
+        values.push(request.context ?? "");
+        contexts.set(owner, values);
+        return { text: `Reply for ${owner}` };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await agent.run({ task: "owner-a secret context", principalId: "owner-a", sessionId: "same-label" });
+  await agent.run({ task: "owner-b private context", principalId: "owner-b", sessionId: "same-label" });
+  await agent.run({ task: "owner-a follow-up", principalId: "owner-a", sessionId: "same-label" });
+  await agent.run({ task: "owner-b follow-up", principalId: "owner-b", sessionId: "same-label" });
+
+  const ownerAContext = contexts.get("owner-a")?.[1] ?? "";
+  const ownerBContext = contexts.get("owner-b")?.[1] ?? "";
+  assert.match(ownerAContext, /owner-a secret context/);
+  assert.doesNotMatch(ownerAContext, /owner-b private context/);
+  assert.match(ownerBContext, /owner-b private context/);
+  assert.doesNotMatch(ownerBContext, /owner-a secret context/);
+});
