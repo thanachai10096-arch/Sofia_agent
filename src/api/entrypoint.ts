@@ -228,8 +228,11 @@ const server = createSofiaApi(deps, {
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
-  deps.closeSessionStore();
-  void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
+  // Close the complete dependency bundle: durable jobs, browser profiles,
+  // and the owner-scoped SQLite session store.
+  void Promise.resolve(deps.close?.()).catch(() => {
+    console.error("Sofia dependency shutdown failed.");
+  });
 });
 server.listen(port, "0.0.0.0", () => {
   console.log("Sofia Agent API listening on port " + port);
