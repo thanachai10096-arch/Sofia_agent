@@ -34,6 +34,12 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 
 The API entrypoint configures a file-backed approval journal at `SOFIA_APPROVAL_JOURNAL_PATH`, defaulting to `$SOFIA_WORKSPACE/.sofia/approvals.json`. Keep this file on a private persistent filesystem and back it up according to your retention policy. The journal stores approval metadata and terminal state, not proposed tool inputs. Pending requests are marked `interrupted` on restart or graceful shutdown and are never restored as executable approvals. The file journal supports one writer process; do not share it between replicas. Grant `approval:read` and `approval:decide` only to clients allowed to review and decide their own actions.
 
+### Transactional SQLite approval store (library integration stage)
+
+The library now exposes `SqliteApprovalStore` as a transactional metadata store. Multiple local processes can open the same SQLite database and use conditional state transitions so only one process can settle a pending approval. It stores owner, run, tool, action-hash, risk, timestamps, and status only; it never stores proposed tool input.
+
+This is a storage primitive, not yet a replacement for the standard entrypoint's `ApprovalBroker`/file journal. Do not configure it as the live API approval backend until the broker is wired to its atomic operations and the API's pending/decision flows are covered by integration tests. SQLite WAL is intended for a local disk shared by processes on one host; it is not a safe general-purpose multi-host/network-filesystem coordination service. For multi-host deployments, use a transactional server database with equivalent compare-and-set semantics and worker leases.
+
 ## Secrets, TLS, and storage
 
 - Terminate TLS at a trusted ingress/reverse proxy and restrict direct access to the application port.
