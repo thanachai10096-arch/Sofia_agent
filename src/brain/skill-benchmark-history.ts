@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { redactSecrets } from "../security/guard.js";
 import { syncDirectoryMetadata } from "./skill-lifecycle.js";
 import type { SkillEvaluationCheck } from "./skill-lifecycle.js";
+import type { SkillCapabilityMetrics } from "./skill-capability-measurement.js";
 
 export interface SkillBenchmarkHistoryRecord {
   id: string;
@@ -12,6 +13,7 @@ export interface SkillBenchmarkHistoryRecord {
   evaluatedAt: string;
   passed: boolean;
   checks: SkillEvaluationCheck[];
+  capability: SkillCapabilityMetrics;
   baselineVersion?: string;
   runId?: string;
 }
@@ -41,6 +43,16 @@ function validateRecord(value: unknown): SkillBenchmarkHistoryRecord {
         (check.detail === undefined || typeof check.detail === "string" && check.detail.length <= 1000)) ||
       new Set(value.checks.map((check) => (check as {name:string}).name.trim())).size !== value.checks.length ||
       (value.baselineVersion !== undefined && (typeof value.baselineVersion !== "string" || value.baselineVersion.length > 100)) ||
+      !isRecord(value.capability) ||
+      typeof value.capability.score !== "number" || !Number.isFinite(value.capability.score) || value.capability.score < 0 || value.capability.score > 100 ||
+      typeof value.capability.passRate !== "number" || !Number.isFinite(value.capability.passRate) || value.capability.passRate < 0 || value.capability.passRate > 1 ||
+      typeof value.capability.baselineCoverage !== "number" || !Number.isFinite(value.capability.baselineCoverage) || value.capability.baselineCoverage < 0 || value.capability.baselineCoverage > 1 ||
+      !Number.isSafeInteger(value.capability.passedChecks) || value.capability.passedChecks < 0 ||
+      !Number.isSafeInteger(value.capability.totalChecks) || value.capability.totalChecks <= 0 ||
+      value.capability.passedChecks > value.capability.totalChecks ||
+      !Number.isSafeInteger(value.capability.baselineChecks) || value.capability.baselineChecks < 0 ||
+      !Array.isArray(value.capability.missingBaselineChecks) || !value.capability.missingBaselineChecks.every((name) => typeof name === "string") ||
+      !Array.isArray(value.capability.failedChecks) || !value.capability.failedChecks.every((name) => typeof name === "string") ||
       (value.runId !== undefined && (typeof value.runId !== "string" || value.runId.length > 500)) ||
       (Array.isArray(value.checks) && typeof value.passed === "boolean" &&
         value.passed !== value.checks.every((check) => isRecord(check) && check.passed === true))) {
@@ -58,6 +70,7 @@ function validateRecord(value: unknown): SkillBenchmarkHistoryRecord {
     evaluatedAt: value.evaluatedAt,
     passed: value.passed,
     checks,
+    capability: JSON.parse(JSON.stringify(value.capability)) as SkillCapabilityMetrics,
     ...(typeof value.baselineVersion === "string" ? { baselineVersion: value.baselineVersion } : {}),
     ...(typeof value.runId === "string" ? { runId: String(redactSecrets(value.runId)).slice(0, 500) } : {}),
   };
