@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
+import { ApprovalBroker, FileApprovalJournal } from "../agent/approval.js";
 import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
@@ -15,12 +16,16 @@ const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
 const apiKey = process.env.SOFIA_API_KEY?.trim();
 if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
-const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read,approval:read,approval:decide").split(",").map((s) => s.trim()).filter(Boolean);
 const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+const approvalJournalPath = path.resolve(
+  process.env.SOFIA_APPROVAL_JOURNAL_PATH ?? path.join(workspace, ".sofia", "approvals.json"),
+);
+const approvalBroker = new ApprovalBroker(120_000, new FileApprovalJournal(approvalJournalPath));
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalBroker.handle);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -208,12 +213,14 @@ const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
+  approvalBroker,
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
+  approvalBroker.interruptAll();
   deps.closeSessionStore();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
