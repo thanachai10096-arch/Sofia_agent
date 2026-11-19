@@ -85,6 +85,7 @@ export interface JobRuntime {
   cancelForOwner?(id: string, ownerKeyId: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
   markNotificationDelivered?(id: string): Promise<void>;
+  close?(): Promise<void>;
 }
 
 async function isExclusiveFileCollision(error: unknown, file: string): Promise<boolean> {
@@ -425,6 +426,9 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly controllers = new Map<string, AbortController>();
   private readonly resuming = new Set<string>();
   private readonly starting = new Set<string>();
+  private readonly executions = new Set<Promise<void>>();
+  private closed = false;
+  private closePromise?: Promise<void>;
   private readonly state: FileJobStateStore;
 
   constructor(
@@ -441,6 +445,7 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
+    if (this.closed) throw new Error("Job runtime is closed");
     const id = randomUUID();
     const now = new Date().toISOString();
     const record: JobRecord = {
@@ -454,7 +459,12 @@ export class DurableJobRuntime implements JobRuntime {
     };
     this.jobs.set(id, record);
     await this.state.save(record);
-    void this.execute(record, input);
+    if (this.closed) {
+      await this.state.cancel(id);
+      Object.assign(record, { status: "cancelled" as const, error: "Job runtime is shutting down." });
+      return publicJobRecord(record);
+    }
+    void this.trackExecution(record, input);
     return publicJobRecord(record);
   }
 
@@ -521,6 +531,7 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
+    if (this.closed) throw new Error("Job runtime is closed");
     // Reserve the resume slot before the first await. Otherwise two callers can both
     // pass the guard while get() is pending and race to resume the same checkpoint.
     if (this.resuming.has(id)) throw new Error("Job is already being resumed");
@@ -541,7 +552,7 @@ export class DurableJobRuntime implements JobRuntime {
       record.notificationDelivered = false;
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
-      await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
+      await this.trackExecution(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
@@ -570,6 +581,33 @@ export class DurableJobRuntime implements JobRuntime {
     if (record) Object.assign(record, persisted);
     controller?.abort(new Error("Job cancelled by caller"));
     return true;
+  }
+
+  private trackExecution(
+    record: JobRecord,
+    input: Omit<BrainRunInput, "signal" | "resume">,
+    externalSignal?: AbortSignal,
+    resume?: BrainRunSnapshot,
+  ): Promise<void> {
+    const execution = this.execute(record, input, externalSignal, resume);
+    this.executions.add(execution);
+    void execution.finally(() => this.executions.delete(execution)).catch(() => undefined);
+    return execution;
+  }
+
+  async close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
+    this.closePromise = (async () => {
+      for (const controller of this.controllers.values()) {
+        controller.abort(new Error("Job runtime is shutting down"));
+      }
+      // Include tasks that are claiming a lease as well as active Brain runs.
+      while (this.executions.size > 0) {
+        await Promise.allSettled([...this.executions]);
+      }
+    })();
+    return this.closePromise;
   }
 
   private async execute(
