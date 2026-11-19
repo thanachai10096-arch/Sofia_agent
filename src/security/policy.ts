@@ -67,8 +67,13 @@ export function classifyToolEffects(name: string): ToolEffect[] {
   // Browser reads are network access, not browser-control actions. They remain
   // gated by allowNetwork + allowedHosts, while page interaction stays privileged.
   if (name === "browser.goto") return ["network", "read"];
-  if (["browser.open", "browser.observe", "browser.screenshot", "browser.close"].includes(name)) return ["read"];
-  if (name.startsWith("browser.")) return ["browser", "network"];
+  if (["browser.open", "browser.observe", "browser.screenshot", "browser.close", "browser.profile.list"].includes(name)) return ["read"];
+  // Browser interaction is gated by the browser capability and explicit approval.
+  // Network egress remains enforced by the browser runtime's URL/DNS-pinned proxy;
+  // requiring a URL in click/type input would incorrectly reject legitimate page actions.
+  if (name === "browser.profile.revoke") return ["browser", "destructive"];
+  if (name === "browser.login") return ["browser", "destructive"];
+  if (["browser.click", "browser.type", "browser.action"].includes(name)) return ["browser"];
   if (name === "desktop.system.discover" || name === "desktop.workspace.list_files" ||
       name === "desktop.workspace.read_file" || name === "desktop.screen.capture") return ["read"];
   if (name === "desktop.workspace.write_file" || name === "workspace.write_file" ||
