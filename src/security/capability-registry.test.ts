@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { authorizeCapability, CapabilityRegistry, type CapabilityDefinition, type DelegatedAuthority } from "./capability-registry.js";
+import { authorizeCapability, reserveDelegatedSpend, CapabilityRegistry, type CapabilityDefinition, type DelegatedAuthority } from "./capability-registry.js";
 
 const readCapability: CapabilityDefinition = {
   id: "web.search",
@@ -75,4 +75,38 @@ test("financial capability requires bounded integer amount, currency, merchant a
 
 test("financial capability cannot be registered over unrestricted desktop transport", () => {
   assert.throws(() => new CapabilityRegistry([{ ...orderCapability, transport: "desktop" }]), /desktop transport/);
+});
+
+
+test("financial spend reservation requires a stable idempotency key and atomic ledger", async () => {
+  const reservations: Array<Record<string, unknown>> = [];
+  const ledger = {
+    async reserve(input: { principalId: string; currency: string; amountMinor: number; dailyLimitMinor: number; idempotencyKey: string }) {
+      reservations.push(input);
+      return "reserved" as const;
+    },
+  };
+  const invocation = { principalId: "user-1", capabilityId: "commerce.place-order", amountMinor: 1200, currency: "THB", merchantId: "merchant-verified" };
+  const invalid = await reserveDelegatedSpend(ledger, authority, invocation, "short");
+  assert.equal(invalid.reserved, false);
+  assert.equal(reservations.length, 0);
+  const reserved = await reserveDelegatedSpend(ledger, authority, invocation, "order:123456789012345");
+  assert.equal(reserved.reserved, true);
+  assert.equal(reserved.duplicate, false);
+  assert.equal(reservations[0]?.dailyLimitMinor, 30_000);
+});
+
+test("duplicate ledger reservation is surfaced without authorizing a second provider submission", async () => {
+  const ledger = {
+    async reserve() { return "already_reserved" as const; },
+  };
+  const result = await reserveDelegatedSpend(ledger, authority, {
+    principalId: "user-1", capabilityId: "commerce.place-order", amountMinor: 1200,
+    currency: "THB", merchantId: "merchant-verified",
+  }, "order:123456789012345");
+  assert.deepEqual(result, {
+    reserved: true,
+    duplicate: true,
+    reason: "This transaction was already reserved; do not submit it again.",
+  });
 });
