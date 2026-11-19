@@ -123,6 +123,23 @@ function pathId(url: string): string | null {
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
+  // Per-owner agents are created only through a server-side resolver after authentication.
+  const tenantAgents = new Map<string, Promise<{ agent: SofiaAgent; dependencies: AgentDependencies }>>();
+  const agentForOwner = async (ownerKeyId: string): Promise<SofiaAgent> => {
+    if (!config.dependenciesForOwner) return agent;
+    let pending = tenantAgents.get(ownerKeyId);
+    if (!pending) {
+      pending = Promise.resolve().then(async () => {
+        const tenantDependencies = await config.dependenciesForOwner!(ownerKeyId);
+        return { agent: new SofiaAgent(tenantDependencies), dependencies: tenantDependencies };
+      }).catch((error: unknown) => {
+        tenantAgents.delete(ownerKeyId);
+        throw error;
+      });
+      tenantAgents.set(ownerKeyId, pending);
+    }
+    return (await pending).agent;
+  };
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
   const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
@@ -262,7 +279,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
-        const result = await agent.run({
+        const ownerAgent = await agentForOwner(run.ownerKeyId);
+        const result = await ownerAgent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
@@ -870,5 +888,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       cronTimer = undefined;
     });
   }
+  server.on("close", () => {
+    void (async () => {
+      const settled = await Promise.allSettled([...tenantAgents.values()]);
+      for (const item of settled) {
+        if (item.status !== "fulfilled") continue;
+        try { await item.value.dependencies.close?.(); } catch { /* continue closing remaining tenants */ }
+      }
+      tenantAgents.clear();
+    })();
+  });
   return server;
 }
