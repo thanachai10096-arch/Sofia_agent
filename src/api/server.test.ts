@@ -297,6 +297,53 @@ test("approval API lists and resolves only requests owned by the authenticated p
 
 
 
+test("server restart marks persisted in-flight runs interrupted instead of replaying side effects", async () => {
+  const ownerKey = "restart-owner-key";
+  const ownerKeyId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
+  const persisted: Array<{ id: string; status: string; error?: string }> = [];
+  const interruptedId = "12345678-1234-4234-8234-123456789abc";
+  const runStore = {
+    save: async (record: { id: string; status: string; error?: string }) => { persisted.push(record); },
+    remove: async () => {},
+    loadAllSync: () => [{
+      id: interruptedId,
+      status: "running" as const,
+      createdAt: Date.now() - 1_000,
+      updatedAt: Date.now() - 500,
+      ownerKeyId,
+      desktopCapabilities: [],
+    }],
+    load: () => undefined,
+  };
+  let agentCalls = 0;
+  const server = createSofiaApi({
+    provider: { generate: async () => { agentCalls += 1; return { text: "must not replay" }; } },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { [ownerKey]: ["agent:run", "agent:read"] },
+    runStore,
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/agent/runs/" + interruptedId, {
+      headers: { authorization: "Bearer " + ownerKey },
+    });
+    assert.equal(response.status, 200);
+    const recovered = await response.json() as { status: string; error?: string };
+    assert.equal(recovered.status, "failed");
+    assert.match(recovered.error ?? "", /interrupted by server restart/i);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(persisted.some((record) => record.id === interruptedId && record.status === "failed"));
+    assert.equal(agentCalls, 0, "restart recovery must not automatically replay an interrupted agent run");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("async run cancellation is owner-scoped and reaches the active execution signal", async () => {
   const ownerKey = "run-owner-key";
   const otherKey = "run-other-key";
