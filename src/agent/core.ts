@@ -317,7 +317,8 @@ export class SofiaAgent {
                 runId,
                 principalId: request.principalId,
                 signal: request.signal ?? new AbortController().signal,
-                requireApproval: true,
+                // Let the gateway enforce risk/effect-based approval; read-only tools stay non-interactive.
+                requireApproval: false,
                 notifyApproval: (waiting) => {
                   if (waiting) emit({
                     type: "tool.approval_required",
