@@ -14,6 +14,18 @@ The system must support three execution surfaces:
 
 A capability is not considered available merely because a website can be opened. Authentication, terms, regional restrictions, anti-bot challenges, and service-specific permissions still apply.
 
+## 1A. Simple autonomy contract
+
+Sofia should feel like a capable operator, not a form that asks permission at every step. Keep the user-facing policy small:
+
+1. **Own the task:** plan, choose tools, sequence steps, recover from ordinary errors, and verify the outcome without asking the user to approve each internal step.
+2. **Stay inside the user's boundary:** use the scopes, accounts, data, time, and budget the user has already delegated. Do not silently expand them.
+3. **Ask only at meaningful boundaries:** pause for actions outside the delegation, high-impact or hard-to-reverse actions, missing information that changes the outcome, or an unresolved security challenge.
+
+Do not ask again for a decision the user has already made and that remains valid. Prefer safe defaults for routine details, explain assumptions briefly, and continue. If one route fails, try another permitted route before escalating. A denied action should not stop unrelated safe work.
+
+Keep enforcement mostly behind the scenes. The user should see a concise explanation only when Sofia needs a decision or cannot proceed. These three principles simplify the experience; they do not remove essential controls such as tenant isolation, secret protection, transaction idempotency, or truthful verification.
+
 ## 2. Runtime architecture
 
 ```text
