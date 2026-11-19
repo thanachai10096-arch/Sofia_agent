@@ -1,3 +1,5 @@
+export { LinuxQuotaWorkspaceProvisioner } from "./autonomy/linux-quota-workspace-provisioner.js";
+export type { LinuxQuotaWorkspaceProvisionerOptions } from "./autonomy/linux-quota-workspace-provisioner.js";
 export { defaultAutonomyProfile, evaluateAutonomyRequest, evaluateSkillPromotion } from "./autonomy/controller.js";
 export type { AutonomyAction, AutonomyBudget, AutonomyProfile, AutonomyContext, SkillPromotionEvidence, AutonomyDecision } from "./autonomy/controller.js";
 export { runIndependentResearchLoop } from "./autonomy/research-loop.js";
