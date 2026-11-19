@@ -1057,3 +1057,42 @@ test("DurableJobRuntime close aborts active work, waits for shutdown, and reject
     /runtime is closed/i,
   );
 });
+
+
+test("DurableJobRuntime close waits for a submit already admitted but still persisting", async () => {
+  const namespace = "job-runtime-close-admission-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const internals = runtime as unknown as {
+    state: { save: (record: import("./job-runtime.js").JobRecord) => Promise<boolean> };
+  };
+  const originalSave = internals.state.save.bind(internals.state);
+  let enteredSave!: () => void;
+  const saveEntered = new Promise<void>((resolve) => { enteredSave = resolve; });
+  let releaseSave!: () => void;
+  const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+  internals.state.save = async (record) => {
+    enteredSave();
+    await saveGate;
+    return originalSave(record);
+  };
+
+  try {
+    const submitting = runtime.submit({ task: "submit racing with close" });
+    await saveEntered;
+    let closeFinished = false;
+    const closing = runtime.close().then(() => { closeFinished = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(closeFinished, false, "close must wait for an admitted submit to finish persistence");
+
+    releaseSave();
+    const submitted = await submitting;
+    await closing;
+    assert.ok(["cancelled", "completed"].includes((await runtime.get(submitted.id))?.status ?? ""));
+    await assert.rejects(runtime.submit({ task: "late submit" }), /runtime is closed/i);
+  } finally {
+    releaseSave();
+  }
+});
