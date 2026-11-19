@@ -112,3 +112,60 @@ sanitizing a caller-provided path is insufficient.
 This is **not yet wired into the API/Agent composition root**. The current `createSofiaAgentDependenciesWithSessions()` still creates one process-wide dependency graph from the configured workspace; the resolver must not be treated as enabling multi-tenant execution until every runtime and mutable store is constructed per principal and cross-tenant integration tests pass. The resolver also cannot eliminate OS-level TOCTOU races against a hostile local process with write access to the workspace root.
 
 The resolver also exposes `resolveStoreDirectory(principalId, storeName)` for fixed application-owned state namespaces (for example `memory`, `jobs`, or `checkpoints`). It validates store identifiers and checks the canonical path and symlink boundary beneath that principal's workspace. This helper is still not a substitute for wiring every store to the resolved directory.
+
+### Principal-scoped dependency graph: implementation contract
+
+The API refactor must not stop at selecting a workspace path. The authenticated
+principal must select one complete dependency graph, and every mutable resource
+created by that graph must be rooted in that principal's workspace.
+
+| Resource | Current composition point | Required tenant boundary |
+| --- | --- | --- |
+| Workspace filesystem and desktop runtime | `createSofiaAgentDependencies()`, `createBrainFactory()`, `DesktopRuntime` | Construct from the resolved principal workspace; never accept a request-supplied path |
+| Brain run snapshots and checkpoints | `FileRunStore`, `DurableCheckpointManager` | Principal-specific state directory and namespace |
+| Project memory and learned-skill ledger | `FileProjectMemoryStore`, `PersistentSkillLedger` | Principal-specific project-memory root |
+| Skill lifecycle and benchmark history | `VersionedSkillLifecycle`, `FileSkillBenchmarkHistory` | Principal-specific lifecycle and benchmark files; no shared mutable singleton |
+| Evolution and audit evidence | `EvolutionEngine`, `EncryptedFileAudit`, `AuditSkillEvidenceVerifier` | Principal-specific persistence and verifier; preserve an explicit platform-level audit path only for genuinely global security events |
+| Durable jobs | `DurableJobRuntime`, `FileJobStateStore` | Principal-specific state namespace/root; every get/list/resume/cancel/notification path must enforce the authenticated owner |
+| API runs and idempotency | `createSofiaApi()`, `FileRunRecordStore`, in-memory run/idempotency maps | Principal-scoped runtime and durable records, or a shared store with mandatory owner predicates on every operation |
+| Sessions | `SqliteSessionStore.open(databasePath)` | Explicit principal-specific database path; session IDs must remain owner-bound |
+| User memory | `FileUserMemoryStore` | Keep identity hashing and owner checks; use a principal-specific root when composing isolated dependency graphs |
+| Browser profiles | `BrowserProfileStore`, `BrowserProfileSessionManager` | Principal-specific profile storage and lifecycle; never share authenticated cookies or page handles |
+| Quotas | `UsageLimiter` | Preserve key-level accounting; tenant graph selection must not reset or bypass API-key quotas |
+
+#### Required request lifecycle
+
+1. Authenticate the API key and derive the opaque principal exclusively from
+   `auth.keyId`. Ignore any client-provided principal or workspace identifier.
+2. Resolve the principal workspace using `PrincipalWorkspaceResolver`.
+3. Obtain or create that principal's dependency graph from a server-owned
+   registry. The graph must include its Agent/Brain factory, workspace runtime,
+   stores, browser profile manager, and job runtime.
+4. Route run submission, streaming, polling, cancellation, jobs, cron, memory,
+   and session operations through that same principal graph.
+5. On shutdown, close each graph's SQLite handles and browser profiles only
+   after its active runs/jobs have stopped or been safely drained.
+6. Bound registry growth without evicting a graph that still owns active work.
+   A process restart must reconstruct the same paths and recover only that
+   principal's durable jobs/checkpoints.
+
+#### Cross-tenant acceptance tests
+
+- Principal A cannot read, write, list, execute, resume, cancel, or infer
+  Principal B's files, sessions, memories, runs, jobs, checkpoints, browser
+  profiles, learned skills, or audit evidence.
+- A request body containing another principal ID or an arbitrary workspace
+  path cannot change the authenticated principal's dependency graph.
+- Two principals can run concurrently without sharing mutable runtime objects,
+  browser handles, session databases, skill lifecycle state, or job state.
+- Restart recovery, cron dispatch, and notification delivery preserve owner
+  boundaries and cannot resume another principal's work.
+- Registry shutdown closes all tenant-owned resources; capacity management
+  never discards a live job's dependencies.
+- Tests use temporary roots and distinct API keys, and include negative
+  cross-owner attempts for every read/mutation endpoint.
+
+This matrix is an implementation contract, not a statement that these
+boundaries already exist. The current process-global `SofiaAgent`,
+`DurableJobRuntime`, run map, cron scheduler, and entrypoint dependency graph
+must be refactored before the product can claim multi-tenant isolation.
