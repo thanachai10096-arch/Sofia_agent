@@ -84,6 +84,12 @@ export class CapabilityGuardToolGateway implements ToolGateway {
     return this.inner.execute(call, {
       ...context,
       requireApproval: context.requireApproval || decision.requiresApproval,
+      // The downstream gateway may skip its generic approval prompt only for
+      // this server-verified, non-critical delegated capability. Its other
+      // policy, path, host, and risk checks remain in force.
+      ...(!decision.requiresApproval && capability?.risk !== "critical"
+        ? { delegatedCapabilityId: capabilityId }
+        : {}),
     });
   }
 
