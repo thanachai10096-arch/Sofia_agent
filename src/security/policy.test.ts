@@ -60,3 +60,33 @@ test("unknown API scopes do not grant tool capabilities", () => {
   assert.equal(effective.allowBrowser, false);
   assert.equal(effective.allowDestructive, false);
 });
+
+
+test("desktop API scopes grant only their matching capability under host policy", () => {
+  const effective = policyForToolScopes(policy({
+    allowFileWrite: true,
+    allowShell: true,
+    allowNetwork: false,
+  }), ["desktop:workspace:write"]);
+  assert.equal(effective.allowFileWrite, true);
+  assert.equal(effective.allowShell, false);
+  assert.equal(effective.allowNetwork, false);
+
+  const process = policyForToolScopes(policy({
+    allowFileWrite: true,
+    allowShell: true,
+    allowNetwork: false,
+  }), ["desktop:process:execute"]);
+  assert.equal(process.allowFileWrite, false);
+  assert.equal(process.allowShell, true);
+  assert.equal(process.allowNetwork, false);
+});
+
+test("desktop scopes cannot override installation-wide host deny switches", () => {
+  const effective = policyForToolScopes(policy({
+    allowFileWrite: false,
+    allowShell: false,
+  }), ["desktop:workspace:write", "desktop:process:execute"]);
+  assert.equal(effective.allowFileWrite, false);
+  assert.equal(effective.allowShell, false);
+});
