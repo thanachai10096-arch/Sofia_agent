@@ -56,9 +56,12 @@ export class CapabilityGuardToolGateway implements ToolGateway {
     }
     const has = (effect: string) => descriptor.effects.includes(effect as typeof descriptor.effects[number]);
     const compatible =
-      (capability.effect === "read" && !has("write") && !has("shell") && !has("destructive")) ||
+      // Read may use network transport, but never a browser-control action.
+      (capability.effect === "read" && has("read") && !has("write") && !has("browser") && !has("shell") && !has("destructive")) ||
       (capability.effect === "local_write" && has("write") && !has("network") && !has("browser") && !has("shell") && !has("destructive")) ||
-      (capability.effect === "external_side_effect" && (has("network") || has("browser")) && !has("shell") && !has("destructive")) ||
+      // External actions must be explicitly classified as write or browser control;
+      // network access alone is not evidence that a tool performs a side effect.
+      (capability.effect === "external_side_effect" && (has("write") || has("browser")) && !has("shell") && !has("destructive")) ||
       capability.effect === "financial";
     if (!compatible) {
       return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Capability effect does not match the registered tool effects." } };
