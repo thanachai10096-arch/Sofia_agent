@@ -255,3 +255,29 @@ test("remote runner rejects a snapshot whose content does not match its digest",
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("remote runner rejects media types that only share the application/json prefix", async () => {
+  const sandbox: Sandbox = {
+    isolation: "container",
+    async run() { throw new Error("must not execute"); },
+  };
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/sandbox/execute", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer " + TOKEN,
+        "content-type": "application/jsonp",
+      },
+      body: "{}",
+    });
+    assert.equal(response.status, 415);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
