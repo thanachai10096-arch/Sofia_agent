@@ -44,6 +44,12 @@ test("Upstash run ownership claim uses one cluster slot and returns a fencing ge
   assert.ok(keys.every((key) => key.startsWith("sofia:")));
   assert.match(RUN_OWNERSHIP_CLAIM_SCRIPT, /INCR/u);
   assert.match(RUN_OWNERSHIP_CLAIM_SCRIPT, /PEXPIRE/u);
+  assert.ok(Number(command[10]) >= input.leaseMs, "tenant binding must live at least as long as the lease");
+  assert.ok(
+    RUN_OWNERSHIP_CLAIM_SCRIPT.indexOf("EXISTS', KEYS[1]") <
+      RUN_OWNERSHIP_CLAIM_SCRIPT.indexOf("GET', KEYS[3]"),
+    "active lease must be checked before a contender can touch tenant binding",
+  );
 });
 
 test("claim returns no lease when another worker owns the run or tenant binding differs", async () => {
