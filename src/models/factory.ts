@@ -101,7 +101,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       check.name !== "skill-regression-benchmark" &&
       check.name !== "skill-benchmark-history" &&
       check.name !== "skill-capability-measurement");
-    let capability;
+    let capability: ReturnType<typeof measureSkillCapability> | undefined;
     try {
       capability = measureSkillCapability({
         checks,
@@ -120,7 +120,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         passed: false,
         detail: error instanceof Error ? error.message : "Capability measurement failed.",
       });
-      capability = undefined;
+      capability = {
+        score: 0, passRate: 0, baselineCoverage: 0,
+        passedChecks: 0, totalChecks: 1, baselineChecks: 0,
+        missingBaselineChecks: [], failedChecks: [],
+      };
     }
     checks.push({
       name: "skill-benchmark-history",
@@ -134,7 +138,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         evaluatedAt: new Date().toISOString(),
         passed: checks.every((check) => check.passed),
         checks,
-        ...(capability ? { capability } : {}),
+        capability,
         ...((previous?.package.version ?? historicalBaseline?.skillVersion) ? { baselineVersion: previous?.package.version ?? historicalBaseline?.skillVersion } : {}),
         ...(provenance.runId ? { runId: provenance.runId } : {}),
       });
