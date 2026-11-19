@@ -1116,3 +1116,71 @@ test("DurableJobRuntime persists desktop grants and intersects them with current
   assert.deepEqual(factoryOptions[1]?.toolScopes, ["agent:run", "desktop:workspace:read"]);
   assert.equal(runCount, 2);
 });
+
+
+test("API-owned jobs require fresh authorization and cannot regain revoked scopes on resume", async () => {
+  const namespace = "job-runtime-auth-resume-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "auth-resume-" + randomUUID(),
+    task: "resume with reduced grants",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: ["step-1"],
+    checkpointId: "auth-resume-checkpoint",
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const factoryOptions: Array<{ toolScopes?: string[]; desktopCapabilities?: import("../desktop/types.js").DesktopCapability[] }> = [];
+  const runtime = new DurableJobRuntime((options) => {
+    factoryOptions.push({
+      toolScopes: options.toolScopes,
+      desktopCapabilities: options.desktopCapabilities,
+    });
+    const resumed = factoryOptions.length > 1;
+    return {
+      run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+        if (!input.resume) {
+          await options.onRunSnapshot?.(snapshot);
+          return { completed: false, state: "failed" };
+        }
+        return { completed: true, state: "completed" };
+      },
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({
+    task: "resume with reduced grants",
+    ownerKeyId: "api-owner",
+    toolScopes: ["tool:write", "tool:shell"],
+    desktopCapabilities: ["workspace:write", "process:execute"],
+  });
+
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+  assert.deepEqual(factoryOptions[0]?.toolScopes, ["tool:write", "tool:shell"]);
+  assert.deepEqual(factoryOptions[0]?.desktopCapabilities, ["workspace:write", "process:execute"]);
+
+  await assert.rejects(
+    () => runtime.resume(submitted.id),
+    /authenticated authorization is required/i,
+  );
+
+  const resumed = await runtime.resume(submitted.id, undefined, {
+    toolScopes: [],
+    desktopCapabilities: [],
+  });
+  assert.equal(resumed.status, "completed");
+  assert.deepEqual(factoryOptions[1]?.toolScopes, []);
+  assert.deepEqual(factoryOptions[1]?.desktopCapabilities, []);
+});
