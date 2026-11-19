@@ -866,11 +866,10 @@ test("approval broker keeps effectful tools blocked until the exact pending acti
     },
   );
 
-  let pending = [];
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    pending = await broker.listPending(principalId);
-    if (pending.length === 1) break;
+  let pending = await broker.listPending(principalId);
+  for (let attempt = 0; attempt < 100 && pending.length !== 1; attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5));
+    pending = await broker.listPending(principalId);
   }
   assert.equal(pending.length, 1, "the gateway must publish a durable approval request");
   assert.equal(pending[0]?.runId, "approval-broker-e2e-run");
