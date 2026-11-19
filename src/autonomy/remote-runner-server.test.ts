@@ -10,6 +10,20 @@ import type { Sandbox } from "../sandbox.js";
 
 const TOKEN = "runner-test-token-with-at-least-thirty-two-characters";
 
+function testWorkspaceProvisioner() {
+  const quotaRoot = path.join(os.tmpdir(), "sofia-runner-test-quota");
+  return {
+    async createWorkspace() {
+      await mkdir(quotaRoot, { recursive: true });
+      return mkdtemp(path.join(quotaRoot, "run-"));
+    },
+    async disposeWorkspace(workspacePath: string) {
+      await rm(workspacePath, { recursive: true, force: true });
+    },
+  };
+}
+
+
 test("remote runner authenticates requests and executes isolated snapshot round trips", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-runner-server-test-"));
   const sandbox: Sandbox = {
@@ -25,7 +39,7 @@ test("remote runner authenticates requests and executes isolated snapshot round 
   const server = createRemoteSandboxRunnerServer({
     token: TOKEN,
     sandbox,
-    diskQuotaEnforced: true,
+    workspaceProvisioner: testWorkspaceProvisioner(),
     tempRoot: path.join(root, "runs"),
     allowNetwork: false,
   });
@@ -61,7 +75,7 @@ test("remote runner rejects unauthenticated calls and unsafe snapshot paths", as
     isolation: "container",
     async run() { throw new Error("must not execute"); },
   };
-  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true, tempRoot: root });
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, workspaceProvisioner: testWorkspaceProvisioner(), tempRoot: root });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -104,7 +118,7 @@ test("remote runner refuses network mode without a confirmed egress firewall", (
     async run() { return { stdout: "", stderr: "", code: 0 }; },
   };
   assert.throws(
-    () => createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true, allowNetwork: true }),
+    () => createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, workspaceProvisioner: testWorkspaceProvisioner(), allowNetwork: true }),
     /egress firewall/,
   );
 });
@@ -122,7 +136,7 @@ test("remote runner refuses to return files through a symlinked parent directory
       return { stdout: "", stderr: "", code: 0 };
     },
   };
-  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true, tempRoot: path.join(root, "runs") });
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, workspaceProvisioner: testWorkspaceProvisioner(), tempRoot: path.join(root, "runs") });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -157,7 +171,7 @@ test("remote runner readiness reflects Docker daemon and preloaded image health"
       if (!ready) throw new Error("Docker daemon or image unavailable.");
     },
   };
-  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true, tempRoot: root });
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, workspaceProvisioner: testWorkspaceProvisioner(), tempRoot: root });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
