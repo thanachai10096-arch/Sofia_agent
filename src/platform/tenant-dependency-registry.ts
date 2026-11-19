@@ -19,6 +19,7 @@ export class TenantDependencyRegistry {
     dependencies: Promise<AgentDependencies>;
   }>();
   private closed = false;
+  private closePromise?: Promise<void>;
 
   constructor(
     private readonly resolver: TenantResourceResolver,
@@ -56,26 +57,29 @@ export class TenantDependencyRegistry {
     return dependencies;
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.closed = true;
-    const pending = [...this.entries.values()].map((entry) => entry.dependencies);
-    const settled = await Promise.allSettled(pending);
-    const failures: unknown[] = [];
-    for (const result of settled) {
-      if (result.status === "rejected") {
-        failures.push(result.reason);
-        continue;
+    this.closePromise = (async () => {
+      const pending = [...this.entries.values()].map((entry) => entry.dependencies);
+      const settled = await Promise.allSettled(pending);
+      const failures: unknown[] = [];
+      for (const result of settled) {
+        if (result.status === "rejected") {
+          failures.push(result.reason);
+          continue;
+        }
+        try {
+          await result.value.closeBrowserProfiles?.();
+        } catch (error) {
+          failures.push(error);
+        }
       }
-      try {
-        await result.value.closeBrowserProfiles?.();
-      } catch (error) {
-        failures.push(error);
+      this.entries.clear();
+      if (failures.length) {
+        throw new AggregateError(failures, "One or more tenant dependency bundles failed to close.");
       }
-    }
-    this.entries.clear();
-    if (failures.length) {
-      throw new AggregateError(failures, "One or more tenant dependency bundles failed to close.");
-    }
+    })();
+    return this.closePromise;
   }
 }
