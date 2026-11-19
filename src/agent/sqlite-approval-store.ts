@@ -134,8 +134,13 @@ export class SqliteApprovalStore implements TransactionalApprovalStore {
     status: Exclude<ApprovalAuditStatus, "pending">,
     settledAt: number,
   ): boolean {
-    if (!id || !principalId || !actionHash || !Number.isSafeInteger(settledAt)) return false;
-    if (status === "expired") return false; // Use expirePending() for the expiry predicate.
+    if (!id || !principalId || !actionHash || !Number.isSafeInteger(settledAt) || settledAt < 0) return false;
+    // Enforce terminal states at runtime too: JavaScript callers and untrusted
+    // adapters can bypass the TypeScript Exclude<> constraint. In particular,
+    // allowing "pending" here would permit a supposedly one-time transition
+    // to leave the record actionable.
+    if (status !== "approved" && status !== "rejected" &&
+        status !== "cancelled" && status !== "interrupted") return false;
     try {
       const result = this.db.prepare(`
         UPDATE approvals SET status = ?, settled_at = ?
