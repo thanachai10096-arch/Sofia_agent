@@ -28,7 +28,7 @@ export interface SecurityAuditSink {
 export class CompositeSecurityAudit implements SecurityAuditSink {
   constructor(private readonly sinks: SecurityAuditSink[]) {}
   get durable(): boolean {
-    return this.sinks.some((sink) => sink.durable === true && typeof sink.read === "function");
+    return this.sinks.some((sink) => sink.durable === true && typeof sink.read === "function" && typeof sink.list === "function");
   }
   async record(event: SecurityAuditEvent): Promise<void> {
     for (const sink of this.sinks) await sink.record(event);
