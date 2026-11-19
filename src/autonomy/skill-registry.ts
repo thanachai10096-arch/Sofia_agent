@@ -185,7 +185,8 @@ export class InMemorySkillRegistryStore implements SkillRegistryStore {
     const previous = this.locks.get(scope) ?? Promise.resolve();
     let release!: () => void;
     const lock = new Promise<void>((resolve) => { release = resolve; });
-    this.locks.set(scope, previous.then(() => lock));
+    const queued = previous.then(() => lock);
+    this.locks.set(scope, queued);
     await previous;
     try {
       const current = this.states.get(scope) ?? emptyState();
@@ -195,7 +196,7 @@ export class InMemorySkillRegistryStore implements SkillRegistryStore {
       return result;
     } finally {
       release();
-      if (this.locks.get(scope) === lock) this.locks.delete(scope);
+      if (this.locks.get(scope) === queued) this.locks.delete(scope);
     }
   }
 }
