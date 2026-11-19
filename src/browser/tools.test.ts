@@ -311,3 +311,37 @@ test("concurrent browser profile acquisition shares one owner-scoped session", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("browser.transaction.inspect returns read-only evidence and fails on mismatches", async () => {
+  const html = "<main><h1>Checkout</h1><p>Acme Store</p><p>USD $42.50</p><p>Canvas bag x 1</p></main>";
+  const runtime: BrowserRuntime = {
+    launch: async () => ({
+      id: "transaction-session",
+      newPage: async () => ({
+        id: "transaction-page", url: async () => "https://shop.example/checkout",
+        title: async () => "Checkout", content: async () => html,
+        goto: async () => {}, click: async () => {}, type: async () => {},
+        select: async () => {}, scroll: async () => {}, wait: async () => {},
+        press: async () => {}, back: async () => {}, forward: async () => {},
+        reload: async () => {}, screenshot: async () => "", close: async () => {},
+      } satisfies BrowserPage),
+      close: async () => {},
+    } satisfies BrowserSession),
+  };
+  const tools = createBrowserTools(runtime);
+  const open = tools.find((item) => item.name === "browser.open")!;
+  const inspect = tools.find((item) => item.name === "browser.transaction.inspect")!;
+  assert.deepEqual(inspect.effects, ["read"]);
+  const { pageId } = await open.execute({}, {} as never) as { pageId: string };
+  const matched = await inspect.execute({
+    pageId, recipient: "Acme Store", amount: "$42.50", currency: "USD",
+    items: ["Canvas bag x 1"],
+  }, {} as never) as { verified: boolean; missing: string[]; url: string };
+  assert.equal(matched.verified, true);
+  assert.deepEqual(matched.missing, []);
+  const mismatch = await inspect.execute({
+    pageId, recipient: "Different Store", amount: "$42.50",
+  }, {} as never) as { verified: boolean; missing: string[] };
+  assert.equal(mismatch.verified, false);
+  assert.deepEqual(mismatch.missing, ["recipient"]);
+});
