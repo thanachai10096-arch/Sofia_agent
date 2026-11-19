@@ -192,3 +192,19 @@ test("named mutable-state directories reject a symlink state root", async (t) =>
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test("named mutable-state directories reject a permissive .sofia parent", async (t) => {
+  if (process.platform === "win32") { t.skip("POSIX mode-bit permissions are unavailable on Windows."); return; }
+  const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-state-mode-"));
+  try {
+    const root = path.join(temp, "workspaces");
+    const resolver = new PrincipalWorkspaceResolver(root);
+    const workspace = await resolver.resolve("tenant:alice");
+    const stateRoot = path.join(workspace, ".sofia");
+    await mkdir(stateRoot, { mode: 0o700 });
+    await chmod(stateRoot, 0o755);
+    await assert.rejects(resolver.resolveStoreDirectory("tenant:alice", "memory"), /group or other users/i);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
