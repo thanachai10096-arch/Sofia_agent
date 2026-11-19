@@ -6,6 +6,9 @@ import path from "node:path";
 import { SqliteApprovalStore } from "./sqlite-approval-store.js";
 import type { ApprovalAuditRecord } from "./approval.js";
 
+const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+const supportsNodeSqlite = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 5);
+
 const record: ApprovalAuditRecord = {
   id: "approval-1",
   runId: "run-1",
@@ -32,7 +35,7 @@ async function withStores(run: (first: SqliteApprovalStore, second: SqliteApprov
   }
 }
 
-test("SQLite approval store allows only one decision across independent connections", async () => {
+test("SQLite approval store allows only one decision across independent connections", { skip: !supportsNodeSqlite }, async () => {
   await withStores(async (first, second) => {
     assert.equal(first.createPending(record), true);
     assert.equal(second.settlePending(record.id, "owner-a", record.actionHash, "approved", 2_000), true);
@@ -42,7 +45,7 @@ test("SQLite approval store allows only one decision across independent connecti
   });
 });
 
-test("SQLite approval store binds decisions to owner and exact action hash", async () => {
+test("SQLite approval store binds decisions to owner and exact action hash", { skip: !supportsNodeSqlite }, async () => {
   await withStores(async (first, second) => {
     assert.equal(first.createPending(record), true);
     assert.equal(second.settlePending(record.id, "owner-b", record.actionHash, "approved", 2_000), false);
@@ -53,7 +56,7 @@ test("SQLite approval store binds decisions to owner and exact action hash", asy
   });
 });
 
-test("SQLite approval store rejects duplicate IDs and never stores proposed tool input", async () => {
+test("SQLite approval store rejects duplicate IDs and never stores proposed tool input", { skip: !supportsNodeSqlite }, async () => {
   await withStores(async (first, _second, file) => {
     assert.equal(first.createPending({ ...record, input: { content: "sensitive-proposed-input" } } as ApprovalAuditRecord), true);
     assert.equal(first.createPending(record), false);
@@ -62,7 +65,7 @@ test("SQLite approval store rejects duplicate IDs and never stores proposed tool
   });
 });
 
-test("SQLite approval store expires pending requests atomically", async () => {
+test("SQLite approval store expires pending requests atomically", { skip: !supportsNodeSqlite }, async () => {
   await withStores(async (first, second) => {
     assert.equal(first.createPending(record), true);
     assert.equal(second.expirePending(10_000), 1);
@@ -72,7 +75,7 @@ test("SQLite approval store expires pending requests atomically", async () => {
   });
 });
 
-test("SQLite approval store refuses expired decisions and supports schema reopen", async () => {
+test("SQLite approval store refuses expired decisions and supports schema reopen", { skip: !supportsNodeSqlite }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-reopen-"));
   const file = path.join(root, "approvals.sqlite");
   try {
@@ -94,7 +97,7 @@ test("SQLite approval store refuses expired decisions and supports schema reopen
 });
 
 
-test("SQLite approval store initializes safely when two workers open a new database together", async () => {
+test("SQLite approval store initializes safely when two workers open a new database together", { skip: !supportsNodeSqlite }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-init-race-"));
   const file = path.join(root, "approvals.sqlite");
   let first: SqliteApprovalStore | undefined;
@@ -113,7 +116,7 @@ test("SQLite approval store initializes safely when two workers open a new datab
   }
 });
 
-test("SQLite approval store supports explicit in-memory databases", async () => {
+test("SQLite approval store supports explicit in-memory databases", { skip: !supportsNodeSqlite }, async () => {
   const store = await SqliteApprovalStore.open(":memory:");
   try {
     assert.equal(store.createPending(record), true);
