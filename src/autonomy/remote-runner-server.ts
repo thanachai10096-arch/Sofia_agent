@@ -239,7 +239,7 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
       return;
     }
     const contentType = request.headers["content-type"];
-    if (typeof contentType !== "string" || !contentType.toLowerCase().startsWith("application/json")) {
+    if (typeof contentType !== "string" || contentType.split(";")[0]?.trim().toLowerCase() !== "application/json") {
       json(response, 415, { error: "unsupported_media_type" });
       return;
     }
