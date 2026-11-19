@@ -135,6 +135,14 @@ export class LinuxQuotaWorkspaceProvisioner {
         try {
           const parsed: unknown = JSON.parse(stdout);
           if (!isRecord(parsed) || parsed.ok !== true) throw new Error("Quota helper did not confirm success.");
+          const allowedReplyKeys = new Set(["ok", "runId", "workspacePath", "quotaBytes", "quotaInodes"]);
+          if (Object.keys(parsed).some((key) => !allowedReplyKeys.has(key)) ||
+              typeof parsed.runId !== "string" ||
+              (parsed.workspacePath !== undefined && typeof parsed.workspacePath !== "string") ||
+              (parsed.quotaBytes !== undefined && (!Number.isSafeInteger(parsed.quotaBytes) || parsed.quotaBytes < 1)) ||
+              (parsed.quotaInodes !== undefined && (!Number.isSafeInteger(parsed.quotaInodes) || parsed.quotaInodes < 1))) {
+            throw new Error("Quota helper returned an unexpected or malformed response.");
+          }
           finish(undefined, parsed as HelperReply);
         } catch (error) {
           finish(error instanceof Error ? error : new Error("Invalid quota helper response."));
