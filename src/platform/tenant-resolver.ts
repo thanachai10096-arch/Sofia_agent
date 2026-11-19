@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
 import { createTenantWorkspace } from "./tenant-workspace.js";
 
 /**
@@ -54,6 +55,20 @@ export function createTenantResourceResolver(tenantsRoot: string): TenantResourc
         context.tenantId !== expectedTenantId
       ) {
         throw new Error("Invalid tenant resource context.");
+      }
+
+      // A context can outlive the directory it originally referenced. Re-check
+      // the filesystem boundary whenever it is consumed so replacing the tenant
+      // workspace with a symlink cannot silently redirect a previously issued
+      // context to another tenant's files.
+      try {
+        const workspaceStat = lstatSync(context.workspaceRoot);
+        if (!workspaceStat.isDirectory() || workspaceStat.isSymbolicLink() ||
+            realpathSync(context.workspaceRoot) !== context.workspaceRoot) {
+          throw new Error("Tenant workspace boundary changed.");
+        }
+      } catch {
+        throw new Error("Tenant workspace is missing or no longer a real directory.");
       }
     },
   });
