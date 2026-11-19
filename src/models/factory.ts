@@ -123,7 +123,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       capability = {
         score: 0, passRate: 0, baselineCoverage: 0,
         passedChecks: 0, totalChecks: 1, baselineChecks: 0,
-        missingBaselineChecks: [], failedChecks: [],
+        missingBaselineChecks: [], failedChecks: ["capability-measurement"],
       };
     }
     checks.push({
