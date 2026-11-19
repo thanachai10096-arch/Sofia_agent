@@ -11,6 +11,8 @@ The host application configures `createSofiaApi(dependencies, config)` and suppl
 - Use least-privilege scopes:
   - `agent:run`: submit runs/jobs, cancel runs, and read run/job status.
   - `agent:read`: read run/job status without granting run creation or cancellation.
+  - `approval:read`: list pending approvals and read the authenticated owner's approval history.
+  - `approval:decide`: approve or reject the authenticated owner's exact pending action hash.
   - `desktop:discover`, `desktop:workspace:list`, `desktop:workspace:read`, `desktop:workspace:write`, `desktop:process:execute`: derive the corresponding desktop capability grants.
   - `security:admin` (or configured `securityAdminScope`): access security status and kill/revive controls, plus learning diagnostics where configured.
 - Admin scope does not implicitly grant `agent:run`; desktop scopes do not grant API run access.
@@ -27,6 +29,10 @@ Set `allowedOrigins` to exact trusted origins including scheme and port. Keep it
 Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `maxConcurrentRunsPerKey`, `requestTimeoutMs`, and `runRetentionMs` for your workload.
 
 **Important:** the current in-memory counters are process-local and may reset on restart. They do not coordinate quotas across replicas. Use a shared atomic store for rate limits, usage accounting, idempotency records, and concurrency reservations before claiming cluster-wide enforcement.
+
+## Approval journal
+
+The API entrypoint configures a file-backed approval journal at `SOFIA_APPROVAL_JOURNAL_PATH`, defaulting to `$SOFIA_WORKSPACE/.sofia/approvals.json`. Keep this file on a private persistent filesystem and back it up according to your retention policy. The journal stores approval metadata and terminal state, not proposed tool inputs. Pending requests are marked `interrupted` on restart or graceful shutdown and are never restored as executable approvals. The file journal supports one writer process; do not share it between replicas. Grant `approval:read` and `approval:decide` only to clients allowed to review and decide their own actions.
 
 ## Secrets, TLS, and storage
 
@@ -51,4 +57,4 @@ Configure `maxBodyBytes`, `maxRunsPerKeyPerDay`, `maxToolCallsPerKeyPerDay`, `ma
 
 ## Current limitations
 
-API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. Approval behavior depends on the configured approval handler and tool gateway. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
+API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. Approval behavior depends on the configured approval handler and tool gateway. The standard API entrypoint uses a file-backed owner-scoped approval journal; custom hosts must configure the same broker for the API and agent dependencies. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
