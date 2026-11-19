@@ -43,6 +43,7 @@ export interface AutonomyJobStore {
   complete<TResult>(principalId: string, jobId: string, workerId: string, result: TResult): Promise<AutonomyJob<unknown, TResult>>;
   fail(principalId: string, jobId: string, workerId: string, error: string, retryable: boolean): Promise<AutonomyJob>;
   cancel(principalId: string, jobId: string): Promise<AutonomyJob>;
+  cancelOwned(principalId: string, jobId: string, workerId: string): Promise<AutonomyJob>;
   recoverExpired(now?: Date): Promise<number>;
 }
 
@@ -264,6 +265,20 @@ export class FileAutonomyJobStore implements AutonomyJobStore {
       const job = await this.readFile(jobId);
       if (!job || job.principalId !== validPrincipal(principalId)) throw new Error("Autonomy job not found.");
       if (terminal(job.status)) return job;
+      job.status = "cancelled";
+      delete job.lease;
+      job.updatedAt = new Date().toISOString();
+      await this.write(job);
+      return job;
+    });
+  }
+
+  async cancelOwned(principalId: string, jobId: string, workerId: string): Promise<AutonomyJob> {
+    return this.serialize(async () => {
+      const job = await this.readFile(jobId);
+      if (!job || job.principalId !== validPrincipal(principalId)) throw new Error("Autonomy job not found.");
+      if (job.status !== "running" || job.lease?.workerId !== workerId ||
+          Date.parse(job.lease.expiresAt) <= Date.now()) return job;
       job.status = "cancelled";
       delete job.lease;
       job.updatedAt = new Date().toISOString();
