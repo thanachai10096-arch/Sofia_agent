@@ -99,10 +99,10 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
     if (!job) return undefined;
 
     const controller = new AbortController();
+    let abortKind: "host" | "safety" | "lease-lost" | "user-cancel" | undefined;
     const forwardAbort = () => { abortKind = "host"; controller.abort(signal.reason ?? new Error("Worker shutdown requested.")); };
     signal.addEventListener("abort", forwardAbort, { once: true });
     if (signal.aborted) forwardAbort();
-    let abortKind: "host" | "safety" | "lease-lost" | "user-cancel" | undefined;
     let safetyPollInFlight = false;
     let heartbeatInFlight = false;
     const pollKillSwitch = async () => {
