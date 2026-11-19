@@ -319,6 +319,7 @@ test("production effectful execution persists and verifies a start receipt befor
       durable: true,
       record(event) { events.set(event.id, event); order.push(event.decision); },
       read(id) { return events.get(id); },
+      list() { return [...events.values()]; },
     };
     const registry = new MapToolRegistry([{
       name: "custom.write",
@@ -378,6 +379,7 @@ test("production blocks effectful execution when its execution-start receipt can
         const event = events.get(id);
         return event?.decision === "approval_approved" ? event : undefined;
       },
+      list() { return [...events.values()]; },
     };
     const registry = new MapToolRegistry([{
       name: "custom.write",
@@ -429,6 +431,7 @@ test("production approval fails closed when the approval audit event cannot be r
       durable: true,
       record() {},
       read() { return undefined; },
+      list() { return []; },
     };
     const gateway = new RegistryToolGateway(
       { runtime: runtime(), tools: registry },
