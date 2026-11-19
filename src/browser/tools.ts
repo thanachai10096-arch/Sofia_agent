@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type { SofiaTool } from "../tools/types.js";
 import type { BrowserRuntime } from "./runtime.js";
 import type { BrowserProfileSessionManager } from "./profile-sessions.js";
@@ -8,6 +9,8 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
   let session: Awaited<ReturnType<BrowserRuntime["launch"]>> | undefined;
   let activeProfileId: string | undefined;
   const pages = new Map<string, Awaited<ReturnType<NonNullable<typeof session>["newPage"]>>>();
+  const transactionChallenges = new Map<string, { pageId: string; url: string; title: string; fingerprint: string; expiresAt: number }>();
+  const pageFingerprint = (url: string, title: string, html: string) => createHash("sha256").update(url + "\n" + title + "\n" + html).digest("hex");
 
   const dispose = async (): Promise<void> => {
     const closing = session;
@@ -15,6 +18,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
     session = undefined;
     activeProfileId = undefined;
     pages.clear();
+    transactionChallenges.clear();
     if (closing && !managedProfileSession) await closing.close();
   };
   registerCleanup?.(dispose);
@@ -104,16 +108,39 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       async execute(input) {
         const p = page(String(input.pageId));
         const { verifyTransactionEvidence } = await import("./transaction.js");
-        return {
-          url: await p.url(), title: await p.title(),
-          ...verifyTransactionEvidence(await p.content(), {
-            recipient: typeof input.recipient === "string" ? input.recipient : undefined,
-            amount: typeof input.amount === "string" ? input.amount : undefined,
-            currency: typeof input.currency === "string" ? input.currency : undefined,
-            items: Array.isArray(input.items) ? input.items.map(String) : undefined,
-            shippingAddress: typeof input.shippingAddress === "string" ? input.shippingAddress : undefined
-          })
-        };
+        const url = await p.url(), title = await p.title(), html = await p.content();
+        const evidence = verifyTransactionEvidence(html, {
+          recipient: typeof input.recipient === "string" ? input.recipient : undefined,
+          amount: typeof input.amount === "string" ? input.amount : undefined,
+          currency: typeof input.currency === "string" ? input.currency : undefined,
+          items: Array.isArray(input.items) ? input.items.map(String) : undefined,
+          shippingAddress: typeof input.shippingAddress === "string" ? input.shippingAddress : undefined
+        });
+        let challengeId: string | undefined;
+        if (evidence.verified) {
+          challengeId = randomUUID();
+          transactionChallenges.set(challengeId, { pageId: String(input.pageId), url, title, fingerprint: pageFingerprint(url, title, html), expiresAt: Date.now() + 300_000 });
+          while (transactionChallenges.size > 100) transactionChallenges.delete(transactionChallenges.keys().next().value!);
+        }
+        return { url, title, ...evidence, ...(challengeId ? { challengeId, expiresInSeconds: 300 } : {}) };
+      },
+    },
+    {
+      name: "browser.transaction.finalize",
+      description: "After explicit approval, click one checkout control only if the page URL, title, and complete HTML are unchanged since inspection. Challenge is short-lived and single-use.",
+      effects: ["browser", "destructive"],
+      inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" }, challengeId: { type: "string" }, selector: { type: "string" } }, required: ["pageId", "url", "challengeId", "selector"], additionalProperties: false },
+      async execute(input) {
+        const id = String(input.challengeId), challenge = transactionChallenges.get(id);
+        if (!challenge) throw new Error("Transaction approval challenge is missing, expired, or already used. Inspect the checkout again.");
+        if (challenge.expiresAt < Date.now()) { transactionChallenges.delete(id); throw new Error("Transaction approval challenge expired. Inspect the checkout again."); }
+        const pageId = String(input.pageId), p = page(pageId);
+        if (challenge.pageId !== pageId || challenge.url !== String(input.url)) throw new Error("Transaction approval is bound to a different page or URL.");
+        const url = await p.url(), title = await p.title(), html = await p.content();
+        if (url !== challenge.url || title !== challenge.title || pageFingerprint(url, title, html) !== challenge.fingerprint) { transactionChallenges.delete(id); throw new Error("Checkout page changed after inspection. Approval is invalid; inspect and approve the updated transaction."); }
+        transactionChallenges.delete(id);
+        await p.click(String(input.selector));
+        return { ok: true, clicked: true, url, title, challengeConsumed: true, note: "The control was clicked. Verify the resulting merchant confirmation independently; this tool cannot prove payment or order completion." };
       },
     },
     {
