@@ -166,6 +166,83 @@ test("multi-project hosts reject shared durable job and cron routes", async () =
   }
 });
 
+
+test("durable jobs are routed to the authenticated owner's selected project runtime", async () => {
+  const keys = ["job-owner-one", "job-owner-two"];
+  const calls: string[] = [];
+  const records = new Map<string, Map<string, { id: string; status: "queued"; createdAt: string; updatedAt: string; task: string; ownerKeyId: string }>>();
+  const makeRuntime = (principalId: string, workspaceId: string) => {
+    const scope = principalId + ":" + workspaceId;
+    calls.push(scope);
+    let store = records.get(scope);
+    if (!store) { store = new Map(); records.set(scope, store); }
+    return {
+      submit: async (input: { task: string; ownerKeyId?: string }) => {
+        const record = { id: "job-" + principalId.slice(0, 6) + "-" + workspaceId, status: "queued" as const,
+          createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), task: input.task,
+          ownerKeyId: input.ownerKeyId ?? principalId };
+        store!.set(record.id, record);
+        return record;
+      },
+      get: async (id: string) => store!.get(id),
+      list: async () => [...store!.values()],
+      resume: async (id: string) => store!.get(id)!,
+      cancel: async (id: string) => store!.has(id),
+    };
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: Object.fromEntries(keys.map((key) => [key, ["agent:run", "agent:read"]])),
+    resolveWorkspaceDependencies: async (principalId, workspaceId) => ({
+      provider: { generate: async () => ({ text: "unused" }) },
+      router: { select: () => route, markUnhealthy: () => undefined },
+      reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+      jobRuntime: makeRuntime(principalId, workspaceId),
+    }),
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const ownerId = createHash("sha256").update(keys[0]!).digest("hex").slice(0, 32);
+  const otherId = createHash("sha256").update(keys[1]!).digest("hex").slice(0, 32);
+  try {
+    const submit = async (key: string) => fetch(baseUrl + "/v1/jobs", {
+      method: "POST",
+      headers: { authorization: "Bearer " + key, "content-type": "application/json" },
+      body: JSON.stringify({ task: "build project", workspace: "project-a" }),
+    });
+    const first = await submit(keys[0]!);
+    const second = await submit(keys[1]!);
+    assert.equal(first.status, 202);
+    assert.equal(second.status, 202);
+    const firstJob = await first.json() as { id: string };
+    const secondJob = await second.json() as { id: string };
+    assert.notEqual(firstJob.id, secondJob.id);
+
+    const read = async (key: string, id: string, workspace: string) => fetch(
+      baseUrl + "/v1/jobs/" + id + "?workspace=" + workspace,
+      { headers: { authorization: "Bearer " + key } },
+    );
+    assert.equal((await read(keys[0]!, firstJob.id, "project-a")).status, 200);
+    assert.equal((await read(keys[1]!, firstJob.id, "project-a")).status, 404);
+    assert.equal((await read(keys[1]!, secondJob.id, "project-a")).status, 200);
+    const list = await fetch(baseUrl + "/v1/jobs?workspace=project-a", {
+      headers: { authorization: "Bearer " + keys[0] },
+    });
+    assert.equal(list.status, 200);
+    assert.equal((await list.json() as { jobs: unknown[] }).jobs.length, 1);
+    assert.deepEqual(calls, [ownerId + ":project-a", otherId + ":project-a", ownerId + ":project-a",
+      otherId + ":project-a", otherId + ":project-a", ownerId + ":project-a"]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("API rejects filesystem paths masquerading as project workspace IDs", async () => {
   const server = createSofiaApi({
     provider: { generate: async () => ({ text: "must not run" }) },
