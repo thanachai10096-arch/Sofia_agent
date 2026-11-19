@@ -17,9 +17,30 @@ import { UpstashApprovalDecisionStore } from "../agent/upstash-approval-store.js
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
-const apiKey = process.env.SOFIA_API_KEY?.trim();
-if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
-const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+const apiKeys: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
+const rawApiKeys = process.env.SOFIA_API_KEYS_JSON?.trim();
+if (rawApiKeys) {
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawApiKeys); }
+  catch { throw new Error("SOFIA_API_KEYS_JSON must be a JSON object mapping API keys to scope arrays."); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("SOFIA_API_KEYS_JSON must be a JSON object mapping API keys to scope arrays.");
+  }
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!key.trim() || key.length > 512 || /[\\x00-\\x20\\x7f]/u.test(key) ||
+        !Array.isArray(value) || value.length === 0 ||
+        !value.every((scope) => typeof scope === "string" && /^[a-z][a-z0-9:_-]{0,63}$/u.test(scope))) {
+      throw new Error("SOFIA_API_KEYS_JSON contains an invalid API key or scope list.");
+    }
+    apiKeys[key] = [...new Set(value as string[])];
+  }
+} else {
+  const apiKey = process.env.SOFIA_API_KEY?.trim();
+  if (!apiKey) throw new Error("Set SOFIA_API_KEY or SOFIA_API_KEYS_JSON.");
+  apiKeys[apiKey] = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+}
+if (Object.keys(apiKeys).length === 0) throw new Error("At least one API key is required.");
+const configuredScopes = new Set(Object.values(apiKeys).flat());
 const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
@@ -28,7 +49,7 @@ let closeApprovalStore: (() => void) | undefined;
 let approvalBroker: ApprovalBroker | undefined;
 let approvalHandler: import("../agent/approval-broker.js").ApprovalHandler | undefined;
 if (process.env.SOFIA_APPROVAL_ENABLED?.trim().toLowerCase() === "true") {
-  if (!scopes.includes("approval:manage")) throw new Error("SOFIA_APPROVAL_ENABLED requires approval:manage in SOFIA_API_SCOPES.");
+  if (!configuredScopes.has("approval:manage")) throw new Error("SOFIA_APPROVAL_ENABLED requires approval:manage in at least one configured API key scope list.");
   const storeKind = (process.env.SOFIA_APPROVAL_STORE ?? "sqlite").trim().toLowerCase();
   if (storeKind === "redis") {
     const url = process.env.UPSTASH_REDIS_REST_URL?.trim() || process.env.REDIS_REST_URL?.trim();
@@ -273,7 +294,7 @@ if (discordConfigured) {
 }
 
 const server = createSofiaApi(deps, {
-  apiKeys: { [apiKey]: scopes },
+  apiKeys,
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
   resolveWorkspaceDependencies,
