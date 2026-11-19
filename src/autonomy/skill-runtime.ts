@@ -32,12 +32,13 @@ export class SkillRuntime {
       const versions = state.versions[skillName];
       if (!Array.isArray(versions)) return null;
       const record = versions.find((entry: SkillRegistryVersion) => entry.version === activeVersion);
-      if (!record || record.candidate.name !== skillName ||
-          record.version !== record.evidence.artifactVersion ||
-          digestSkillCandidate(record.candidate) !== record.candidateDigest) return null;
+      if (!record || !record.candidate || typeof record.candidate !== "object" ||
+          !record.evidence || typeof record.evidence !== "object" ||
+          record.candidate.name !== skillName || record.version !== record.evidence.artifactVersion) return null;
       const evaluation = evaluateSkillCandidate(record.candidate, record.evidence);
       if (!evaluation.eligible || evaluation.candidateDigest !== record.candidateDigest ||
-          evaluation.artifactVersion !== record.version) return null;
+          evaluation.artifactVersion !== record.version ||
+          digestSkillCandidate(record.candidate) !== record.candidateDigest) return null;
 
       const candidate: LearnedSkillCandidate = record.candidate;
       return {
