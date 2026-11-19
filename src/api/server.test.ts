@@ -84,6 +84,79 @@ test("API sessions are persisted and scoped to the authenticated API key", async
 });
 
 
+
+test("API resolves each project workspace inside the authenticated principal boundary", async () => {
+  const ownerKey = "workspace-owner-key";
+  const otherKey = "workspace-other-key";
+  const resolved: string[] = [];
+  const baseDependencies = {
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "shared fallback must not run" }) },
+    ...baseDependencies,
+  }, {
+    apiKeys: {
+      [ownerKey]: ["agent:run"],
+      [otherKey]: ["agent:run"],
+    },
+    resolveWorkspaceDependencies: async (principalId, workspaceId) => {
+      resolved.push(principalId + ":" + workspaceId);
+      return {
+        ...baseDependencies,
+        provider: { generate: async () => ({ text: principalId + ":" + workspaceId }) },
+      };
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  try {
+    const run = async (key: string) => {
+      const response = await fetch(baseUrl + "/v1/agent/runs", {
+        method: "POST",
+        headers: { authorization: "Bearer " + key, "content-type": "application/json" },
+        body: JSON.stringify({ task: "inspect this project", workspace: "same-project" }),
+      });
+      assert.equal(response.status, 200);
+      return (await response.json() as { result: { output: string } }).result.output;
+    };
+    const ownerId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
+    const otherId = createHash("sha256").update(otherKey).digest("hex").slice(0, 32);
+    assert.equal(await run(ownerKey), ownerId + ":same-project");
+    assert.equal(await run(otherKey), otherId + ":same-project");
+    assert.deepEqual(resolved, [ownerId + ":same-project", otherId + ":same-project"]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("API rejects filesystem paths masquerading as project workspace IDs", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "must not run" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, { apiKeys: { "workspace-key": ["agent:run"] } });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer workspace-key", "content-type": "application/json" },
+      body: JSON.stringify({ task: "read files", workspace: "../../another-user" }),
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "invalid_workspace_id" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("API lists configured models and honors an explicit model route", async () => {
   const routes: ModelRoute[] = [
     { id: "fast", model: "vendor/fast-model", capabilities: ["fast"], costWeight: 1, latencyWeight: 1, qualityWeight: 5, healthy: true },
