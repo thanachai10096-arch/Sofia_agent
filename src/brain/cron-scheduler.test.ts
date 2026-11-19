@@ -116,6 +116,41 @@ test("scheduled jobs intersect saved grants with current API-key grants", async 
   assert.deepEqual(submitted?.desktopCapabilities, []);
 });
 
+test("running scheduled jobs are cancelled when an API grant is revoked", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(operation) { return operation(state); } };
+  let currentScopes = ["agent:run", "tool:write"];
+  let cancelled = false;
+  let submitted = false;
+  const runtime = {
+    async submit(input: Record<string, unknown>) {
+      submitted = true;
+      assert.deepEqual(input.toolScopes, ["agent:run", "tool:write"]);
+      return { id: "long-running", status: "running", task: String(input.task) } as JobRecord;
+    },
+    async get() {
+      return { id: "long-running", status: cancelled ? "cancelled" : "running", task: "long task" } as JobRecord;
+    },
+    async cancel() { cancelled = true; return true; },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, {
+    store, now: () => now,
+    resolveAuthorization: () => ({ toolScopes: currentScopes, desktopCapabilities: [] }),
+  });
+  await scheduler.create({
+    name: "revocable", task: "long task", runAt: "2026-10-17T00:01:00.000Z",
+    timeZone: "UTC", ownerKeyId: "alice", toolScopes: ["agent:run", "tool:write"],
+  }, "alice");
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await scheduler.tick();
+  for (let i = 0; i < 30 && !submitted; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(submitted, true);
+  currentScopes = ["agent:run"];
+  for (let i = 0; i < 100 && !cancelled; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(cancelled, true);
+});
+
 test("cron next occurrence respects timezone offset and weekday", () => {
   const next = nextCronOccurrence("0 9 * * 1-5", "Asia/Bangkok", new Date("2026-10-16T03:00:00.000Z"));
   assert.equal(next.toISOString(), "2026-10-19T02:00:00.000Z");
