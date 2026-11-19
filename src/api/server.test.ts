@@ -6,6 +6,10 @@ import { MemorySessionStore } from "../session/store.js";
 import { ApprovalBroker, InMemoryApprovalDecisionStore } from "../agent/approval-broker.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
+import { RegistryToolGateway } from "../brain/registry-tool-gateway.js";
+import { MapToolRegistry } from "../tools/types.js";
+import { defaultPolicy } from "../security/policy.js";
+import type { WorkspaceRuntime } from "../platform/runtime.js";
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -291,3 +295,111 @@ test("approval API lists and resolves only requests owned by the authenticated p
   }
 });
 
+
+
+test("API approval decision gates the actual effectful tool execution", async () => {
+  const ownerKey = "approval-e2e-owner-key";
+  const ownerId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
+  const broker = new ApprovalBroker({
+    store: new InMemoryApprovalDecisionStore(),
+    pollIntervalMs: 25,
+    ttlMs: 10_000,
+  });
+  const files = new Map<string, string>();
+  const runtime: WorkspaceRuntime = {
+    platform: "linux",
+    async cwd() { return "/workspace"; },
+    async readFile(path) {
+      const value = files.get(path);
+      if (value === undefined) throw new Error("missing");
+      return value;
+    },
+    async writeFile(path, content) { files.set(path, content); },
+    async listFiles() { return [...files.keys()]; },
+    async search() { return []; },
+    async run() { return { stdout: "", stderr: "", code: 0 }; },
+    async git() { return { stdout: "", stderr: "", code: 0 }; },
+  };
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Write a file only after its exact action is approved",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"],
+    },
+    effects: ["write"] as const,
+    async execute(input) {
+      executions += 1;
+      const value = input as { path: string; content: string };
+      await runtime.writeFile(value.path, value.content);
+      return { written: value.path };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime, tools: registry },
+    { ...defaultPolicy, capabilitySecret: "api-approval-e2e-test-secret" },
+    broker.handle,
+  );
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    approvalBroker: broker,
+  }, {
+    apiKeys: { [ownerKey]: ["agent:run", "agent:read", "approval:manage"] },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  const controller = new AbortController();
+  try {
+    const execution = gateway.execute(
+      { tool: "custom.write", input: { path: "approved.txt", content: "authorized" } },
+      {
+        runId: "api-gateway-approval-e2e",
+        principalId: ownerId,
+        signal: controller.signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+
+    let approvals: Array<{ id: string; actionHash: string; runId: string; toolName: string }> = [];
+    for (let attempt = 0; attempt < 100 && approvals.length !== 1; attempt += 1) {
+      const response = await fetch(base + "/v1/approvals", {
+        headers: { authorization: "Bearer " + ownerKey },
+      });
+      assert.equal(response.status, 200);
+      approvals = (await response.json() as { approvals: typeof approvals }).approvals;
+      if (approvals.length !== 1) await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    assert.equal(approvals.length, 1, "the API inbox must expose the gateway's pending approval");
+    const pending = approvals[0]!;
+    assert.equal(pending.runId, "api-gateway-approval-e2e");
+    assert.equal(pending.toolName, "custom.write");
+    assert.equal(executions, 0, "the side effect must not run before the HTTP approval decision");
+    assert.equal(files.has("approved.txt"), false);
+
+    const response = await fetch(base + "/v1/approvals/" + pending.id + "/approve", {
+      method: "POST",
+      headers: { authorization: "Bearer " + ownerKey, "content-type": "application/json" },
+      body: JSON.stringify({ actionHash: pending.actionHash }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { id: pending.id, status: "approved" });
+
+    const result = await execution;
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.data, { written: "approved.txt" });
+    assert.equal(executions, 1);
+    assert.equal(await runtime.readFile("approved.txt"), "authorized");
+  } finally {
+    controller.abort(new Error("test cleanup"));
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
