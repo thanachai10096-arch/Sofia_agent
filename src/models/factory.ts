@@ -219,9 +219,15 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const tools=createToolRegistry(createBuiltinTools());
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
+  // Browser login profiles contain cookies and authenticated browser state.
+  // Keep them inside this dependency set's workspace instead of a process-wide
+  // environment path, so separate principal workspaces cannot share credentials.
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
-    process.env.SOFIA_BROWSER_HEADLESS === "false" && process.env.SOFIA_BROWSER_PROFILE_DIR?.trim()
-      ? new BrowserProfileSessionManager(new BrowserProfileStore(process.env.SOFIA_BROWSER_PROFILE_DIR), () => new PlaywrightBrowserRuntime())
+    process.env.SOFIA_BROWSER_HEADLESS === "false"
+      ? new BrowserProfileSessionManager(
+          new BrowserProfileStore(path.join(workspace, ".sofia", "browser-profiles")),
+          () => new PlaywrightBrowserRuntime(),
+        )
       : undefined;
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,evidenceVerifier,profileSessions});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
