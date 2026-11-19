@@ -105,11 +105,18 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
     const pollKillSwitch = async () => {
       if (controller.signal.aborted) return;
       try {
+        // API-side cancellation is durable state. Poll it independently of the
+        // host kill switch so a running worker stops even when its process is remote.
+        const current = await this.options.store.get(job.principalId, job.id);
+        if (!current || current.status !== "running" || current.lease?.workerId !== workerId) {
+          controller.abort(new Error("Autonomy job was cancelled or its lease is no longer owned."));
+          return;
+        }
         const killed = await this.options.isKilled(job);
         if (killed !== false) controller.abort(new Error("Autonomy kill switch is active or returned an invalid result."));
       } catch {
-        // Fail closed: an unavailable kill-switch authority stops autonomous work.
-        controller.abort(new Error("Autonomy kill-switch check failed."));
+        // Fail closed: unavailable job state or kill-switch authority stops autonomous work.
+        controller.abort(new Error("Autonomy cancellation or kill-switch check failed."));
       }
     };
     await pollKillSwitch();
