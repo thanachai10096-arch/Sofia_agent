@@ -50,6 +50,8 @@ test("SQLite approval store binds decisions to owner and exact action hash", { s
     assert.equal(first.createPending(record), true);
     assert.equal(second.settlePending(record.id, "owner-b", record.actionHash, "approved", 2_000), false);
     assert.equal(second.settlePending(record.id, "owner-a", "different-hash", "approved", 2_000), false);
+    assert.equal(second.settlePending(record.id, "owner-a", record.actionHash, "pending" as never, 2_000), false);
+    assert.equal(second.settlePending(record.id, "owner-a", record.actionHash, "expired" as never, 2_000), false);
     assert.equal(first.pending("owner-a").length, 1);
     assert.equal(first.history("owner-b").length, 0);
     assert.equal(second.settlePending(record.id, "owner-a", record.actionHash, "rejected", 2_000), true);
