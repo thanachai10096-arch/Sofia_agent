@@ -59,3 +59,15 @@ test("API run validation rejects malformed model route selectors", () => {
   });
   assert.equal(validateAgentRunInput({ task: "inspect", modelRouteId: 123 }).valid, false);
 });
+
+
+test("API run validation rejects caller-selected workspace until per-principal isolation exists", () => {
+  assert.deepEqual(validateAgentRunInput({ task: "inspect", workspace: "/srv/other-user" }), {
+    valid: false,
+    error: "workspace_selection_unsupported",
+  });
+  assert.deepEqual(validateAgentRunInput({ task: "inspect", workspace: "../shared" }), {
+    valid: false,
+    error: "workspace_selection_unsupported",
+  });
+});
