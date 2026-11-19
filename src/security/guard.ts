@@ -46,7 +46,7 @@ export function riskFor(effects: readonly ToolEffect[], input: Record<string, un
       .filter((value) => typeof value === "string")
       .join(" ")
       .toLowerCase();
-    if (/\\b(?:buy|purchase|pay|payment|checkout|place[-_ ]order|submit[-_ ]order|confirm[-_ ](?:order|payment|purchase)|transfer|send[-_ ]money|withdraw|subscribe|delete[-_ ]account)\\b/.test(intent)) {
+    if (/\b(?:buy|purchase|pay|payment|checkout|place[-_ ]order|submit[-_ ]order|confirm[-_ ](?:order|payment|purchase)|transfer|send[-_ ]money|withdraw|subscribe|delete[-_ ]account)\b/.test(intent)) {
       return "critical";
     }
   }
