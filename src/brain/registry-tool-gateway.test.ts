@@ -310,6 +310,7 @@ test("production effectful execution persists and verifies a start receipt befor
     assert.equal(started.principalId, completed.principalId);
     assert.equal(started.actionHash, completed.actionHash);
     assert.equal(started.toolName, completed.toolName);
+    assert.equal(completed.relatedEventId, started.id, "terminal receipt must reference its exact execution-start record");
   } finally {
     if (previousSofia === undefined) delete process.env.SOFIA_ENV;
     else process.env.SOFIA_ENV = previousSofia;
