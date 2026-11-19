@@ -67,7 +67,7 @@ export interface ResearchCycleResult {
   finding: ResearchFinding;
   hypothesis: ResearchHypothesis;
   evidence?: ExperimentEvidence;
-  status: "learned" | "experiment-denied" | "no-gap";
+  status: "learned" | "experiment-failed" | "experiment-denied" | "no-gap";
   reason?: string;
 }
 export interface ResearchLoopReport {
@@ -118,7 +118,10 @@ export async function runIndependentResearchLoop(
 
     const finding = await options.adapters.researchLocally(question.slice(0, 1000), options.signal);
     options.signal.throwIfAborted();
-    if (!finding.summary.trim() || !Number.isFinite(finding.confidence) || finding.confidence < 0 || finding.confidence > 1) {
+    if (typeof finding.summary !== "string" || !finding.summary.trim() || finding.summary.length > 4000 ||
+        !Array.isArray(finding.sourceIds) || finding.sourceIds.length > 100 ||
+        finding.sourceIds.some((id) => typeof id !== "string" || !id.trim() || id.length > 500) ||
+        !Number.isFinite(finding.confidence) || finding.confidence < 0 || finding.confidence > 1) {
       throw new Error("Research adapter returned invalid finding evidence.");
     }
     const hypothesis = await options.adapters.formulateHypothesis(question, finding, options.signal);
@@ -151,8 +154,14 @@ export async function runIndependentResearchLoop(
 
     const evidence = await options.adapters.experiment(hypothesis, options.signal);
     options.signal.throwIfAborted();
-    if (!Number.isFinite(evidence.benchmarkBefore) || !Number.isFinite(evidence.benchmarkAfter) ||
-        evidence.safetyIncidents < 0 || !Number.isSafeInteger(evidence.safetyIncidents)) {
+    if (typeof evidence.passed !== "boolean" || typeof evidence.summary !== "string" ||
+        !evidence.summary.trim() || evidence.summary.length > 4000 ||
+        !Number.isFinite(evidence.benchmarkBefore) || evidence.benchmarkBefore < 0 || evidence.benchmarkBefore > 1 ||
+        !Number.isFinite(evidence.benchmarkAfter) || evidence.benchmarkAfter < 0 || evidence.benchmarkAfter > 1 ||
+        !Number.isSafeInteger(evidence.safetyIncidents) || evidence.safetyIncidents < 0 ||
+        typeof evidence.rollbackAvailable !== "boolean" ||
+        (evidence.artifactVersion !== undefined &&
+          (typeof evidence.artifactVersion !== "string" || !evidence.artifactVersion.trim() || evidence.artifactVersion.length > 200))) {
       throw new Error("Experiment adapter returned invalid benchmark or safety evidence.");
     }
     options.signal.throwIfAborted();
@@ -161,7 +170,11 @@ export async function runIndependentResearchLoop(
       idempotencyKey: `${idempotencyPrefix}:${cycle}`,
       question, finding, hypothesis, evidence,
     }, options.signal);
-    const result: ResearchCycleResult = { cycle, question, finding, hypothesis, evidence, status: "learned" };
+    const result: ResearchCycleResult = {
+      cycle, question, finding, hypothesis, evidence,
+      status: evidence.passed ? "learned" : "experiment-failed",
+      ...(!evidence.passed ? { reason: "The sandbox experiment did not meet its success criteria; this result is retained as negative evidence." } : {}),
+    };
     cycles.push(result);
     await options.onCycle?.(result, cycle + 1);
   }
