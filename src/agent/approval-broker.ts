@@ -187,6 +187,20 @@ export class ApprovalBroker {
     return this.options.store.listPending(principalId);
   }
 
+  /** Cancel pending approvals tied to a run that cannot be resumed after restart. */
+  async cancelRun(runId: string, principalId: string): Promise<number> {
+    const run = runId.trim();
+    const owner = principalId.trim();
+    if (!run || run.length > 256 || !owner || owner.length > 256) return 0;
+    const pending = await this.options.store.listPending(owner);
+    let cancelled = 0;
+    for (const record of pending) {
+      if (record.principalId !== owner || record.runId !== run || record.status !== "pending") continue;
+      if (await this.options.store.resolve(record.id, record.actionHash, "cancelled", "system:abort", this.now())) cancelled += 1;
+    }
+    return cancelled;
+  }
+
   get(id: string): Promise<ApprovalRecord | undefined> {
     if (!id.trim()) return Promise.resolve(undefined);
     return this.options.store.get(id);
