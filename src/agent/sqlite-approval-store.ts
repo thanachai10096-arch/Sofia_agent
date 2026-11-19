@@ -32,6 +32,10 @@ export class SqliteApprovalStore implements TransactionalApprovalStore {
 
   static async open(filePath: string): Promise<SqliteApprovalStore> {
     if (!filePath.trim()) throw new Error("Approval database path must not be empty.");
+    const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+    if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 5)) {
+      throw new Error("SqliteApprovalStore requires Node.js 22.5 or newer (node:sqlite).");
+    }
     const inMemory = filePath === ":memory:";
     const absolutePath = inMemory ? ":memory:" : path.resolve(filePath);
     if (!inMemory) {
@@ -49,10 +53,6 @@ export class SqliteApprovalStore implements TransactionalApprovalStore {
       }
     }
 
-    const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
-    if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 5)) {
-      throw new Error("SqliteApprovalStore requires Node.js 22.5 or newer (node:sqlite).");
-    }
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(absolutePath);
     try {
