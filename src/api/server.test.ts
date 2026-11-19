@@ -9,6 +9,7 @@ import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
 import { FileAutonomyJobStore } from "../autonomy/job-store.js";
+import type { AutonomyJobStore } from "../autonomy/job-store.js";
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -263,5 +264,45 @@ test("autonomy queue API derives tenant identity from auth and supports idempote
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("autonomy queue API returns generic 503 responses when the store is unavailable", async () => {
+  const unavailableStore = {
+    enqueue: async () => { throw new Error("database password must never be exposed"); },
+    list: async () => { throw new Error("database password must never be exposed"); },
+    get: async () => { throw new Error("database password must never be exposed"); },
+    cancel: async () => { throw new Error("database password must never be exposed"); },
+  } as unknown as AutonomyJobStore;
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { "queue-outage-key": ["autonomy:run", "autonomy:read"] },
+    autonomyJobStore: unavailableStore,
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  const headers = { authorization: "Bearer queue-outage-key", "content-type": "application/json" };
+  try {
+    const requests: Array<Promise<Response>> = [
+      fetch(base + "/v1/autonomy/jobs", { method: "POST", headers, body: JSON.stringify({ topic: "Check queue recovery" }) }),
+      fetch(base + "/v1/autonomy/jobs", { headers }),
+      fetch(base + "/v1/autonomy/jobs/00000000-0000-4000-8000-000000000001", { headers }),
+      fetch(base + "/v1/autonomy/jobs/00000000-0000-4000-8000-000000000001", { method: "DELETE", headers }),
+    ];
+    for (const request of requests) {
+      const response = await request;
+      assert.equal(response.status, 503);
+      const payload = await response.json() as { error: string; message?: string };
+      assert.deepEqual(payload, { error: "autonomy_queue_unavailable" });
+      assert.equal(JSON.stringify(payload).includes("database password"), false);
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
