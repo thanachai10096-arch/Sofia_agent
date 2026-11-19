@@ -65,8 +65,10 @@ test("financial capability requires bounded integer amount, currency, merchant a
   assert.equal(authorizeCapability(registry, authority, { ...invoke, amountMinor: 1000, currency: "USD", merchantId: "merchant-verified" }, 1).allowed, false);
   assert.equal(authorizeCapability(registry, authority, { ...invoke, amountMinor: 20_001, currency: "THB", merchantId: "merchant-verified" }, 1).allowed, false);
   assert.equal(authorizeCapability(registry, authority, { ...invoke, amountMinor: 1000.5, currency: "THB", merchantId: "merchant-verified" }, 1).allowed, false);
-  assert.equal(authorizeCapability(registry, authority, { ...invoke, amountMinor: 1000, currency: "THB", merchantId: "unknown" }, 1).allowed, false);
-  const accepted = authorizeCapability(registry, authority, { ...invoke, amountMinor: 1000, currency: "THB", merchantId: "merchant-verified" }, 1);
+  assert.equal(authorizeCapability(registry, authority, { ...invoke, amountMinor: 1000, currency: "THB", merchantId: "unknown" }, 1, { currency: "THB", spentTodayMinor: 0 }).allowed, false);
+  assert.equal(authorizeCapability(registry, authority, { ...invoke, amountMinor: 1000, currency: "THB", merchantId: "merchant-verified" }, 1).allowed, false);
+  assert.equal(authorizeCapability(registry, authority, { ...invoke, amountMinor: 1000, currency: "THB", merchantId: "merchant-verified" }, 1, { currency: "THB", spentTodayMinor: 29_500 }).allowed, false);
+  const accepted = authorizeCapability(registry, authority, { ...invoke, amountMinor: 1000, currency: "THB", merchantId: "merchant-verified" }, 1, { currency: "THB", spentTodayMinor: 10_000 });
   assert.equal(accepted.allowed, true);
   if (accepted.allowed) assert.equal(accepted.requiresApproval, true);
 });
