@@ -13,7 +13,7 @@ This is the initial **single-host Docker Compose** deployment path. Each install
 Clone the repository and enter its directory:
 
 ```bash
-git clone https://github.com/thanachai10096-arch/Sofia_agent.git
+git clone https://github.com/t-ksc/Sofia_agent.git
 cd Sofia_agent
 ```
 
