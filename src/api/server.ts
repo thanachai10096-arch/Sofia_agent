@@ -317,6 +317,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      // Durable JobRuntime and CronScheduler are still host-workspace scoped. Do not
+      // let multi-project API hosts accidentally route these requests into the shared root.
+      if (config.resolveWorkspaceDependencies &&
+          (requestUrl.pathname === "/v1/jobs" || requestUrl.pathname.startsWith("/v1/jobs/") ||
+           requestUrl.pathname === "/v1/cron" || requestUrl.pathname.startsWith("/v1/cron/"))) {
+        return json(res, 503, { error: "project_scoped_jobs_unavailable" }, origin, config);
+      }
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
         if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
