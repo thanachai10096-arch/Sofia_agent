@@ -115,23 +115,37 @@ test("in-memory approval store enforces the per-principal pending cap", async ()
 });
 
 
-test("approval broker cancels only pending approvals belonging to a recovered interrupted run", async () => {
+test("approval broker cancellation is isolated by both run and tenant", async () => {
   const store = new InMemoryApprovalDecisionStore();
   const broker = new ApprovalBroker({ store, pollIntervalMs: 25 });
-  const first = new AbortController();
-  const second = new AbortController();
-  const firstWait = broker.handle({ runId: "interrupted-run", principalId: "owner-1", toolName: "write_file", input: { path: "a" }, actionHash: "a".repeat(64), risk: "medium", signal: first.signal });
-  const secondWait = broker.handle({ runId: "live-run", principalId: "owner-1", toolName: "write_file", input: { path: "b" }, actionHash: "b".repeat(64), risk: "medium", signal: second.signal });
-  let records = await broker.listPending("owner-1");
-  for (let attempt = 0; attempt < 20 && records.length !== 2; attempt += 1) {
+  const interruptedOwner = new AbortController();
+  const liveOwner = new AbortController();
+  const foreignTenant = new AbortController();
+  const waits = [
+    broker.handle({ runId: "interrupted-run", principalId: "owner-1", toolName: "write_file", input: { path: "a" }, actionHash: "a".repeat(64), risk: "medium", signal: interruptedOwner.signal }),
+    broker.handle({ runId: "live-run", principalId: "owner-1", toolName: "write_file", input: { path: "b" }, actionHash: "b".repeat(64), risk: "medium", signal: liveOwner.signal }),
+    broker.handle({ runId: "interrupted-run", principalId: "owner-2", toolName: "write_file", input: { path: "c" }, actionHash: "c".repeat(64), risk: "medium", signal: foreignTenant.signal }),
+  ];
+  let ownerRecords = await broker.listPending("owner-1");
+  let foreignRecords = await broker.listPending("owner-2");
+  for (let attempt = 0; attempt < 20 && (ownerRecords.length !== 2 || foreignRecords.length !== 1); attempt += 1) {
     await new Promise((resolve) => setTimeout(resolve, 5));
-    records = await broker.listPending("owner-1");
+    ownerRecords = await broker.listPending("owner-1");
+    foreignRecords = await broker.listPending("owner-2");
   }
-  assert.equal(records.length, 2);
+  assert.equal(ownerRecords.length, 2);
+  assert.equal(foreignRecords.length, 1);
+
   assert.equal(await broker.cancelRun("interrupted-run", "owner-1"), 1);
-  assert.equal((await broker.get(records.find((record) => record.runId === "interrupted-run")!.id))?.status, "cancelled");
+  assert.equal((await broker.get(ownerRecords.find((record) => record.runId === "interrupted-run")!.id))?.status, "cancelled");
+  assert.equal((await broker.get(ownerRecords.find((record) => record.runId === "live-run")!.id))?.status, "pending");
+  assert.equal((await broker.get(foreignRecords[0]!.id))?.status, "pending", "another tenant's approval must remain pending");
   assert.equal((await broker.listPending("owner-1")).length, 1, "a different active run must remain pending");
-  assert.equal(await broker.cancelRun("interrupted-run", "other-owner"), 0);
-  first.abort(); second.abort();
-  await Promise.all([firstWait, secondWait]);
+  assert.equal((await broker.listPending("owner-2")).length, 1);
+  assert.equal(await broker.cancelRun("interrupted-run", "owner-2"), 1, "the same run ID is scoped to its owning tenant");
+
+  interruptedOwner.abort();
+  liveOwner.abort();
+  foreignTenant.abort();
+  await Promise.all(waits);
 });
