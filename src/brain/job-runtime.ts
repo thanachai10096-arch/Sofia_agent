@@ -565,7 +565,7 @@ export class DurableJobRuntime implements JobRuntime {
 
   private async execute(
     record: JobRecord,
-    input: Omit<BrainRunInput, "signal" | "resume">,
+    input: Omit<BrainRunInput, "signal" | "resume"> & { toolScopes?: string[]; desktopCapabilities?: DesktopCapability[] },
     externalSignal?: AbortSignal,
     resume?: BrainRunSnapshot,
   ): Promise<void> {
