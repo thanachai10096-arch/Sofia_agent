@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { LearnedSkillCandidate } from "../brain/learning.js";
-import { digestSkillCandidate } from "./skill-evaluator.js";
+import { digestSkillCandidate, type SkillCandidateEvaluationEvidence } from "./skill-evaluator.js";
 import {
   ControlledSkillRegistry,
   InMemorySkillRegistryStore,
-  type SkillCandidateEvaluationEvidence,
 } from "./skill-registry.js";
 
 const candidate: LearnedSkillCandidate = {
