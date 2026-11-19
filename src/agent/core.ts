@@ -25,8 +25,16 @@ export class SofiaAgent {
   private readonly sessionTails = new Map<string, Promise<void>>();
 
   async run(request: AgentRequest): Promise<AgentResult> {
-    const sessionId = request.sessionId;
-    if (!sessionId || !this.deps.sessionStore) return this.runUnlocked(request);
+    // Session IDs are caller-controlled; namespace them by the authenticated
+    // principal before using either the transcript store or per-session queue.
+    // Keep the legacy unscoped behavior only for trusted single-user callers
+    // that do not provide a principal identity.
+    const principalId = request.principalId?.trim();
+    const scopedRequest = request.sessionId && principalId
+      ? { ...request, sessionId: JSON.stringify([principalId, request.sessionId]) }
+      : request;
+    const sessionId = scopedRequest.sessionId;
+    if (!sessionId || !this.deps.sessionStore) return this.runUnlocked(scopedRequest);
     const previous = this.sessionTails.get(sessionId) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -34,7 +42,7 @@ export class SofiaAgent {
     this.sessionTails.set(sessionId, tail);
     await previous.catch(() => undefined);
     try {
-      return await this.runUnlocked(request);
+      return await this.runUnlocked(scopedRequest);
     } finally {
       release();
       if (this.sessionTails.get(sessionId) === tail) this.sessionTails.delete(sessionId);
