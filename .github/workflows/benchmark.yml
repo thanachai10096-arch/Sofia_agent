@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
       - run: node bench/run.mjs --selftest
       - run: node bench/run.mjs --agent noop
       - run: node bench/run.mjs --agent reference
