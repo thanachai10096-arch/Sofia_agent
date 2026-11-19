@@ -529,6 +529,11 @@ export class DurableJobRuntime implements JobRuntime {
       const record = this.jobs.get(id) ?? fetched;
       if (record.status === "completed") return publicJobRecord(record);
       if (record.status === "cancelled") throw new Error("Cancelled jobs cannot be resumed");
+      // API-owned jobs must be resumed through an authenticated API request so
+      // revoked key scopes can be intersected with the original persisted grants.
+      if (record.ownerKeyId && !authorization) {
+        throw new Error("Authenticated authorization is required to resume an API-owned job.");
+      }
       if (!record.snapshot) throw new Error("Job has no resumable snapshot");
       // A terminal status may be persisted just before the previous worker's finally block
       // removes its controller. Only the canonical status determines whether resume is blocked.
