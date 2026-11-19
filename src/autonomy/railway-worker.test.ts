@@ -1,7 +1,7 @@
+import { createRailwayWorkerInstanceId, runRailwayAutonomyWorker, runRailwayAutonomyWorkerWithProcessSignals } from "./railway-worker.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { EventEmitter } from "node:events";
-import { runRailwayAutonomyWorker, runRailwayAutonomyWorkerWithProcessSignals } from "./railway-worker.js";
 
 function withEnv(values: Record<string, string | undefined>, run: () => Promise<void>): Promise<void> {
   const previous = new Map<string, string | undefined>();
@@ -100,4 +100,13 @@ test("Railway worker handles termination and closes its host-owned pool", async 
     assert.equal(signals.listenerCount("SIGTERM"), 0);
     assert.equal(signals.listenerCount("SIGINT"), 0);
   });
+});
+
+test("Railway worker lease identities are unique per process even with a stable label", () => {
+  const first = createRailwayWorkerInstanceId("sofia-worker");
+  const second = createRailwayWorkerInstanceId("sofia-worker");
+  assert.notEqual(first, second);
+  assert.match(first, /^sofia-worker:[0-9a-f-]{36}$/);
+  assert.match(second, /^sofia-worker:[0-9a-f-]{36}$/);
+  assert.throws(() => createRailwayWorkerInstanceId(" "), /Worker label/);
 });
