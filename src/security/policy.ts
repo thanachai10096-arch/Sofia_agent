@@ -72,7 +72,7 @@ export function classifyToolEffects(name: string): ToolEffect[] {
   // Network egress remains enforced by the browser runtime's URL/DNS-pinned proxy;
   // requiring a URL in click/type input would incorrectly reject legitimate page actions.
   if (name === "browser.profile.revoke") return ["browser", "destructive"];
-  if (name === "browser.login") return ["browser", "destructive"];
+  if (name === "browser.login") return ["browser", "network"];
   if (["browser.click", "browser.type", "browser.action"].includes(name)) return ["browser"];
   if (name === "desktop.system.discover" || name === "desktop.workspace.list_files" ||
       name === "desktop.workspace.read_file" || name === "desktop.screen.capture") return ["read"];
