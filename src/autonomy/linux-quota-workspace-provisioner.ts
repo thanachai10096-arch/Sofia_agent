@@ -24,6 +24,7 @@ interface HelperReply {
   ok: boolean;
   workspacePath?: string;
   quotaBytes?: number;
+  quotaInodes?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -68,7 +69,9 @@ export class LinuxQuotaWorkspaceProvisioner {
   }
 
   private async verifyHelper(): Promise<void> {
-    const info = await lstat(this.helperPath);
+    const resolved = await realpath(this.helperPath);
+    if (resolved !== this.helperPath) throw new Error("Quota helper path and all parent components must be canonical, not symlinked.");
+    const info = await lstat(resolved);
     if (!info.isFile() || info.isSymbolicLink() || info.uid !== 0 || (info.mode & 0o022) !== 0 || (info.mode & 0o111) === 0) {
       throw new Error("Quota helper must be an executable, root-owned file not writable by group or others.");
     }
@@ -144,7 +147,7 @@ export class LinuxQuotaWorkspaceProvisioner {
       hardQuotaBytes: this.maxWorkspaceBytes,
       hardQuotaInodes: 20_000,
     });
-    if (typeof reply.workspacePath !== "string" || reply.quotaBytes !== this.maxWorkspaceBytes) {
+    if (typeof reply.workspacePath !== "string" || reply.quotaBytes !== this.maxWorkspaceBytes || reply.quotaInodes !== 20_000) {
       throw new Error("Quota helper did not confirm the requested hard quota.");
     }
     const workspacePath = await realpath(reply.workspacePath);
