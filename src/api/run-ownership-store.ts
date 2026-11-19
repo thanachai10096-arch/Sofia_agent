@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 interface UpstashResponse { result?: unknown; error?: string }
 
 export interface RunOwnershipLease {
