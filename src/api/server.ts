@@ -317,13 +317,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
-      // Durable JobRuntime and CronScheduler are still host-workspace scoped. Do not
-      // let multi-project API hosts accidentally route these requests into the shared root.
+      // Cron schedules remain host-scoped until their dispatcher can be partitioned.
       if (config.resolveWorkspaceDependencies &&
-          (requestUrl.pathname === "/v1/jobs" || requestUrl.pathname.startsWith("/v1/jobs/") ||
-           requestUrl.pathname === "/v1/cron" || requestUrl.pathname.startsWith("/v1/cron/"))) {
-        return json(res, 503, { error: "project_scoped_jobs_unavailable" }, origin, config);
+          (requestUrl.pathname === "/v1/cron" || requestUrl.pathname.startsWith("/v1/cron/"))) {
+        return json(res, 503, { error: "project_scoped_cron_unavailable" }, origin, config);
       }
+      const requestedJobWorkspace = requestUrl.searchParams.get("workspace") ?? undefined;
+      const resolveJobRuntime = async (workspaceId?: string) => {
+        if (config.resolveWorkspaceDependencies) {
+          if (!workspaceId || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(workspaceId)) return undefined;
+          const projectDeps = await config.resolveWorkspaceDependencies(auth.keyId, workspaceId);
+          return projectDeps.jobRuntime;
+        }
+        if (workspaceId !== undefined) return undefined;
+        return deps.jobRuntime;
+      };
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
         if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
@@ -794,45 +802,49 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
 
-      const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
-      if (jobMatch && deps.jobRuntime) {
+      const jobMatch = requestUrl.pathname.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
+      if (jobMatch) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
-        const job = await deps.jobRuntime.get(jobId);
-        if (!job || job.ownerKeyId !== auth.keyId) {
-          return json(res, 404, { error: "job_not_found" }, origin, config);
-        }
-        if (req.method === "GET" && !action) {
-          return json(res, 200, job, origin, config);
-        }
+        const jobRuntime = await resolveJobRuntime(requestedJobWorkspace);
+        if (!jobRuntime) return json(res, config.resolveWorkspaceDependencies ? 400 : 503,
+          { error: config.resolveWorkspaceDependencies ? "workspace_required" : "job_runtime_unavailable" }, origin, config);
+        const job = await jobRuntime.get(jobId);
+        if (!job || job.ownerKeyId !== auth.keyId) return json(res, 404, { error: "job_not_found" }, origin, config);
+        if (req.method === "GET" && !action) return json(res, 200, job, origin, config);
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
+          try { return json(res, 202, await jobRuntime.resume(jobId), origin, config); }
           catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
-          const cancelled = await deps.jobRuntime.cancel(jobId);
+          const cancelled = await jobRuntime.cancel(jobId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
         }
       }
 
-      if (req.method === "GET" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
+      if (req.method === "GET" && requestUrl.pathname === "/v1/jobs") {
+        const jobRuntime = await resolveJobRuntime(requestedJobWorkspace);
+        if (!jobRuntime) return json(res, config.resolveWorkspaceDependencies ? 400 : 503,
+          { error: config.resolveWorkspaceDependencies ? "workspace_required" : "job_runtime_unavailable" }, origin, config);
+        const jobs = (await jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
         return json(res, 200, { jobs }, origin, config);
       }
 
-      if (req.method === "POST" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+      if (req.method === "POST" && requestUrl.pathname === "/v1/jobs") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
+        const jobWorkspace = input.workspace ?? requestedJobWorkspace;
+        const jobRuntime = await resolveJobRuntime(jobWorkspace);
+        if (!jobRuntime) return json(res, config.resolveWorkspaceDependencies ? 400 : 503,
+          { error: config.resolveWorkspaceDependencies ? "workspace_required" : "job_runtime_unavailable" }, origin, config);
         const selectionError = modelSelectionError(input);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
-          const job = await deps.jobRuntime.submit({
+          const job = await jobRuntime.submit({
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
