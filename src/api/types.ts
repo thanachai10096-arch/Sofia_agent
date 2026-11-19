@@ -1,6 +1,7 @@
 import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import type { AgentDependencies } from "../agent/types.js";
 
 export interface AgentRunInput {
   task: string;
@@ -40,6 +41,8 @@ export interface ApiAuth {
 
 export interface SofiaApiConfig {
   apiKeys: Record<string, string[]>;
+  /** Server-side resolver for dependencies belonging to an authenticated API owner. */
+  dependenciesForOwner?: (ownerKeyId: string) => Promise<AgentDependencies>;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
