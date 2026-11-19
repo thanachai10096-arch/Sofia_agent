@@ -21,6 +21,11 @@ function record(overrides: Record<string, unknown> = {}) {
     evaluatedAt: new Date(0).toISOString(),
     passed: true,
     checks: [{ name: "typecheck", passed: true }, { name: "test", passed: true }],
+    capability: {
+      score: 100, passRate: 1, baselineCoverage: 1,
+      passedChecks: 2, totalChecks: 2, baselineChecks: 0,
+      missingBaselineChecks: [], failedChecks: [],
+    },
     ...overrides,
   };
 }
