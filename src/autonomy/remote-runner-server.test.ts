@@ -11,7 +11,7 @@ import type { Sandbox } from "../sandbox.js";
 const TOKEN = "runner-test-token-with-at-least-thirty-two-characters";
 
 function testWorkspaceProvisioner() {
-  const quotaRoot = path.join(os.tmpdir(), "sofia-runner-test-quota");
+  const quotaRoot = path.join(os.tmpdir(), "sofia-remote-runner");
   return {
     async createWorkspace() {
       await mkdir(quotaRoot, { recursive: true });
@@ -40,7 +40,6 @@ test("remote runner authenticates requests and executes isolated snapshot round 
     token: TOKEN,
     sandbox,
     workspaceProvisioner: testWorkspaceProvisioner(),
-    tempRoot: path.join(root, "runs"),
     allowNetwork: false,
   });
   server.listen(0, "127.0.0.1");
@@ -295,4 +294,15 @@ test("remote runner rejects media types that only share the application/json pre
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
+});
+
+test("remote runner refuses startup without a real quota-backed workspace provisioner", () => {
+  const sandbox: Sandbox = {
+    isolation: "container",
+    async run() { return { stdout: "", stderr: "", code: 0 }; },
+  };
+  assert.throws(
+    () => createRemoteSandboxRunnerServer({ token: TOKEN, sandbox }),
+    /host-owned workspace provisioner backed by a hard per-run disk quota/,
+  );
 });
