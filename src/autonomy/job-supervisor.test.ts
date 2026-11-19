@@ -64,7 +64,7 @@ test("supervisor records bounded retryable failures", async () => {
     const failed = await supervisor.runNext("worker-1", new AbortController().signal);
     assert.equal(failed?.id, job.id);
     assert.equal(failed?.status, "failed");
-    assert.equal(failed?.error, "Autonomy job failed; inspect trusted host diagnostics.");
+    assert.equal(failed?.error, "Autonomy job failed.");
     assert.equal(failed?.error?.includes("secret-password"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
