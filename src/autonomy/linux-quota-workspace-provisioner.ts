@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat, realpath, stat } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import path from "node:path";
 
 export interface LinuxQuotaWorkspaceProvisionerOptions {
@@ -68,8 +68,8 @@ export class LinuxQuotaWorkspaceProvisioner {
   }
 
   private async verifyHelper(): Promise<void> {
-    const info = await stat(this.helperPath);
-    if (!info.isFile() || info.uid !== 0 || (info.mode & 0o022) !== 0 || (info.mode & 0o111) === 0) {
+    const info = await lstat(this.helperPath);
+    if (!info.isFile() || info.isSymbolicLink() || info.uid !== 0 || (info.mode & 0o022) !== 0 || (info.mode & 0o111) === 0) {
       throw new Error("Quota helper must be an executable, root-owned file not writable by group or others.");
     }
   }
