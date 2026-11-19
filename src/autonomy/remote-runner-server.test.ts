@@ -25,6 +25,7 @@ test("remote runner authenticates requests and executes isolated snapshot round 
   const server = createRemoteSandboxRunnerServer({
     token: TOKEN,
     sandbox,
+    diskQuotaEnforced: true,
     tempRoot: path.join(root, "runs"),
     allowNetwork: false,
   });
@@ -60,7 +61,7 @@ test("remote runner rejects unauthenticated calls and unsafe snapshot paths", as
     isolation: "container",
     async run() { throw new Error("must not execute"); },
   };
-  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, tempRoot: root });
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true, tempRoot: root });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -103,7 +104,7 @@ test("remote runner refuses network mode without a confirmed egress firewall", (
     async run() { return { stdout: "", stderr: "", code: 0 }; },
   };
   assert.throws(
-    () => createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, allowNetwork: true }),
+    () => createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true, allowNetwork: true }),
     /egress firewall/,
   );
 });
@@ -121,7 +122,7 @@ test("remote runner refuses to return files through a symlinked parent directory
       return { stdout: "", stderr: "", code: 0 };
     },
   };
-  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, tempRoot: path.join(root, "runs") });
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true, tempRoot: path.join(root, "runs") });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -156,7 +157,7 @@ test("remote runner readiness reflects Docker daemon and preloaded image health"
       if (!ready) throw new Error("Docker daemon or image unavailable.");
     },
   };
-  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, tempRoot: root });
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true, tempRoot: root });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -179,7 +180,7 @@ test("remote runner rejects unknown protocol fields and bounds HTTP connection l
     isolation: "container",
     async run() { throw new Error("must not execute"); },
   };
-  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox });
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true });
   assert.equal(server.headersTimeout, 30_000);
   assert.equal(server.requestTimeout, 300_000);
   assert.equal(server.keepAliveTimeout, 5_000);
@@ -223,7 +224,7 @@ test("remote runner rejects a snapshot whose content does not match its digest",
     isolation: "container",
     async run() { throw new Error("must not execute"); },
   };
-  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox });
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
@@ -262,7 +263,7 @@ test("remote runner rejects media types that only share the application/json pre
     isolation: "container",
     async run() { throw new Error("must not execute"); },
   };
-  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox });
+  const server = createRemoteSandboxRunnerServer({ token: TOKEN, sandbox, diskQuotaEnforced: true });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
