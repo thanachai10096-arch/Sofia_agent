@@ -44,6 +44,27 @@ export class PrincipalWorkspaceResolver {
     return this.rootPromise;
   }
 
+  /**
+   * Resolve a named mutable-state directory beneath one principal's workspace.
+   * Store names are fixed application identifiers, never caller-provided paths.
+   */
+  async resolveStoreDirectory(principalId: string, storeName: string): Promise<string> {
+    if (!/^[a-z0-9-]{1,64}$/.test(storeName)) {
+      throw new Error("Principal workspace store names may contain only lowercase letters, digits, and hyphens.");
+    }
+    const workspace = await this.resolve(principalId);
+    const candidate = path.join(workspace, ".sofia", storeName);
+    if (!within(workspace, candidate)) throw new Error("Principal store escapes its workspace.");
+    await mkdir(candidate, { recursive: true, mode: 0o700 });
+    const info = await lstat(candidate);
+    if (!info.isDirectory() || info.isSymbolicLink()) {
+      throw new Error("Principal store must be a real directory, not a symbolic link.");
+    }
+    const canonical = await realpath(candidate);
+    if (!within(workspace, canonical)) throw new Error("Principal store escapes its workspace.");
+    return canonical;
+  }
+
   async resolve(principalId: string): Promise<string> {
     if (typeof principalId !== "string" || !principalId.trim() || principalId.length > 512 ||
         /[\x00-\x1f\x7f]/.test(principalId)) {
