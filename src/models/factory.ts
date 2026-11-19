@@ -206,9 +206,11 @@ export async function createSofiaAgentDependenciesForTenantWithDelegatedAuthorit
     return {
       ...dependencies,
       close: async () => {
-        await dependencies.close?.();
-        await dependencies.closeBrowserProfiles?.();
-        authority.close();
+        try {
+          await dependencies.close?.();
+        } finally {
+          authority.close();
+        }
       },
     };
   } catch (error) {
@@ -224,8 +226,31 @@ export async function createSofiaAgentDependenciesWithSessions(
   databasePath?: string,
 ): Promise<AgentDependencies & { closeSessionStore: () => void }> {
   const dependencies = createSofiaAgentDependencies(workspace, approval);
-  const sessionStore = await SqliteSessionStore.open(databasePath);
-  return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+  let sessionStore: SqliteSessionStore;
+  try {
+    sessionStore = await SqliteSessionStore.open(databasePath);
+  } catch (error) {
+    await dependencies.close?.();
+    throw error;
+  }
+  let closed = false;
+  const closeSessionStore = (): void => {
+    if (closed) return;
+    closed = true;
+    sessionStore.close();
+  };
+  return {
+    ...dependencies,
+    sessionStore,
+    closeSessionStore,
+    close: async () => {
+      try {
+        await dependencies.close?.();
+      } finally {
+        closeSessionStore();
+      }
+    },
+  };
 }
 
 /**
