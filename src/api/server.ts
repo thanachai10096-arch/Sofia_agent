@@ -691,6 +691,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }
           const scheduleInput: CronScheduleInput = {
             name: input.name, task: input.task, timeZone: input.timeZone, ownerKeyId: auth.keyId,
+            toolScopes: [...auth.scopes],
+            desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             ...(typeof input.cron === "string" ? { cron: input.cron } : {}),
             ...(typeof input.runAt === "string" ? { runAt: input.runAt } : {}),
             ...(typeof input.enabled === "boolean" ? { enabled: input.enabled } : {}),
