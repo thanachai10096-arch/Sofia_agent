@@ -158,6 +158,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     return runStore.save(record);
   };
   const interruptedRuns: Array<{ runId: string; principalId: string }> = [];
+  const interruptedRunPersistence: Promise<void>[] = [];
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
@@ -176,12 +177,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(record.idempotencyId ? { idempotencyId: record.idempotencyId } : {}),
       ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
     };
-    runs.set(run.id, run); if (interrupted) void persist(run).catch(() => undefined);
+    runs.set(run.id, run);
+    if (interrupted) interruptedRunPersistence.push(persist(run));
   }
-  // Cancel approvals from runs recovered as interrupted before serving the approval inbox.
-  const approvalRecovery = deps.approvalBroker
-    ? Promise.all(interruptedRuns.map(({ runId, principalId }) => deps.approvalBroker!.cancelRun(runId, principalId)))
-    : Promise.resolve([]);
+  // Persist failed Run records and cancel their approvals before exposing approval operations.
+  // Both recovery steps are required; a failure in either keeps the approval API unavailable.
+  const approvalRecovery = Promise.all([
+    Promise.all(interruptedRunPersistence),
+    deps.approvalBroker
+      ? Promise.all(interruptedRuns.map(({ runId, principalId }) => deps.approvalBroker!.cancelRun(runId, principalId)))
+      : Promise.resolve([]),
+  ]);
   const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   // Rehydrate replay protection from durable run records after a server restart.
   for (const run of runs.values()) {
