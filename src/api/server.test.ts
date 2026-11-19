@@ -306,7 +306,7 @@ test("async run cancellation is owner-scoped and reaches the active execution si
     provider: {
       generate: async (_request, _route, options) => {
         executionStarted();
-        return await new Promise((resolve, reject) => {
+        return await new Promise<never>((_resolve, reject) => {
           if (options?.signal?.aborted) {
             reject(options.signal.reason ?? new Error("aborted"));
             return;
