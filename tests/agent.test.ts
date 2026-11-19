@@ -7,15 +7,15 @@ import { Reviewer } from "../src/review/reviewer.js";
 import type { ModelProvider } from "../src/models/types.js";
 
 test("Brain factory preserves explicit empty API scopes without changing local runs", async () => {
-  const observed: Array<string[] | undefined> = [];
+  const observed: Array<{ toolScopes?: string[]; desktopCapabilities?: string[] }> = [];
   const agent = new SofiaAgent({
     provider: { generate: async () => ({ text: "unused" }) },
     router: new ModelRouter([
       { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
     ]),
     reviewer: new Reviewer(),
-    brainFactory: ((options: { toolScopes?: string[] }) => {
-      observed.push(options.toolScopes);
+    brainFactory: ((options: { toolScopes?: string[]; desktopCapabilities?: string[] }) => {
+      observed.push({ toolScopes: options.toolScopes, desktopCapabilities: options.desktopCapabilities });
       return {
         run: async () => ({
           completed: true,
@@ -32,9 +32,12 @@ test("Brain factory preserves explicit empty API scopes without changing local r
     }) as never,
   });
 
-  await agent.run({ task: "API key with no elevated scopes", toolScopes: [] });
+  await agent.run({ task: "API key with no elevated scopes", toolScopes: [], desktopCapabilities: [] });
   await agent.run({ task: "Local operator run" });
-  assert.deepEqual(observed, [[], undefined]);
+  assert.deepEqual(observed, [
+    { toolScopes: [], desktopCapabilities: [] },
+    { toolScopes: undefined, desktopCapabilities: undefined },
+  ]);
 });
 
 test("agent retries after reviewer rejection and succeeds on fallback", async () => {
