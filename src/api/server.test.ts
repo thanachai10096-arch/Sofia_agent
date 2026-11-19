@@ -226,3 +226,41 @@ test("approval API scopes pending requests and one-time decisions to the authent
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+test("approval history is durable, owner-scoped, and requires approval:read", async () => {
+  const root=await (await import("node:fs/promises")).mkdtemp((await import("node:os")).tmpdir()+"/sofia-api-approval-history-");
+  const file=(await import("node:path")).join(root,"approvals.json");
+  const broker=new ApprovalBroker(120_000,new (await import("../agent/approval.js")).FileApprovalJournal(file));
+  const pendingResult=broker.handle({
+    runId:"history-run",principalId:createHash("sha256").update("owner-key").digest("hex").slice(0,32),
+    toolName:"workspace.write_file",input:{path:"x",content:"secret"},actionHash:"history-hash",risk:"high",
+  });
+  const [pending]=broker.pending(createHash("sha256").update("owner-key").digest("hex").slice(0,32));
+  assert.ok(pending);
+  broker.decide({approvalId:pending.id,principalId:createHash("sha256").update("owner-key").digest("hex").slice(0,32),actionHash:"history-hash",approved:false});
+  assert.equal(await pendingResult,false);
+  const server=createSofiaApi({
+    provider:{generate:async()=>({text:"unused"})},router:{select:()=>route,markUnhealthy:()=>undefined},
+    reviewer:{review:async()=>({approved:true,reason:"unused"})},
+  },{
+    apiKeys:{"owner-key":["approval:read"],"other-key":["approval:read"],"no-history-key":[]},
+    approvalBroker:broker,
+  });
+  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const address=server.address(); assert.ok(address&&typeof address!=="string");
+  const base="http://127.0.0.1:"+address.port;
+  try {
+    const owner=await fetch(base+"/v1/approvals/history",{headers:{authorization:"Bearer owner-key"}});
+    assert.equal(owner.status,200);
+    const payload=await owner.json() as {approvals:Array<{status:string;principalId:string}>};
+    assert.equal(payload.approvals[0]?.status,"rejected");
+    assert.equal(payload.approvals[0]?.principalId,createHash("sha256").update("owner-key").digest("hex").slice(0,32));
+    const other=await fetch(base+"/v1/approvals/history",{headers:{authorization:"Bearer other-key"}});
+    assert.deepEqual(await other.json(),{approvals:[]});
+    const denied=await fetch(base+"/v1/approvals/history",{headers:{authorization:"Bearer no-history-key"}});
+    assert.equal(denied.status,403);
+  } finally {
+    await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+    await (await import("node:fs/promises")).rm(root,{recursive:true,force:true});
+  }
+});
