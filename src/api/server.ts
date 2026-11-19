@@ -567,7 +567,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         res.on("close", abortOnDisconnect);
         try {
           run.status = "running";
-          const result = await agent.run({
+          const ownerAgent = await agentForOwner(auth.keyId);
+          const result = await ownerAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
