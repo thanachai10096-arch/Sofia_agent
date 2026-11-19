@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
@@ -55,6 +56,39 @@ if (process.env.SOFIA_APPROVAL_ENABLED?.trim().toLowerCase() === "true") {
 // Mutating deps.approval afterwards does not update the factory's captured dependency.
 const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalHandler);
 if (approvalBroker) deps.approvalBroker = approvalBroker;
+
+// API users never choose a filesystem path. Their opaque project ID is mapped to
+// a private directory under a hash of the authenticated API principal.
+const userWorkspaceRoot = path.resolve(
+  process.env.SOFIA_USER_WORKSPACES_DIR ?? path.join(workspace, ".sofia", "user-workspaces"),
+);
+mkdirSync(userWorkspaceRoot, { recursive: true, mode: 0o700 });
+type WorkspaceDependencies = Awaited<ReturnType<typeof createSofiaAgentDependenciesWithSessions>>;
+const workspaceDependencies = new Map<string, Promise<WorkspaceDependencies>>();
+const resolveWorkspaceDependencies = async (principalId: string, workspaceId: string) => {
+  if (!/^[a-f0-9]{32}$/u.test(principalId)) throw new Error("Workspace resolution requires an authenticated API principal.");
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(workspaceId)) throw new Error("Invalid project workspace ID.");
+  const cacheKey = principalId + ":" + workspaceId;
+  let pending = workspaceDependencies.get(cacheKey);
+  if (!pending) {
+    const ownerRoot = path.join(userWorkspaceRoot, principalId);
+    const projectRoot = path.join(ownerRoot, createHash("sha256").update(workspaceId).digest("hex"));
+    mkdirSync(projectRoot, { recursive: true, mode: 0o700 });
+    mkdirSync(path.join(projectRoot, ".sofia"), { recursive: true, mode: 0o700 });
+    pending = createSofiaAgentDependenciesWithSessions(
+      projectRoot,
+      approvalHandler,
+      path.join(projectRoot, ".sofia", "sessions.sqlite"),
+    );
+    workspaceDependencies.set(cacheKey, pending);
+    void pending.catch(() => {
+      if (workspaceDependencies.get(cacheKey) === pending) workspaceDependencies.delete(cacheKey);
+    });
+  }
+  const resolved = await pending;
+  if (approvalBroker) resolved.approvalBroker = approvalBroker;
+  return resolved;
+};
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -242,6 +276,7 @@ const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
+  resolveWorkspaceDependencies,
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
@@ -249,6 +284,12 @@ const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
   deps.closeSessionStore();
+  for (const pending of workspaceDependencies.values()) {
+    void pending.then(async (workspaceDeps) => {
+      workspaceDeps.closeSessionStore();
+      await workspaceDeps.closeBrowserProfiles?.();
+    }).catch(() => undefined);
+  }
   closeApprovalStore?.();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
