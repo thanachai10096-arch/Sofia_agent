@@ -21,8 +21,9 @@ test("tenant dependency registry caches one bundle per issued tenant and closes 
   let factoryCalls = 0;
   let closeCalls = 0;
   const resolver = createTenantResourceResolver(root);
-  const registry = new TenantDependencyRegistry(resolver, () => {
+  const registry = new TenantDependencyRegistry(resolver, async () => {
     factoryCalls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 10));
     return dependencies(() => { closeCalls += 1; });
   });
 
@@ -86,6 +87,34 @@ test("tenant dependency registry evicts failed construction so a later request c
     assert.equal(factoryCalls, 2);
   } finally {
     await registry.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("tenant dependency registry waits for in-flight construction before closing", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-tenant-registry-close-"));
+  const resolver = createTenantResourceResolver(root);
+  let release!: () => void;
+  let closeCalls = 0;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const registry = new TenantDependencyRegistry(resolver, async () => {
+    await gate;
+    return dependencies(() => { closeCalls += 1; });
+  });
+
+  try {
+    const context = await resolver.resolve("principal-a");
+    const pending = registry.get(context);
+    const closing = registry.close();
+    release();
+    const [resolved] = await Promise.all([pending, closing]);
+    assert.ok(resolved);
+    assert.equal(closeCalls, 1);
+    await assert.rejects(registry.get(context), /registry is closed/);
+  } finally {
+    release();
+    await registry.close().catch(() => undefined);
     await rm(root, { recursive: true, force: true });
   }
 });
