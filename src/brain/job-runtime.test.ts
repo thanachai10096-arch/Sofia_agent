@@ -1125,7 +1125,6 @@ test("DurableJobRuntime close aborts a resumed execution without waiting on its 
       resume?: import("./run-state.js").BrainRunSnapshot;
     }) => {
       if (!input.resume) {
-        await snapshot && undefined;
         return { completed: false, state: "failed" };
       }
       resumeStarted();
