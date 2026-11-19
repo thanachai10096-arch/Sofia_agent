@@ -342,3 +342,38 @@ test("supervisor observes API-side durable cancellation while research is runnin
   }
 });
 
+test("user cancellation wins when it races with final job completion", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-complete-cancel-race-"));
+  try {
+    const store = new FileAutonomyJobStore("complete-cancel-race-test", root);
+    const job = await store.enqueue({ principalId: "tenant-1", kind: "research", payload: {} });
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: {
+        runResearch: async () => {
+          await store.cancel("tenant-1", job.id);
+          return { completed: true, stoppedBy: "cycle-budget", cycles: [] };
+        },
+      },
+      resolveAdapters: async () => ({
+        observe: async () => ({ signal: "x", sourceIds: [] }),
+        identifyGaps: async () => [],
+        researchLocally: async () => ({ summary: "x", sourceIds: [], confidence: 1 }),
+        formulateHypothesis: async () => ({ statement: "x", successMetric: "x" }),
+        experiment: async () => ({ passed: true, summary: "x", benchmarkBefore: 0, benchmarkAfter: 1, safetyIncidents: 0, rollbackAvailable: true }),
+        recordLearning: async () => undefined,
+      }),
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+      isKilled: async () => false,
+      leaseMs: 3_000,
+    });
+
+    const result = await supervisor.runNext("worker-1", new AbortController().signal);
+    assert.equal(result?.id, job.id);
+    assert.equal(result?.status, "cancelled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
