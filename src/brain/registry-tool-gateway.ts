@@ -70,7 +70,10 @@ export class RegistryToolGateway implements ToolGateway {
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:assessment.reason,input:auditInput(call.tool,input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:assessment.reason??"Security policy denied the action."}};
     }
-    if(riskRank[assessment.risk]>riskRank[this.policy.maxRisk]){
+    const effectiveMaxRisk = permission.maxRisk && riskRank[permission.maxRisk] < riskRank[this.policy.maxRisk]
+      ? permission.maxRisk
+      : this.policy.maxRisk;
+    if(riskRank[assessment.risk]>riskRank[effectiveMaxRisk]){
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:"Risk exceeds policy maximum.",input:auditInput(call.tool,input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Action risk exceeds Sofia security policy."}};
     }
@@ -95,14 +98,21 @@ export class RegistryToolGateway implements ToolGateway {
     // policy change cannot leave a stale approval executable.
     const currentPermission=toolPermission(this.policy,call.tool,descriptor.effects);
     const currentAssessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input,effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
+    const currentMaxRisk = currentPermission.maxRisk && riskRank[currentPermission.maxRisk] < riskRank[this.policy.maxRisk]
+      ? currentPermission.maxRisk
+      : this.policy.maxRisk;
+    const currentRequiresApproval = currentPermission.requireApproval===true || currentAssessment.requireApproval ||
+      descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
     const authorizationChanged=!this.policy.allowTools || currentPermission.allow===false || !currentAssessment.allowed ||
-      riskRank[currentAssessment.risk]>riskRank[this.policy.maxRisk] ||
+      riskRank[currentAssessment.risk]>riskRank[currentMaxRisk] ||
+      (currentRequiresApproval && !requiresApproval) ||
       currentAssessment.actionHash!==assessment.actionHash;
     if(authorizationChanged){
       const reason=!this.policy.allowTools?"Tool execution was disabled while awaiting approval.":
         currentPermission.allow===false?"Tool permission was revoked while awaiting approval.":
         !currentAssessment.allowed?(currentAssessment.reason??"Security policy denied the action after approval."):
-        riskRank[currentAssessment.risk]>riskRank[this.policy.maxRisk]?"Action risk now exceeds policy maximum.":"Approved action no longer matches its security assessment.";
+        riskRank[currentAssessment.risk]>riskRank[currentMaxRisk]?"Action risk now exceeds policy maximum.":
+        currentRequiresApproval && !requiresApproval?"Action now requires approval; retry to obtain a fresh approval.":"Approved action no longer matches its security assessment.";
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:currentAssessment.actionHash,risk:currentAssessment.risk,decision:"deny",reason,input:auditInput(call.tool,input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:reason}};
     }
