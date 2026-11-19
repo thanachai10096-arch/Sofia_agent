@@ -92,6 +92,22 @@ test("renew, assert, and release all compare tenant, instance, opaque token, and
   }
 });
 
+test("renewal keeps tenant binding alive for at least the extended lease duration", async () => {
+  let command: unknown[] = [];
+  const store = new UpstashRunOwnershipStore({
+    url: "https://redis.example.com",
+    token: "test-token",
+    bindingTtlMs: 60_000,
+    fetchImpl: async (_url, init) => {
+      command = JSON.parse(String(init?.body)) as unknown[];
+      return response(1);
+    },
+  });
+  assert.equal(await store.renew(lease(), 120_000), true);
+  assert.equal(command.at(-2), "120000", "lease TTL should use the requested duration");
+  assert.equal(command.at(-1), "120000", "tenant binding TTL must not be shorter than the renewed lease");
+});
+
 test("stale owner cannot renew or release after a newer generation is claimed", async () => {
   const commands: unknown[][] = [];
   const store = new UpstashRunOwnershipStore({
