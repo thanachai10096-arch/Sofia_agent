@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
-import { ApprovalBroker } from "../agent/approval.js";
+import { ApprovalBroker, FileApprovalJournal } from "../agent/approval.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
@@ -228,9 +231,9 @@ test("approval API scopes pending requests and one-time decisions to the authent
 });
 
 test("approval history is durable, owner-scoped, and requires approval:read", async () => {
-  const root=await (await import("node:fs/promises")).mkdtemp((await import("node:os")).tmpdir()+"/sofia-api-approval-history-");
-  const file=(await import("node:path")).join(root,"approvals.json");
-  const broker=new ApprovalBroker(120_000,new (await import("../agent/approval.js")).FileApprovalJournal(file));
+  const root=await mkdtemp(path.join(os.tmpdir(),"sofia-api-approval-history-"));
+  const file=path.join(root,"approvals.json");
+  const broker=new ApprovalBroker(120_000,new FileApprovalJournal(file));
   const pendingResult=broker.handle({
     runId:"history-run",principalId:createHash("sha256").update("owner-key").digest("hex").slice(0,32),
     toolName:"workspace.write_file",input:{path:"x",content:"secret"},actionHash:"history-hash",risk:"high",
@@ -261,6 +264,6 @@ test("approval history is durable, owner-scoped, and requires approval:read", as
     assert.equal(denied.status,403);
   } finally {
     await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
-    await (await import("node:fs/promises")).rm(root,{recursive:true,force:true});
+    await rm(root,{recursive:true,force:true});
   }
 });
