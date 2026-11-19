@@ -41,7 +41,9 @@ if redis.call('HGET', KEYS[1], 'principalId') ~= ARGV[1] then return 0 end
 if redis.call('HGET', KEYS[1], 'instanceId') ~= ARGV[2] then return 0 end
 if redis.call('HGET', KEYS[1], 'token') ~= ARGV[3] then return 0 end
 if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[4] then return 0 end
+if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
 redis.call('PEXPIRE', KEYS[1], ARGV[5])
+redis.call('PEXPIRE', KEYS[2], ARGV[6])
 return 1
 `;
 
@@ -167,8 +169,9 @@ export class UpstashRunOwnershipStore implements RunOwnershipStore {
   async renew(lease: RunOwnershipLease, leaseMs: number): Promise<boolean> {
     this.validateLease(lease);
     if (!Number.isSafeInteger(leaseMs) || leaseMs < 1000 || leaseMs > 300_000) throw new Error("Run ownership lease must be between 1000 and 300000 milliseconds.");
-    const result = await this.eval(RUN_OWNERSHIP_RENEW_SCRIPT, [this.keys(lease.runId)[0]], [
-      lease.principalId, lease.instanceId, lease.token, String(lease.generation), String(leaseMs),
+    const [, , principalKey] = this.keys(lease.runId);
+    const result = await this.eval(RUN_OWNERSHIP_RENEW_SCRIPT, [this.keys(lease.runId)[0], principalKey], [
+      lease.principalId, lease.instanceId, lease.token, String(lease.generation), String(leaseMs), String(this.bindingTtlMs),
     ]);
     return Number(result) === 1;
   }
