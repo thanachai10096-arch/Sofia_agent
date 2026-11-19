@@ -50,7 +50,10 @@ function validateRecord(value: unknown): SkillBenchmarkHistoryRecord {
       !Number.isSafeInteger(value.capability.passedChecks) || value.capability.passedChecks < 0 ||
       !Number.isSafeInteger(value.capability.totalChecks) || value.capability.totalChecks <= 0 ||
       value.capability.passedChecks > value.capability.totalChecks ||
+      Math.abs(value.capability.passRate - value.capability.passedChecks / value.capability.totalChecks) > 0.0001 ||
+      Math.abs(value.capability.score - Math.round(value.capability.passRate * value.capability.baselineCoverage * 10_000) / 100) > 0.01 ||
       !Number.isSafeInteger(value.capability.baselineChecks) || value.capability.baselineChecks < 0 ||
+      value.capability.missingBaselineChecks.length > value.capability.baselineChecks ||
       !Array.isArray(value.capability.missingBaselineChecks) || !value.capability.missingBaselineChecks.every((name) => typeof name === "string") ||
       !Array.isArray(value.capability.failedChecks) || !value.capability.failedChecks.every((name) => typeof name === "string") ||
       (value.runId !== undefined && (typeof value.runId !== "string" || value.runId.length > 500)) ||
