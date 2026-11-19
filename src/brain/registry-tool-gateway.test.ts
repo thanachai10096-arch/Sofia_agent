@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RegistryToolGateway } from "./registry-tool-gateway.js";
+import { CapabilityRegistry } from "../security/capability-registry.js";
+import { CapabilityGuardToolGateway } from "../security/capability-tool-gateway.js";
 import { markDelegatedExecution } from "./delegated-context.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
@@ -510,3 +512,61 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
 });
+
+
+test("capability guard and registry gateway integrate delegated routine writes", async () => {
+  let approvalCalls = 0;
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write a project file",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"],
+      additionalProperties: false,
+    },
+    async execute() { executions += 1; return { written: true }; },
+  }]);
+  const inner = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async () => { approvalCalls += 1; return false; },
+  );
+  const guarded = new CapabilityGuardToolGateway(
+    inner,
+    new CapabilityRegistry([{
+      id: "workspace.write",
+      version: 1,
+      description: "Write within the delegated workspace.",
+      transport: "api",
+      effect: "local_write",
+      requiredScopes: ["workspace:write"],
+      risk: "high",
+      inputSchema: { type: "object" },
+      supportsIdempotency: true,
+    }]),
+    async principalId => ({
+      principalId,
+      scopes: ["workspace:write"],
+      allowedCapabilityIds: ["workspace.write"],
+      expiresAt: Date.now() + 60_000,
+    }),
+    toolName => toolName === "workspace.write_file" ? "workspace.write" : undefined,
+  );
+
+  const result = await guarded.execute(
+    { tool: "workspace.write_file", input: { path: "src/delegated.txt", content: "delegated" } },
+    {
+      runId: "capability-registry-integration",
+      principalId: "principal-1",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(executions, 1);
+  assert.equal(approvalCalls, 0, "a valid delegated routine write skips only the generic approval prompt");
+});
+
