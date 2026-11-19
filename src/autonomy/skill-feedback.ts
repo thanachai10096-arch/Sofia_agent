@@ -52,6 +52,7 @@ export interface SkillFeedbackSummary {
   successRate: number;
   safetyIncidents: number;
   evidenceIds: string[];
+  integrityValid: boolean;
   recommendation: "insufficient-data" | "retain" | "review" | "disable-pending-review";
 }
 
@@ -89,8 +90,14 @@ export class SkillFeedbackLedger {
           existing.recordedBy === input.actor &&
           JSON.stringify(existing.evidenceIds) === JSON.stringify([...new Set(input.evidenceIds)]);
         if (!samePayload) throw new Error("Idempotency key was reused with different feedback.");
+        const samePayload = existing.skillName === input.skillName && existing.skillVersion === input.skillVersion &&
+          existing.candidateDigest === input.candidateDigest && existing.outcome === input.outcome &&
+          existing.safetyIncidentCount === input.safetyIncidentCount && existing.recordedBy === input.actor &&
+          JSON.stringify(existing.evidenceIds) === JSON.stringify([...new Set(input.evidenceIds)]);
+        if (!samePayload) throw new Error("Idempotency key was reused with different feedback.");
         return { recorded: false, feedback: existing };
       }
+      if (state.entries.length >= 10000) throw new Error("Skill feedback retention limit reached for this scope.");
       if (state.entries.length >= 10000) throw new Error("Skill feedback retention limit reached for this scope.");
       const id = createHash("sha256")
         .update([input.scope, input.idempotencyKey, input.skillName, input.skillVersion].join("\n"))
@@ -120,7 +127,10 @@ export class SkillFeedbackLedger {
       const safetyIncidents = entries.reduce((sum, entry) => sum + entry.safetyIncidentCount, 0);
       const total = entries.length;
       const successRate = succeeded / total;
-      const recommendation = safetyIncidents > 0
+      const integrityValid = entries.every((entry) => entry.candidateDigest === entries[0]!.candidateDigest);
+      const recommendation = !integrityValid
+        ? "review"
+        : safetyIncidents > 0
         ? "disable-pending-review"
         : total < 5
           ? "insufficient-data"
@@ -131,6 +141,7 @@ export class SkillFeedbackLedger {
         skillName, skillVersion, candidateDigest: entries[0]!.candidateDigest,
         total, succeeded, failed, aborted, successRate, safetyIncidents,
         evidenceIds: [...new Set(entries.flatMap((entry) => entry.evidenceIds))].slice(0, 500),
+        integrityValid,
         recommendation,
       };
     });
