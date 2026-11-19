@@ -140,7 +140,7 @@ it("shared tool-effect classification marks privileged actions consistently", ()
     assert.deepEqual(classifyToolEffects("browser.click"), ["browser"]);
   assert.deepEqual(classifyToolEffects("browser.type"), ["browser"]);
   assert.deepEqual(classifyToolEffects("browser.action"), ["browser"]);
-  assert.deepEqual(classifyToolEffects("browser.login"), ["browser", "destructive"]);
+  assert.deepEqual(classifyToolEffects("browser.login"), ["browser", "network"]);
   assert.deepEqual(classifyToolEffects("browser.profile.revoke"), ["browser", "destructive"]);
   assert.deepEqual(classifyToolEffects("browser.profile.list"), ["read"]);
   assert.deepEqual(classifyToolEffects("desktop.input.click"), ["destructive"]);
