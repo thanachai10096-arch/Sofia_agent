@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { PrincipalWorkspaceResolver } from "./principal-workspace.js";
 
 test("principal workspaces are stable and isolated by opaque principal hashes", async () => {
@@ -33,6 +34,37 @@ test("principal workspace resolver rejects invalid principal identifiers", async
   }
 });
 
+test("principal workspace resolver rejects a root directory accessible by group or others", async (t) => {
+  if (process.platform === "win32") { t.skip("POSIX mode-bit permissions are unavailable on Windows."); return; }
+  const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-root-mode-"));
+  try {
+    const root = path.join(temp, "workspaces");
+    await mkdir(root, { mode: 0o700 });
+    await chmod(root, 0o755);
+    const resolver = new PrincipalWorkspaceResolver(root);
+    await assert.rejects(resolver.resolve("tenant:alice"), /group or other users/i);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("principal workspace resolver rejects a tenant directory accessible by group or others", async (t) => {
+  if (process.platform === "win32") { t.skip("POSIX mode-bit permissions are unavailable on Windows."); return; }
+  const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-tenant-mode-"));
+  try {
+    const root = path.join(temp, "workspaces");
+    await mkdir(root, { mode: 0o700 });
+    const opaque = createHash("sha256").update("tenant:alice", "utf8").digest("hex");
+    const tenant = path.join(root, opaque);
+    await mkdir(tenant, { mode: 0o700 });
+    await chmod(tenant, 0o755);
+    const resolver = new PrincipalWorkspaceResolver(root);
+    await assert.rejects(resolver.resolve("tenant:alice"), /group or other users/i);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test("principal workspace resolver refuses a symlink at the tenant directory", async (t) => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-symlink-"));
   try {
@@ -41,8 +73,7 @@ test("principal workspace resolver refuses a symlink at the tenant directory", a
     await mkdir(root);
     await mkdir(outside);
     const resolver = new PrincipalWorkspaceResolver(root);
-    const opaque = await import("node:crypto").then(({ createHash }) =>
-      createHash("sha256").update("tenant:alice", "utf8").digest("hex"));
+    const opaque = createHash("sha256").update("tenant:alice", "utf8").digest("hex");
     try {
       await symlink(outside, path.join(root, opaque), "dir");
     } catch (error) {
