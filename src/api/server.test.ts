@@ -335,3 +335,26 @@ test("API rejects multiple keys when they would share one Agent runtime bundle",
     },
   }), /multi_tenant_agent_runtime_not_supported/);
 });
+
+
+test("API fail-closed guard covers every shared stateful runtime dependency", () => {
+  const sharedStatefulDependencies = [
+    ["workspace runtime", { runtime: {} as never }],
+    ["tool registry", { tools: { list: () => [], get: () => undefined } as never }],
+    ["durable job runtime", { jobRuntime: {} as never }],
+  ] as const;
+
+  for (const [name, statefulDependency] of sharedStatefulDependencies) {
+    assert.throws(() => createSofiaApi({
+      provider: { generate: async () => ({ text: "must not run" }) },
+      router: { select: () => route, markUnhealthy: () => undefined },
+      reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+      ...statefulDependency,
+    }, {
+      apiKeys: {
+        "tenant-one": ["agent:run"],
+        "tenant-two": ["agent:run"],
+      },
+    }), /multi_tenant_agent_runtime_not_supported/, name);
+  }
+});
