@@ -159,16 +159,14 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
         return await this.options.store.cancel(job.principalId, job.id);
       }
       return await this.options.store.complete(job.principalId, job.id, workerId, report);
-    } catch (error) {
+    } catch {
       if (controller.signal.aborted || signal.aborted) {
         return await this.options.store.cancel(job.principalId, job.id);
       }
-      // Adapter/provider errors can contain API keys, database URLs, prompts or user data.
-      // Persist only a fixed public-safe message; diagnostics belong in trusted host logs.
-      void error;
+      // Adapter/provider errors can contain credentials, connection strings or user data.
+      // Keep public job records safe; never persist raw exception messages.
       return await this.options.store.fail(
-        job.principalId, job.id, workerId,
-        "Autonomy job failed; inspect trusted host diagnostics.", true,
+        job.principalId, job.id, workerId, "Autonomy job failed.", true,
       );
     } finally {
       clearInterval(heartbeat);
