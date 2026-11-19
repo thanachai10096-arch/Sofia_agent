@@ -99,35 +99,51 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
     if (!job) return undefined;
 
     const controller = new AbortController();
-    const forwardAbort = () => controller.abort(signal.reason ?? new Error("Worker shutdown requested."));
+    const forwardAbort = () => { abortKind = "host"; controller.abort(signal.reason ?? new Error("Worker shutdown requested.")); };
     signal.addEventListener("abort", forwardAbort, { once: true });
     if (signal.aborted) forwardAbort();
+    let abortKind: "host" | "safety" | "lease-lost" | "user-cancel" | undefined;
+    let safetyPollInFlight = false;
+    let heartbeatInFlight = false;
     const pollKillSwitch = async () => {
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted || safetyPollInFlight) return;
+      safetyPollInFlight = true;
       try {
-        // API-side cancellation is durable state. Poll it independently of the
-        // host kill switch so a running worker stops even when its process is remote.
         const current = await this.options.store.get(job.principalId, job.id);
         if (!current || current.status !== "running" || current.lease?.workerId !== workerId) {
+          abortKind = current?.status === "cancelled" ? "user-cancel" : "lease-lost";
           controller.abort(new Error("Autonomy job was cancelled or its lease is no longer owned."));
           return;
         }
         const killed = await this.options.isKilled(job);
-        if (killed !== false) controller.abort(new Error("Autonomy kill switch is active or returned an invalid result."));
+        if (killed !== false) {
+          abortKind = "safety";
+          controller.abort(new Error("Autonomy kill switch is active or returned an invalid result."));
+        }
       } catch {
-        // Fail closed: unavailable job state or kill-switch authority stops autonomous work.
+        abortKind = "safety";
         controller.abort(new Error("Autonomy cancellation or kill-switch check failed."));
+      } finally {
+        safetyPollInFlight = false;
       }
     };
     await pollKillSwitch();
     if (controller.signal.aborted) {
       signal.removeEventListener("abort", forwardAbort);
-      return this.options.store.cancel(job.principalId, job.id);
+      return abortKind === "lease-lost" || abortKind === "user-cancel"
+        ? (await this.options.store.get(job.principalId, job.id))
+        : this.options.store.cancelOwned(job.principalId, job.id, workerId);
     }
     const killPoll = setInterval(() => { void pollKillSwitch(); }, this.killSwitchPollMs);
     const heartbeat = setInterval(() => {
+      if (heartbeatInFlight || controller.signal.aborted) return;
+      heartbeatInFlight = true;
       void this.options.store.heartbeat(job.principalId, job.id, workerId, this.leaseMs)
-        .catch((error: unknown) => controller.abort(error instanceof Error ? error : new Error("Job lease heartbeat failed.")));
+        .catch((error: unknown) => {
+          abortKind = "lease-lost";
+          controller.abort(error instanceof Error ? error : new Error("Job lease heartbeat failed."));
+        })
+        .finally(() => { heartbeatInFlight = false; });
     }, Math.max(1_000, Math.floor(this.leaseMs / 3)));
 
     try {
@@ -163,12 +179,16 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
         },
       });
       if (controller.signal.aborted || report.stoppedBy === "aborted") {
-        return await this.options.store.cancel(job.principalId, job.id);
+        return abortKind === "lease-lost" || abortKind === "user-cancel"
+          ? (await this.options.store.get(job.principalId, job.id))
+          : await this.options.store.cancelOwned(job.principalId, job.id, workerId);
       }
       return await this.options.store.complete(job.principalId, job.id, workerId, report);
     } catch {
       if (controller.signal.aborted || signal.aborted) {
-        return await this.options.store.cancel(job.principalId, job.id);
+        return abortKind === "lease-lost" || abortKind === "user-cancel"
+          ? (await this.options.store.get(job.principalId, job.id))
+          : await this.options.store.cancelOwned(job.principalId, job.id, workerId);
       }
       // Adapter/provider errors can contain credentials, connection strings or user data.
       // Keep public job records safe; never persist raw exception messages.
