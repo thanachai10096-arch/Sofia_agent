@@ -6,7 +6,7 @@ Status: partially implemented foundations; **not production-ready multi-tenant i
 
 The API derives an opaque principal ID from each bearer API key and scopes API run/job records, user memory, cron schedules, usage counters, and session IDs to that principal in their respective code paths. The single-key API entrypoint now stores transcripts in a separate SQLite database named by the server-derived owner ID and migrates that owner’s legacy transcripts on startup. This is useful defense in depth, but it is not complete tenant isolation.
 
-The current process constructs a single `AgentDependencies` instance from one operator-configured `SOFIA_WORKSPACE`. Brain runs currently share workspace-backed project memory, run snapshots, skill lifecycle/ledger, evolution state, local runtime, and desktop workspace root. Some of these stores are created inside the Brain factory but rooted at the same workspace. A principal ID passed to the Agent does not automatically partition those resources.
+The default API configuration still uses one operator-configured `AgentDependencies` instance. An opt-in `dependenciesForOwner` server callback now routes synchronous, asynchronous, and streaming `/v1/agent/runs` execution through a cached `SofiaAgent` created from dependencies selected by the authenticated owner key ID. This is only a request-run routing hook: it does not automatically isolate `/v1/jobs`, cron execution, shared API stores, or messaging adapters. Hosts must implement the callback using a trusted tenant resolver and tenant-owned workspace roots; never derive the tenant context from request JSON.
 
 Client-supplied workspace paths are rejected by the API validation guard. Do not work around this by accepting arbitrary paths or by deriving paths directly from request body fields.
 
@@ -30,7 +30,7 @@ The following observations were verified against this branch during the audit. T
 
 **Important distinction:** creating per-principal copies of memory, snapshots, or checkpoint metadata would not make the filesystem safe to share. Checkpoint rollback, shell execution, Git, repository indexing, project context discovery, and generated artifacts all act on the runtime root. The runtime/workspace boundary must be isolated before user-controlled code execution is offered to multiple tenants.
 
-### Tenant workspace allocator (foundation added; not yet wired)
+### Tenant workspace allocator (foundation added; host wiring required)
 
 The branch now contains `src/platform/tenant-workspace.ts` with `createTenantWorkspace(root, principalId)`. It:
 - requires an absolute operator-configured root and a non-empty authenticated principal ID;
@@ -40,11 +40,11 @@ The branch now contains `src/platform/tenant-workspace.ts` with `createTenantWor
 
 Regression coverage is in `src/platform/tenant-workspace.test.ts` for deterministic separation, invalid inputs, and symlink escapes.
 
-**The workspace allocator and tenant dependency factory are foundations, not a complete request-routing implementation.** `createSofiaAgentDependenciesForTenant` now builds workspace-rooted dependencies, but API authentication does not yet select and lifecycle-manage one dependency bundle per tenant for every request. Queued-job recovery, messaging adapters, and shared host resources still require tenant-aware routing and immutable tenant identity.
+**The workspace allocator and tenant dependency factory are foundations, not complete tenant routing.** The optional `dependenciesForOwner` hook can route Agent run requests when a host supplies a secure resolver-backed factory. The repository entrypoint does not yet wire that hook to `createSofiaAgentDependenciesForTenant`; queued-job submission/recovery, cron, shared API resources, messaging adapters, and multi-replica lifecycle still require separate tenant-aware routing and immutable tenant identity.
 
 ### Safe interim operating mode
 
-The API entrypoint is configured with one `SOFIA_API_KEY` and now uses a physically separate transcript database outside the agent workspace for that owner, under `SOFIA_STATE_DIR/sofia-agents-sessions/tenants/` (or the OS temporary root when `SOFIA_STATE_DIR` is unset). Migration copies only session IDs beginning with the authenticated owner ID plus a colon, writes to the destination before deleting the legacy row, and is safe to retry after interruption. This does not yet provide a multi-key session-store router for arbitrary embedded `createSofiaApi` hosts, and it does not isolate the shared workspace, Brain stores, JobRuntime, or messaging adapters.
+The API entrypoint is configured with one `SOFIA_API_KEY` and now uses a physically separate transcript database outside the agent workspace for that owner, under `SOFIA_STATE_DIR/sofia-agents-sessions/tenants/` (or the OS temporary root when `SOFIA_STATE_DIR` is unset). Migration copies only session IDs beginning with the authenticated owner ID plus a colon, writes to the destination before deleting the legacy row, and is safe to retry after interruption. This does not yet provide a multi-key session-store router for arbitrary embedded `createSofiaApi` hosts. The opt-in run dependency hook does not isolate JobRuntime, cron execution, shared session stores, or messaging adapters unless the host separately routes those resources.
 
 Until a tenant-aware runtime factory and tenant-owned workspace roots exist:
 - treat the API deployment as a single trusted workspace/operator, even when API keys have separate run and user-memory records;
