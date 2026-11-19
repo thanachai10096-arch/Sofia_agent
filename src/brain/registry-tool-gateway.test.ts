@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RegistryToolGateway } from "./registry-tool-gateway.js";
+import { ApprovalBroker, InMemoryApprovalDecisionStore } from "../agent/approval-broker.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { createBuiltinTools } from "../tools/builtin.js";
@@ -827,4 +828,63 @@ test("tool evidence ID is empty when durable audit readback is missing", async (
   assert.equal(result.ok, true);
   assert.equal(result.evidenceId, "");
   assert.match(result.warnings?.[0] ?? "", /persisted and read back/i);
+});
+
+
+test("approval broker keeps effectful tools blocked until the exact pending action is approved", async () => {
+  const principalId = "approval-e2e-principal";
+  const broker = new ApprovalBroker({
+    store: new InMemoryApprovalDecisionStore(),
+    pollIntervalMs: 25,
+    ttlMs: 10_000,
+  });
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Write protected data after an explicit approval decision",
+    inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+    effects: ["write"] as const,
+    async execute(input) {
+      executions += 1;
+      return { saved: (input as { value: string }).value };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, capabilitySecret: "approval-broker-e2e-test-secret" },
+    broker.handle,
+  );
+
+  const execution = gateway.execute(
+    { tool: "custom.write", input: { value: "approved-value" } },
+    {
+      runId: "approval-broker-e2e-run",
+      principalId,
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  let pending = [];
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    pending = await broker.listPending(principalId);
+    if (pending.length === 1) break;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(pending.length, 1, "the gateway must publish a durable approval request");
+  assert.equal(pending[0]?.runId, "approval-broker-e2e-run");
+  assert.equal(pending[0]?.toolName, "custom.write");
+  assert.equal(pending[0]?.input.value, "approved-value");
+  assert.match(pending[0]?.actionHash ?? "", /^[a-f0-9]{64}$/);
+  assert.equal(executions, 0, "the effectful tool must remain blocked while approval is pending");
+
+  const approved = await broker.approve(pending[0]!.id, pending[0]!.actionHash, principalId);
+  assert.equal(approved, true);
+  const result = await execution;
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data, { saved: "approved-value" });
+  assert.equal(executions, 1, "the tool must execute exactly once after approval");
+  assert.deepEqual(await broker.listPending(principalId), []);
 });
