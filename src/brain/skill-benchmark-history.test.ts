@@ -61,6 +61,18 @@ test("benchmark history rejects malformed and duplicate check identities", () =>
   } finally { f.cleanup(); }
 });
 
+test("benchmark history rejects a pass flag that disagrees with its checks", () => {
+  const f = fixture();
+  try {
+    const history = new FileSkillBenchmarkHistory(f.file);
+    assert.throws(() => history.append(record({
+      passed: true,
+      checks: [{ name: "typecheck", passed: false }],
+    })), /Invalid skill benchmark history record/);
+    assert.equal(history.list().length, 0);
+  } finally { f.cleanup(); }
+});
+
 test("benchmark history refuses to overwrite corrupt persisted data", () => {
   const f = fixture();
   try {
