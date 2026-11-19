@@ -538,6 +538,7 @@ export class DurableJobRuntime implements JobRuntime {
 
   async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
     this.beginAdmission();
+    let admissionHeld = true;
     try {
       // Reserve the resume slot before the first await so concurrent callers cannot
       // both pass the guard while get() is pending.
@@ -554,7 +555,10 @@ export class DurableJobRuntime implements JobRuntime {
         record.notificationDelivered = false;
         const saved = await this.state.save(record);
         if (!saved) throw new Error("Job state changed before resume could be scheduled");
-        await this.trackExecution(
+        // Once execution is registered, shutdown can abort it directly. Do not hold
+        // the admission open for the entire Brain run or close() would wait forever
+        // before reaching the controller-abort phase.
+        const execution = this.trackExecution(
           record,
           {
             task: record.task,
@@ -564,12 +568,15 @@ export class DurableJobRuntime implements JobRuntime {
           signal,
           record.snapshot,
         );
+        this.endAdmission();
+        admissionHeld = false;
+        await execution;
         return publicJobRecord(record);
       } finally {
         this.resuming.delete(id);
       }
     } finally {
-      this.endAdmission();
+      if (admissionHeld) this.endAdmission();
     }
   }
 
@@ -662,6 +669,13 @@ export class DurableJobRuntime implements JobRuntime {
       return;
     }
     Object.assign(record, claimed);
+    // close() may begin while the durable lease claim is in flight. Do not start
+    // a Brain after shutdown has already drained admissions and begun teardown.
+    if (this.closed) {
+      const cancelled = await this.state.cancel(record.id);
+      if (cancelled) Object.assign(record, cancelled);
+      return;
+    }
 
     // Register cancellation before the first await so cancel() cannot miss startup.
     const controller = new AbortController();
