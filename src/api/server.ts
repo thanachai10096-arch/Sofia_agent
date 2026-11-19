@@ -836,6 +836,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
+        if (input.workspace !== undefined && requestedJobWorkspace !== undefined && input.workspace !== requestedJobWorkspace) {
+          return json(res, 400, { error: "workspace_selector_mismatch" }, origin, config);
+        }
         const jobWorkspace = input.workspace ?? requestedJobWorkspace;
         const jobRuntime = await resolveJobRuntime(jobWorkspace);
         if (!jobRuntime) return json(res, config.resolveWorkspaceDependencies ? 400 : 503,
