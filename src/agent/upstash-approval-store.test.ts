@@ -5,7 +5,7 @@ import {
   APPROVAL_RESOLVE_SCRIPT,
   UpstashApprovalDecisionStore,
 } from "./upstash-approval-store.js";
-import type { ApprovalRecord } from "./approval-broker.js";
+import { ApprovalBroker, type ApprovalRecord } from "./approval-broker.js";
 
 function record(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
   const now = Date.now();
@@ -136,4 +136,36 @@ test("Upstash create atomically caps pending requests and prunes expired index e
   assert.match(String(command[1]), /ZREMRANGEBYSCORE/u);
   assert.match(String(command[1]), /ZCARD/u);
   assert.equal(command[command.length - 1], "50");
+});
+
+
+test("Upstash-backed recovery cancels only the interrupted run using an atomic Redis decision", async () => {
+  const orphan = record({ id: "orphan-approval", runId: "interrupted-run" });
+  const live = record({ id: "live-approval", runId: "live-run", actionHash: "b".repeat(64) });
+  const commands: unknown[][] = [];
+  const store = new UpstashApprovalDecisionStore({
+    url: "https://redis.example.com",
+    token: "test-token",
+    fetchImpl: async (_input, init) => {
+      const command = JSON.parse(String(init?.body)) as unknown[];
+      commands.push(command);
+      if (command[0] === "ZRANGE") return response([orphan.id, live.id]);
+      if (command[0] === "MGET") return response([JSON.stringify(orphan), JSON.stringify(live)]);
+      if (command[0] === "GET") {
+        const id = String(command[1]).split(":").at(-1);
+        return response(JSON.stringify(id === orphan.id ? orphan : live));
+      }
+      if (command[0] === "EVAL") return response(1);
+      throw new Error("Unexpected Redis command");
+    },
+  });
+  const broker = new ApprovalBroker({ store });
+  assert.equal(await broker.cancelRun("interrupted-run", orphan.principalId), 1);
+  assert.deepEqual(commands.map((command) => command[0]), ["ZRANGE", "MGET", "GET", "EVAL"]);
+  const evalCommand = commands[3]!;
+  assert.equal(evalCommand[1], APPROVAL_RESOLVE_SCRIPT);
+  assert.equal(evalCommand[evalCommand.length - 2], "cancelled");
+  assert.equal(evalCommand[evalCommand.length - 1], "system:abort");
+  assert.match(APPROVAL_RESOLVE_SCRIPT, /record\.status ~= 'pending'/u);
+  assert.match(APPROVAL_RESOLVE_SCRIPT, /record\.actionHash ~= ARGV\[1\]/u);
 });
