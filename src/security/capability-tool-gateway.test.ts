@@ -141,3 +141,24 @@ test("guarded gateway blocks financial execution until transaction executor is i
   assert.match(result.error?.message ?? "", /Financial execution is disabled/);
   assert.equal(stub.count(), 0);
 });
+
+test("API capabilities cannot be mapped to browser-control tools", async () => {
+  const apiSideEffect = {
+    ...capability,
+    id: "commerce.api-submit",
+    effect: "external_side_effect" as const,
+    risk: "high" as const,
+    transport: "api" as const,
+  };
+  const stub = gatewayStub(["browser"]);
+  const gateway = new CapabilityGuardToolGateway(
+    stub.inner,
+    new CapabilityRegistry([apiSideEffect]),
+    async () => ({ ...authority, allowedCapabilityIds: ["commerce.api-submit"] }),
+    () => "commerce.api-submit",
+  );
+  const result = await gateway.execute({ tool: "browser.search", input: {} }, context);
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /API capability cannot be mapped/i);
+  assert.equal(stub.count(), 0);
+});
