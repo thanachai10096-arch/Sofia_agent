@@ -220,6 +220,15 @@ test("durable jobs are routed to the authenticated owner's selected project runt
       body: JSON.stringify({ task: "must not be accepted", workspace: "project-a" }),
     });
     assert.equal(forbiddenSubmit.status, 403);
+
+    const conflictingWorkspace = await fetch(baseUrl + "/v1/jobs?workspace=project-b", {
+      method: "POST",
+      headers: { authorization: "Bearer " + keys[0], "content-type": "application/json" },
+      body: JSON.stringify({ task: "must not select an ambiguous project", workspace: "project-a" }),
+    });
+    assert.equal(conflictingWorkspace.status, 400);
+    assert.deepEqual(await conflictingWorkspace.json(), { error: "workspace_selector_mismatch" });
+
     const submit = async (key: string) => fetch(baseUrl + "/v1/jobs", {
       method: "POST",
       headers: { authorization: "Bearer " + key, "content-type": "application/json" },
