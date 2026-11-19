@@ -13,6 +13,15 @@ function assertPrivateDirectory(info: Awaited<ReturnType<typeof lstat>>, descrip
   }
 }
 
+async function assertRealPrivateDirectory(directory: string, description: string): Promise<string> {
+  const info = await lstat(directory);
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error(description + " must be a real directory, not a symbolic link.");
+  }
+  assertPrivateDirectory(info, description);
+  return realpath(directory);
+}
+
 /**
  * Maps an authenticated principal to an opaque, stable workspace directory.
  * This is a resolver primitive only: callers must construct all per-user
@@ -33,12 +42,7 @@ export class PrincipalWorkspaceResolver {
       this.rootPromise = (async () => {
         const configured = path.resolve(this.configuredRoot);
         await mkdir(configured, { recursive: true, mode: 0o700 });
-        const info = await lstat(configured);
-        if (!info.isDirectory() || info.isSymbolicLink()) {
-          throw new Error("Principal workspace root must be a real directory, not a symbolic link.");
-        }
-        assertPrivateDirectory(info, "Principal workspace root");
-        return realpath(configured);
+        return assertRealPrivateDirectory(configured, "Principal workspace root");
       })();
     }
     return this.rootPromise;
@@ -53,15 +57,16 @@ export class PrincipalWorkspaceResolver {
       throw new Error("Principal workspace store names may contain only lowercase letters, digits, and hyphens.");
     }
     const workspace = await this.resolve(principalId);
-    const candidate = path.join(workspace, ".sofia", storeName);
-    if (!within(workspace, candidate)) throw new Error("Principal store escapes its workspace.");
+    const stateRoot = path.join(workspace, ".sofia");
+    await mkdir(stateRoot, { recursive: true, mode: 0o700 });
+    const canonicalStateRoot = await assertRealPrivateDirectory(stateRoot, "Principal state directory");
+    if (!within(workspace, canonicalStateRoot)) throw new Error("Principal state directory escapes its workspace.");
+
+    const candidate = path.join(canonicalStateRoot, storeName);
+    if (!within(canonicalStateRoot, candidate)) throw new Error("Principal store escapes its state directory.");
     await mkdir(candidate, { recursive: true, mode: 0o700 });
-    const info = await lstat(candidate);
-    if (!info.isDirectory() || info.isSymbolicLink()) {
-      throw new Error("Principal store must be a real directory, not a symbolic link.");
-    }
-    const canonical = await realpath(candidate);
-    if (!within(workspace, canonical)) throw new Error("Principal store escapes its workspace.");
+    const canonical = await assertRealPrivateDirectory(candidate, "Principal store");
+    if (!within(canonicalStateRoot, canonical)) throw new Error("Principal store escapes its state directory.");
     return canonical;
   }
 
@@ -77,12 +82,7 @@ export class PrincipalWorkspaceResolver {
     if (!within(root, candidate)) throw new Error("Principal workspace escapes its configured root.");
 
     await mkdir(candidate, { recursive: true, mode: 0o700 });
-    const info = await lstat(candidate);
-    if (!info.isDirectory() || info.isSymbolicLink()) {
-      throw new Error("Principal workspace must be a real directory, not a symbolic link.");
-    }
-    assertPrivateDirectory(info, "Principal workspace");
-    const canonical = await realpath(candidate);
+    const canonical = await assertRealPrivateDirectory(candidate, "Principal workspace");
     if (!within(root, canonical)) throw new Error("Principal workspace escapes its configured root.");
     return canonical;
   }
