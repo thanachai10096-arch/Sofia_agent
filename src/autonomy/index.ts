@@ -12,3 +12,4 @@ export type { AutonomyJobSupervisorOptions, AutonomyResearchExecutor, AutonomyWo
 
 export { runRailwayAutonomyWorker, runRailwayAutonomyWorkerWithProcessSignals } from "./railway-worker.js";
 export type { RailwayAutonomyWorkerConfig } from "./railway-worker.js";
+\nexport * from "./skill-evaluator.js";\n
