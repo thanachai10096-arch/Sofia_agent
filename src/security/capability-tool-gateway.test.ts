@@ -22,11 +22,11 @@ const authority: DelegatedAuthority = {
   expiresAt: Date.now() + 60_000,
 };
 
-function gatewayStub() {
+function gatewayStub(effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[] = ["read"]) {
   let executions = 0;
   const inner: ToolGateway = {
-    listTools: () => [{ name: "browser.search", description: "Search", effects: ["read"] }],
-    describe: name => name === "browser.search" ? { effects: ["read"] } : undefined,
+    listTools: () => [{ name: "browser.search", description: "Search", effects }],
+    describe: name => name === "browser.search" ? { effects } : undefined,
     async execute() { executions += 1; return { ok: true, data: { found: true }, evidenceId: "evidence-1" }; },
     async snapshot() { return { id: "s", revision: "r", evidenceId: "e" }; },
     async changedFiles() { return []; },
@@ -64,7 +64,7 @@ test("guarded gateway denies missing principal, missing grant, and unregistered 
 
 test("bounded delegated external actions execute without repeated approval", async () => {
   const sideEffect = { ...capability, id: "commerce.submit", effect: "external_side_effect" as const, risk: "high" as const };
-  const stub = gatewayStub();
+  const stub = gatewayStub(["browser"]);
   const gateway = new CapabilityGuardToolGateway(stub.inner, new CapabilityRegistry([sideEffect]), async () => ({
     ...authority, scopes: ["internet:read"], allowedCapabilityIds: ["commerce.submit"],
   }), () => "commerce.submit");
@@ -74,7 +74,7 @@ test("bounded delegated external actions execute without repeated approval", asy
 
 test("explicit approval and critical capabilities still require approval", async () => {
   const explicit = { ...capability, id: "commerce.confirm", effect: "external_side_effect" as const, risk: "high" as const, approvalRequired: true };
-  const stub = gatewayStub();
+  const stub = gatewayStub(["browser"]);
   const gateway = new CapabilityGuardToolGateway(stub.inner, new CapabilityRegistry([explicit]), async () => ({
     ...authority, scopes: ["internet:read"], allowedCapabilityIds: ["commerce.confirm"],
   }), () => "commerce.confirm");
@@ -85,6 +85,33 @@ test("explicit approval and critical capabilities still require approval", async
     ...authority, scopes: ["internet:read"], allowedCapabilityIds: ["system.destroy"],
   }), () => "system.destroy");
   assert.equal((await criticalGateway.execute({ tool: "browser.search", input: {} }, context)).ok, false);
+});
+
+
+test("capability mappings cannot downgrade a write tool to read-only", async () => {
+  const writeStub = gatewayStub(["write"]);
+  const gateway = new CapabilityGuardToolGateway(
+    writeStub.inner,
+    new CapabilityRegistry([capability]),
+    async () => authority,
+    () => "web.search",
+  );
+  const result = await gateway.execute({ tool: "browser.search", input: {} }, context);
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /risk is lower|effect does not match/i);
+  assert.equal(writeStub.count(), 0);
+});
+
+test("unmapped production tools fail closed", async () => {
+  const stub = gatewayStub();
+  const gateway = new CapabilityGuardToolGateway(
+    stub.inner,
+    new CapabilityRegistry([capability]),
+    async () => authority,
+    () => undefined,
+  );
+  assert.equal((await gateway.execute({ tool: "browser.search", input: {} }, context)).ok, false);
+  assert.equal(stub.count(), 0);
 });
 
 test("guarded gateway blocks financial execution until transaction executor is integrated", async () => {
