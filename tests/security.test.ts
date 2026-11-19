@@ -94,6 +94,14 @@ describe("Sofia security controls",()=>{
     assert.equal(a.requireApproval,true);
     assert.equal(a.actionHash,b.actionHash);
   });
+
+  it("classifies financial and irreversible browser controls as critical", () => {
+    assert.equal(riskFor(["browser"], { selector: "#buy-now" }), "critical");
+    assert.equal(riskFor(["browser"], { selector: "[data-testid=confirm-payment]" }), "critical");
+    assert.equal(riskFor(["browser"], { action: "press", selector: "#place-order", value: "Enter" }), "critical");
+    assert.equal(riskFor(["browser"], { selector: "button.continue" }), "high");
+  });
+
   it("redacts secrets before audit/display",()=>{
     const value=redactSecrets({apiKey:"super-secret",message:"Bearer abc123"});
     assert.deepEqual(value,{apiKey:"[REDACTED]",message:"Bearer [REDACTED]"});
