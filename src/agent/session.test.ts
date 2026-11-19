@@ -195,3 +195,44 @@ test("SofiaAgent scopes identical session labels to different authenticated prin
   assert.match(ownerBContext, /owner-b private context/);
   assert.doesNotMatch(ownerBContext, /owner-a secret context/);
 });
+
+
+test("SofiaAgent isolates concurrent identical session labels across principals", async () => {
+  const sessions = new MemorySessionStore();
+  let active = 0;
+  let maxActive = 0;
+  const contexts = new Map<string, string[]>();
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async (request) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        const owner = request.task.startsWith("owner-a") ? "owner-a" : "owner-b";
+        const values = contexts.get(owner) ?? [];
+        values.push(request.context ?? "");
+        contexts.set(owner, values);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { text: `Reply for ${owner}` };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await Promise.all([
+    agent.run({ task: "owner-a initial private turn", principalId: "owner-a", sessionId: "same-concurrent-label" }),
+    agent.run({ task: "owner-b initial private turn", principalId: "owner-b", sessionId: "same-concurrent-label" }),
+  ]);
+  await Promise.all([
+    agent.run({ task: "owner-a follow-up", principalId: "owner-a", sessionId: "same-concurrent-label" }),
+    agent.run({ task: "owner-b follow-up", principalId: "owner-b", sessionId: "same-concurrent-label" }),
+  ]);
+
+  assert.equal(maxActive, 2, "different principals must not share a session serialization queue");
+  assert.match(contexts.get("owner-a")?.[1] ?? "", /owner-a initial private turn/);
+  assert.doesNotMatch(contexts.get("owner-a")?.[1] ?? "", /owner-b initial private turn/);
+  assert.match(contexts.get("owner-b")?.[1] ?? "", /owner-b initial private turn/);
+  assert.doesNotMatch(contexts.get("owner-b")?.[1] ?? "", /owner-a initial private turn/);
+});
