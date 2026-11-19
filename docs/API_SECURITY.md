@@ -36,7 +36,7 @@ The API entrypoint configures a file-backed approval journal at `SOFIA_APPROVAL_
 
 ### Transactional SQLite approval store (library integration stage)
 
-The library now exposes `SqliteApprovalStore` as a transactional metadata store. Multiple local processes can open the same SQLite database and use conditional state transitions so only one process can settle a pending approval. It stores owner, run, tool, action-hash, risk, timestamps, and status only; it never stores proposed tool input.
+The library now exposes `SqliteApprovalStore` as a transactional metadata store (requires Node.js 22.5+ for the built-in `node:sqlite` module; the rest of the package retains its existing Node.js engine range). Multiple local processes can open the same SQLite database and use conditional state transitions so only one process can settle a pending approval. It stores owner, run, tool, action-hash, risk, timestamps, and status only; it never stores proposed tool input.
 
 This is a storage primitive, not yet a replacement for the standard entrypoint's `ApprovalBroker`/file journal. Do not configure it as the live API approval backend until the broker is wired to its atomic operations and the API's pending/decision flows are covered by integration tests. SQLite WAL is intended for a local disk shared by processes on one host; it is not a safe general-purpose multi-host/network-filesystem coordination service. For multi-host deployments, use a transactional server database with equivalent compare-and-set semantics and worker leases.
 
