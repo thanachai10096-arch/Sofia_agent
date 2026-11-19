@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, fstatSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { redactSecrets } from "../security/guard.js";
@@ -53,8 +53,8 @@ function validateRecord(value: unknown): SkillBenchmarkHistoryRecord {
       Math.abs(value.capability.passRate - value.capability.passedChecks / value.capability.totalChecks) > 0.0001 ||
       Math.abs(value.capability.score - Math.round(value.capability.passRate * value.capability.baselineCoverage * 10_000) / 100) > 0.01 ||
       !Number.isSafeInteger(value.capability.baselineChecks) || value.capability.baselineChecks < 0 ||
-      value.capability.missingBaselineChecks.length > value.capability.baselineChecks ||
       !Array.isArray(value.capability.missingBaselineChecks) || !value.capability.missingBaselineChecks.every((name) => typeof name === "string") ||
+      value.capability.missingBaselineChecks.length > value.capability.baselineChecks ||
       !Array.isArray(value.capability.failedChecks) || !value.capability.failedChecks.every((name) => typeof name === "string") ||
       (value.runId !== undefined && (typeof value.runId !== "string" || value.runId.length > 500)) ||
       (Array.isArray(value.checks) && typeof value.passed === "boolean" &&
@@ -109,10 +109,13 @@ export class FileSkillBenchmarkHistory {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const lockFile = this.file + ".lock";
     let lockFd: number | undefined;
+    let lockIdentity: { dev: number; ino: number } | undefined;
     let temporary: string | undefined;
     try {
       // Never steal a stale lock automatically: an operator must inspect it.
       lockFd = openSync(lockFile, "wx", 0o600);
+      const lockStat = fstatSync(lockFd);
+      lockIdentity = { dev: lockStat.dev, ino: lockStat.ino };
       const current = this.readSnapshot();
       const existing = current.records.find((item) => item.id === record.id);
       if (existing) {
@@ -145,7 +148,14 @@ export class FileSkillBenchmarkHistory {
       throw error;
     } finally {
       if (lockFd !== undefined) closeSync(lockFd);
-      if (lockFd !== undefined) rmSync(lockFile, { force: true });
+      if (lockIdentity) {
+        try {
+          const currentLock = lstatSync(lockFile);
+          if (currentLock.dev === lockIdentity.dev && currentLock.ino === lockIdentity.ino) rmSync(lockFile);
+        } catch (error) {
+          if (!isRecord(error) || error.code !== "ENOENT") throw error;
+        }
+      }
     }
   }
 
