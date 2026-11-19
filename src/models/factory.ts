@@ -32,6 +32,7 @@ import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { compareSkillRegressionBenchmark } from "../brain/skill-regression-benchmark.js";
 import { FileSkillBenchmarkHistory } from "../brain/skill-benchmark-history.js";
+import { measureSkillCapability } from "../brain/skill-capability-measurement.js";
 import { AuditSkillEvidenceVerifier } from "../brain/skill-evidence.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
@@ -72,7 +73,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     } else if (baselineChecks?.length) {
       try {
         const benchmark = compareSkillRegressionBenchmark({
-          baseline: baselineChecks.filter((check) => check.name !== "skill-regression-benchmark" && check.name !== "skill-benchmark-history").map((check) => ({ name: check.name, passed: check.passed })),
+          baseline: baselineChecks.filter((check) => check.name !== "skill-regression-benchmark" && check.name !== "skill-benchmark-history" && check.name !== "skill-capability-measurement").map((check) => ({ name: check.name, passed: check.passed })),
           candidate: checks.map((check) => ({ name: check.name, passed: check.passed })),
         });
         checks.push({
@@ -96,6 +97,31 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         detail: "First managed version: its verified checks become the baseline for future upgrades.",
       });
     }
+    const benchmarkBaseline = baselineChecks?.filter((check) =>
+      check.name !== "skill-regression-benchmark" &&
+      check.name !== "skill-benchmark-history" &&
+      check.name !== "skill-capability-measurement");
+    let capability;
+    try {
+      capability = measureSkillCapability({
+        checks,
+        ...(benchmarkBaseline?.length ? { baseline: benchmarkBaseline } : {}),
+      });
+      checks.push({
+        name: "skill-capability-measurement",
+        passed: true,
+        detail: "Capability score " + capability.score + "/100; pass rate " +
+          Math.round(capability.passRate * 100) + "%; baseline coverage " +
+          Math.round(capability.baselineCoverage * 100) + "%.",
+      });
+    } catch (error) {
+      checks.push({
+        name: "skill-capability-measurement",
+        passed: false,
+        detail: error instanceof Error ? error.message : "Capability measurement failed.",
+      });
+      capability = undefined;
+    }
     checks.push({
       name: "skill-benchmark-history",
       passed: true,
@@ -108,6 +134,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         evaluatedAt: new Date().toISOString(),
         passed: checks.every((check) => check.passed),
         checks,
+        ...(capability ? { capability } : {}),
         ...((previous?.package.version ?? historicalBaseline?.skillVersion) ? { baselineVersion: previous?.package.version ?? historicalBaseline?.skillVersion } : {}),
         ...(provenance.runId ? { runId: provenance.runId } : {}),
       });
