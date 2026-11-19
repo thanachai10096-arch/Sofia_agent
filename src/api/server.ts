@@ -199,7 +199,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const modelSelectionError = (input: AgentRunInput): { status: number; error: string } | undefined => {
     const requested = input.modelRouteId?.trim();
     if (!requested || requested === "auto") return undefined;
-    const routes = deps.router.listRoutes?.();
+    const routes = requestDeps.router.listRoutes?.();
     if (!routes) return { status: 503, error: "model_selection_unavailable" };
     const route = routes.find((item) => item.id === requested);
     if (!route) return { status: 400, error: "invalid_model_route" };
@@ -214,7 +214,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
-        const result = await agent.run({
+        const result = await requestAgent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
@@ -294,11 +294,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
+      // The resolver receives only the opaque principal ID derived from the verified bearer key.
+      // Never accept a workspace or principal identifier from request input.
+      const requestDeps = config.resolvePrincipalDependencies
+        ? await config.resolvePrincipalDependencies(auth.keyId)
+        : deps;
+      const requestAgent = requestDeps === deps ? agent : new SofiaAgent(requestDeps);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
-        if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
+        if (!requestDeps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
         if (req.method === "GET") {
           if (!auth.scopes.includes("memory:read")) return json(res, 403, { error: "forbidden", requiredScope: "memory:read" }, origin, config);
           const query = requestUrl.searchParams.get("q")?.trim() ?? "";
@@ -306,8 +312,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const rawLimit = Number(requestUrl.searchParams.get("limit") ?? "8");
           const limit = Number.isSafeInteger(rawLimit) ? Math.max(1, Math.min(20, rawLimit)) : 8;
           const memories = query
-            ? await deps.userMemoryStore.find(auth.keyId, query, limit)
-            : (await deps.userMemoryStore.list(auth.keyId)).slice(0, 200);
+            ? await requestDeps.userMemoryStore!.find(auth.keyId, query, limit)
+            : (await requestDeps.userMemoryStore!.list(auth.keyId)).slice(0, 200);
           return json(res, 200, { memories }, origin, config);
         }
         if (req.method === "POST" && requestUrl.pathname === "/v1/memory") {
@@ -322,7 +328,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }
           try {
             const entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
-            await deps.userMemoryStore.save(auth.keyId, entry);
+            await requestDeps.userMemoryStore!.save(auth.keyId, entry);
             const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
             if (!saved) return json(res, 500, { error: "memory_write_failed" }, origin, config);
             return json(res, 201, { memory: saved }, origin, config);
@@ -332,7 +338,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (req.method === "DELETE" && requestUrl.pathname === "/v1/memory") {
           if (!auth.scopes.includes("memory:write")) return json(res, 403, { error: "forbidden", requiredScope: "memory:write" }, origin, config);
-          await deps.userMemoryStore.clear(auth.keyId);
+          await requestDeps.userMemoryStore!.clear(auth.keyId);
           return json(res, 200, { cleared: true }, origin, config);
         }
         const memoryIdMatch = requestUrl.pathname.match(/^\/v1\/memory\/([^/]+)$/);
@@ -341,14 +347,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           let memoryId: string;
           try { memoryId = decodeURIComponent(memoryIdMatch[1]!); } catch { return json(res, 400, { error: "invalid_memory_id" }, origin, config); }
           if (!memoryId || memoryId.length > 256) return json(res, 400, { error: "invalid_memory_id" }, origin, config);
-          const deleted = await deps.userMemoryStore.delete(auth.keyId, memoryId);
+          const deleted = await requestDeps.userMemoryStore!.delete(auth.keyId, memoryId);
           return deleted ? json(res, 200, { deleted: true }, origin, config) : json(res, 404, { error: "memory_not_found" }, origin, config);
         }
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
-      if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
+      if (isCronRequest && !requestDeps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
         return json(res, 403, { error: "forbidden", requiredScope: "cron:read" }, origin, config);
       }
@@ -728,11 +734,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
 
       const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
-      if (jobMatch && deps.jobRuntime) {
+      if (jobMatch && requestDeps.jobRuntime) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
-        const job = await deps.jobRuntime.get(jobId);
+        const job = await requestDeps.jobRuntime!.get(jobId);
         if (!job || job.ownerKeyId !== auth.keyId) {
           return json(res, 404, { error: "job_not_found" }, origin, config);
         }
@@ -740,18 +746,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 200, job, origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
+          try { return json(res, 202, await requestDeps.jobRuntime!.resume(jobId), origin, config); }
           catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
-          const cancelled = await deps.jobRuntime.cancel(jobId);
+          const cancelled = await requestDeps.jobRuntime!.cancel(jobId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
         }
       }
 
       if (req.method === "GET" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
+        if (!requestDeps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+        const jobs = (await requestDeps.jobRuntime!.list()).filter((item) => item.ownerKeyId === auth.keyId);
         return json(res, 200, { jobs }, origin, config);
       }
 
@@ -765,7 +771,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
-          const job = await deps.jobRuntime.submit({
+          const job = await requestDeps.jobRuntime!.submit({
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
