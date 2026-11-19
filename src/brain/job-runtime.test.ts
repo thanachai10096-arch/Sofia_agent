@@ -1022,3 +1022,38 @@ test("DurableJobRuntime owner-bound accessors reject cross-owner job control", a
   );
   assert.equal((await runtime.get(submitted.id))?.status, "failed");
 });
+
+
+test("DurableJobRuntime close aborts active work, waits for shutdown, and rejects new submissions", async () => {
+  const namespace = "job-runtime-close-" + randomUUID();
+  let started!: () => void;
+  const running = new Promise<void>((resolve) => { started = resolve; });
+  let observedAbort = false;
+  const brain = {
+    run: async ({ signal }: { signal?: AbortSignal }) => {
+      started();
+      if (!signal) throw new Error("Runtime did not pass an abort signal");
+      await new Promise<void>((resolve) => {
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      observedAbort = true;
+      return { completed: false, state: "cancelled" };
+    },
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({ task: "shutdown active work" });
+  await running;
+
+  const firstClose = runtime.close();
+  const secondClose = runtime.close();
+  assert.equal(firstClose, secondClose);
+  await Promise.all([firstClose, secondClose]);
+
+  assert.equal(observedAbort, true);
+  assert.equal((await runtime.get(submitted.id))?.status, "cancelled");
+  await assert.rejects(
+    runtime.submit({ task: "must not start after shutdown" }),
+    /runtime is closed/i,
+  );
+});
