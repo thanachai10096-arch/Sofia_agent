@@ -53,6 +53,7 @@ def secure_directory(path):
 def load_config():
     if os.geteuid() != 0:
         fail("helper must run as root")
+    secure_directory(CONFIG.parent)
     info = CONFIG.lstat()
     if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
         fail("configuration must be a root-owned regular file not writable by group/others")
@@ -205,7 +206,7 @@ def create(root, state_root, request):
     try:
         workspace.mkdir(mode=0o700)
         run(["xfs_quota", "-x", "-c", "project -s -p " + str(workspace) + " " + str(project_id), str(root)])
-        run(["xfs_quota", "-x", "-c", "limit -p bhard=" + str(byte_limit) + "B ihard=" + str(inode_limit) + " " + str(project_id), str(root)])
+        run(["xfs_quota", "-x", "-c", "limit -p bhard=" + str(byte_limit) + " ihard=" + str(inode_limit) + " " + str(project_id), str(root)])
         verify_quota(root, project_id, byte_limit, inode_limit)
         allocation["status"] = "active"
         save_allocations(state_root, allocations)
@@ -239,7 +240,7 @@ def dispose(root, state_root, request, abort=False):
         shutil.rmtree(workspace)
     # Reset limits before returning the project ID, even after interrupted removal.
     # A failed reset preserves the registry entry.
-    run(["xfs_quota", "-x", "-c", "limit -p bhard=0B ihard=0 " + str(entry["project_id"]), str(root)])
+    run(["xfs_quota", "-x", "-c", "limit -p bhard=0 ihard=0 " + str(entry["project_id"]), str(root)])
     allocations.pop(run_id, None)
     save_allocations(state_root, allocations)
     return {"ok": True, "runId": run_id}
