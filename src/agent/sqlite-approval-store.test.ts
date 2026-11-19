@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { SqliteApprovalDecisionStore } from "./sqlite-approval-store.js";
-import type { ApprovalRecord } from "./approval-broker.js";
+import { ApprovalBroker, type ApprovalRecord } from "./approval-broker.js";
 
 function record(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
   return {
@@ -135,5 +135,49 @@ test("SQLite store caps pending approvals atomically per principal", async () =>
     assert.equal((await second.listPending("principal-1")).length, 50);
   } finally {
     first.close(); second.close(); fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+test("SQLite restart recovery durably cancels only approvals for the interrupted run", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-orphan-recovery-"));
+  const file = path.join(dir, "approvals.sqlite");
+  const owner = "principal-recovery";
+  try {
+    const beforeRestart = await SqliteApprovalDecisionStore.open(file);
+    await beforeRestart.create(record({
+      id: "orphaned-approval",
+      runId: "interrupted-run",
+      principalId: owner,
+      actionHash: "b".repeat(64),
+    }));
+    await beforeRestart.create(record({
+      id: "live-approval",
+      runId: "still-running",
+      principalId: owner,
+      actionHash: "c".repeat(64),
+    }));
+    beforeRestart.close();
+
+    const afterRestart = await SqliteApprovalDecisionStore.open(file);
+    try {
+      const broker = new ApprovalBroker({ store: afterRestart });
+      assert.equal(await broker.cancelRun("interrupted-run", owner), 1);
+      assert.equal((await afterRestart.get("orphaned-approval"))?.status, "cancelled");
+      assert.equal((await afterRestart.get("live-approval"))?.status, "pending");
+      assert.deepEqual((await broker.listPending(owner)).map((item) => item.id), ["live-approval"]);
+    } finally {
+      afterRestart.close();
+    }
+
+    const afterRecoveryRestart = await SqliteApprovalDecisionStore.open(file);
+    try {
+      assert.equal((await afterRecoveryRestart.get("orphaned-approval"))?.status, "cancelled");
+      assert.equal((await afterRecoveryRestart.get("live-approval"))?.status, "pending");
+    } finally {
+      afterRecoveryRestart.close();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
