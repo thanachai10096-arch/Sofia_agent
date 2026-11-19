@@ -63,7 +63,7 @@ test("guarded gateway denies missing principal, missing grant, and unregistered 
 });
 
 test("bounded delegated external actions execute without repeated approval", async () => {
-  const sideEffect = { ...capability, id: "commerce.submit", effect: "external_side_effect" as const, risk: "high" as const };
+  const sideEffect = { ...capability, id: "commerce.submit", transport: "browser" as const, effect: "external_side_effect" as const, risk: "high" as const };
   const stub = gatewayStub(["browser"]);
   const gateway = new CapabilityGuardToolGateway(stub.inner, new CapabilityRegistry([sideEffect]), async () => ({
     ...authority, scopes: ["internet:read"], allowedCapabilityIds: ["commerce.submit"],
@@ -73,7 +73,7 @@ test("bounded delegated external actions execute without repeated approval", asy
 });
 
 test("explicit approval and critical capabilities still require approval", async () => {
-  const explicit = { ...capability, id: "commerce.confirm", effect: "external_side_effect" as const, risk: "high" as const, approvalRequired: true };
+  const explicit = { ...capability, id: "commerce.confirm", transport: "browser" as const, effect: "external_side_effect" as const, risk: "high" as const, approvalRequired: true };
   const stub = gatewayStub(["browser"]);
   const gateway = new CapabilityGuardToolGateway(stub.inner, new CapabilityRegistry([explicit]), async () => ({
     ...authority, scopes: ["internet:read"], allowedCapabilityIds: ["commerce.confirm"],
@@ -160,5 +160,36 @@ test("API capabilities cannot be mapped to browser-control tools", async () => {
   const result = await gateway.execute({ tool: "browser.search", input: {} }, context);
   assert.equal(result.ok, false);
   assert.match(result.error?.message ?? "", /API capability cannot be mapped/i);
+  assert.equal(stub.count(), 0);
+});
+
+
+test("browser capabilities cannot be mapped to non-browser API tools", async () => {
+  const apiRead = { ...capability, id: "web.search", transport: "browser" as const };
+  const stub = gatewayStub(["network", "read"]);
+  const gateway = new CapabilityGuardToolGateway(
+    stub.inner,
+    new CapabilityRegistry([apiRead]),
+    async () => authority,
+    () => "web.search",
+  );
+  const result = await gateway.execute({ tool: "browser.search", input: {} }, context);
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /Browser capability must map/i);
+  assert.equal(stub.count(), 0);
+});
+
+test("desktop capabilities cannot be mapped to non-desktop tools", async () => {
+  const desktopRead = { ...capability, id: "desktop.inspect", transport: "desktop" as const };
+  const stub = gatewayStub(["read"]);
+  const gateway = new CapabilityGuardToolGateway(
+    stub.inner,
+    new CapabilityRegistry([desktopRead]),
+    async () => authority,
+    () => "desktop.inspect",
+  );
+  const result = await gateway.execute({ tool: "browser.search", input: {} }, context);
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /Desktop capability is mapped/i);
   assert.equal(stub.count(), 0);
 });
