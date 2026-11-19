@@ -139,7 +139,7 @@ export function createSofiaAgentDependencies(
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore(options?.userMemoryDirectory);
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),close:()=>profileSessions?.closeAll() ?? Promise.resolve()};
 }
 
 /**
