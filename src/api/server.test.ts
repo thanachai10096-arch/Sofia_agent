@@ -469,3 +469,78 @@ test("API restart recovery cancels orphaned approvals before exposing or accepti
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API fails closed when orphaned approval recovery storage is unavailable", async () => {
+  class RecoveryFailureStore extends InMemoryApprovalDecisionStore {
+    failRecovery = false;
+    override async listPending(principalId: string) {
+      if (this.failRecovery) throw new Error("simulated approval store outage");
+      return super.listPending(principalId);
+    }
+  }
+
+  const ownerKey = "recovery-failure-owner-key";
+  const ownerId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
+  const store = new RecoveryFailureStore();
+  const broker = new ApprovalBroker({ store, pollIntervalMs: 25 });
+  const controller = new AbortController();
+  const waiting = broker.handle({
+    runId: "recovery-failure-run",
+    principalId: ownerId,
+    toolName: "workspace.write_file",
+    input: { path: "outage.txt", content: "must remain blocked" },
+    actionHash: "e".repeat(64),
+    risk: "high",
+    signal: controller.signal,
+  });
+  const [pending] = await broker.listPending(ownerId);
+  assert.ok(pending);
+  store.failRecovery = true;
+
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    approvalBroker: broker,
+  }, {
+    apiKeys: { [ownerKey]: ["approval:manage"] },
+    runStore: {
+      async save() {},
+      async remove() {},
+      loadAllSync: () => [{
+        id: "recovery-failure-run",
+        status: "running" as const,
+        createdAt: Date.now() - 5_000,
+        updatedAt: Date.now() - 1_000,
+        ownerKeyId: ownerId,
+        desktopCapabilities: [],
+      }],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  try {
+    const inbox = await fetch(base + "/v1/approvals", {
+      headers: { authorization: "Bearer " + ownerKey },
+    });
+    assert.equal(inbox.status, 503);
+    assert.deepEqual(await inbox.json(), { error: "approval_recovery_unavailable" });
+
+    const decision = await fetch(base + "/v1/approvals/" + pending.id + "/approve", {
+      method: "POST",
+      headers: { authorization: "Bearer " + ownerKey, "content-type": "application/json" },
+      body: JSON.stringify({ actionHash: pending.actionHash }),
+    });
+    assert.equal(decision.status, 503);
+    assert.deepEqual(await decision.json(), { error: "approval_recovery_unavailable" });
+    assert.equal((await broker.get(pending.id))?.status, "pending");
+  } finally {
+    controller.abort(new Error("test cleanup"));
+    await waiting;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
