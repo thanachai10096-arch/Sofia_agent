@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RegistryToolGateway } from "./registry-tool-gateway.js";
+import { markDelegatedExecution } from "./delegated-context.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { createBuiltinTools } from "../tools/builtin.js";
@@ -118,16 +119,17 @@ test("delegated capability does not bypass explicit per-tool approval", async ()
     { ...defaultPolicy, permissions: { "workspace.write_file": { requireApproval: true } } },
     async () => { approvalCalls += 1; return true; },
   );
+  const context = {
+    runId: "delegated-explicit-approval-test",
+    principalId: "principal-1",
+    signal: new AbortController().signal,
+    requireApproval: false,
+    notifyApproval() {},
+  };
+  markDelegatedExecution(context);
   const result = await gateway.execute(
     { tool: "workspace.write_file", input: { path: "src/explicit.txt", content: "approval remains" } },
-    {
-      runId: "delegated-explicit-approval-test",
-      principalId: "principal-1",
-      signal: new AbortController().signal,
-      requireApproval: false,
-      delegatedCapabilityId: "workspace.write_file",
-      notifyApproval() {},
-    },
+    context,
   );
   assert.equal(result.ok, true);
   assert.equal(approvalCalls, 1);
