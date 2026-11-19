@@ -293,3 +293,52 @@ test("supervisor forwards host shutdown to active research and cancels the job",
   }
 });
 
+test("supervisor observes API-side durable cancellation while research is running", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-api-cancel-"));
+  try {
+    const store = new FileAutonomyJobStore("api-cancel-test", root);
+    const job = await store.enqueue({ principalId: "tenant-1", kind: "research", payload: {} });
+    let markStarted!: () => void;
+    let markAborted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const aborted = new Promise<void>((resolve) => { markAborted = resolve; });
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: {
+        runResearch: async (request) => {
+          markStarted();
+          await new Promise<void>((resolve) => {
+            const finish = () => { markAborted(); resolve(); };
+            if (request.signal.aborted) finish();
+            else request.signal.addEventListener("abort", finish, { once: true });
+          });
+          return { completed: false, stoppedBy: "aborted", cycles: [] };
+        },
+      },
+      resolveAdapters: async () => ({
+        observe: async () => ({ signal: "x", sourceIds: [] }),
+        identifyGaps: async () => [],
+        researchLocally: async () => ({ summary: "x", sourceIds: [], confidence: 1 }),
+        formulateHypothesis: async () => ({ statement: "x", successMetric: "x" }),
+        experiment: async () => ({ passed: true, summary: "x", benchmarkBefore: 0, benchmarkAfter: 1, safetyIncidents: 0, rollbackAvailable: true }),
+        recordLearning: async () => undefined,
+      }),
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+      isKilled: async () => false,
+      leaseMs: 3_000,
+      killSwitchPollMs: 1_000,
+    });
+
+    const running = supervisor.runNext("worker-1", new AbortController().signal);
+    await started;
+    await store.cancel("tenant-1", job.id);
+    await aborted;
+    const result = await running;
+    assert.equal(result?.id, job.id);
+    assert.equal(result?.status, "cancelled");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
