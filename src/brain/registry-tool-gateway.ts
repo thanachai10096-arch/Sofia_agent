@@ -118,8 +118,44 @@ export class RegistryToolGateway implements ToolGateway {
       if(capabilitySecret && (!capability || !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk,actionHash:assessment.actionHash},capabilitySecret))) {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability validation failed immediately before execution."}};
       }
-      if(!capabilitySecret && (process.env.NODE_ENV==="production"||process.env.SOFIA_ENV==="production")) {
+      if(!capabilitySecret && production) {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Production tool execution requires a capability secret."}};
+      }
+      if (effectfulForAudit && this.audit) {
+        const startedId = randomUUID();
+        try {
+          await this.audit.record({
+            id: startedId,
+            at: new Date().toISOString(),
+            runId: context.runId,
+            principalId: context.principalId,
+            toolName: call.tool,
+            actionHash: assessment.actionHash,
+            risk: assessment.risk,
+            decision: "execution_started",
+            reason: "Execution intent persisted immediately before invoking the tool.",
+            input: redactSecrets(input),
+          });
+          if (production) {
+            const persistedStart = await this.audit.read?.(startedId);
+            if (!persistedStart || persistedStart.id !== startedId ||
+                persistedStart.runId !== context.runId || persistedStart.principalId !== context.principalId ||
+                persistedStart.toolName !== call.tool || persistedStart.actionHash !== assessment.actionHash ||
+                persistedStart.decision !== "execution_started") {
+              throw new Error("Execution-start receipt readback mismatch.");
+            }
+          }
+        } catch {
+          return {
+            ok: false,
+            data: null,
+            evidenceId: "",
+            error: {
+              category: "permission_error",
+              message: "Tool execution was blocked because its execution-start receipt could not be persisted and verified.",
+            },
+          };
+        }
       }
       const boundSignal=this.security.bindSignal(context.signal);
       try {
