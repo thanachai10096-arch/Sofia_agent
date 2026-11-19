@@ -144,6 +144,7 @@ export class SofiaAgent {
     };
 
     const brain = this.deps.brainFactory!({
+      ...(request.runId ? { runId: request.runId } : {}),
       ...(request.signal ? { signal: request.signal } : {}),
       ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
