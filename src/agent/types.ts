@@ -11,6 +11,8 @@ import type { SecurityAuditSink } from "../security/audit.js";
 import type { DesktopCapability } from "../desktop/types.js";
 export interface AgentRequest {
   task: string;
+  /** Trusted host-assigned run ID used to bind approval requests to API cancellation. */
+  runId?: string;
   context?: string;
   /** Explicit configured route ID, or auto/omitted for Sofia's automatic routing. */
   modelRouteId?: string;
