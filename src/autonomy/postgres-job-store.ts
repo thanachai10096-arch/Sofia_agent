@@ -226,6 +226,19 @@ export class PostgresAutonomyJobStore implements AutonomyJobStore {
     throw new Error("Autonomy job not found.");
   }
 
+  async cancelOwned(principalId: string, jobId: string, workerId: string): Promise<AutonomyJob> {
+    const result = await this.pool.query<JobRow>(
+      `UPDATE ${this.table} SET status='cancelled', lease_worker_id=NULL, lease_expires_at=NULL, updated_at=now()
+       WHERE principal_id=$1 AND id=$2 AND status='running' AND lease_worker_id=$3
+       AND lease_expires_at > now() RETURNING ${columns}`,
+      [principalId.trim(), jobId, workerId],
+    );
+    if (result.rows[0]) return mapJob(result.rows[0]);
+    const existing = await this.get(principalId, jobId);
+    if (existing) return existing;
+    throw new Error("Autonomy job not found.");
+  }
+
   async recoverExpired(): Promise<number> {
     const result = await this.pool.query(
       `UPDATE ${this.table} SET status=CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END,
