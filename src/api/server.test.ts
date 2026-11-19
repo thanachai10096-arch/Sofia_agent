@@ -154,13 +154,16 @@ test("multi-project hosts reject shared durable job and cron routes", async () =
   assert.ok(address && typeof address !== "string");
   const baseUrl = "http://127.0.0.1:" + address.port;
   try {
-    for (const path of ["/v1/jobs", "/v1/cron/schedules"]) {
-      const response = await fetch(baseUrl + path, {
-        headers: { authorization: "Bearer workspace-key" },
-      });
-      assert.equal(response.status, 503);
-      assert.deepEqual(await response.json(), { error: "project_scoped_jobs_unavailable" });
-    }
+    const jobsResponse = await fetch(baseUrl + "/v1/jobs", {
+      headers: { authorization: "Bearer workspace-key" },
+    });
+    assert.equal(jobsResponse.status, 400);
+    assert.deepEqual(await jobsResponse.json(), { error: "workspace_required" });
+    const cronResponse = await fetch(baseUrl + "/v1/cron/schedules", {
+      headers: { authorization: "Bearer workspace-key" },
+    });
+    assert.equal(cronResponse.status, 503);
+    assert.deepEqual(await cronResponse.json(), { error: "project_scoped_cron_unavailable" });
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
