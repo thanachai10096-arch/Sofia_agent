@@ -17,7 +17,6 @@ export interface LinuxQuotaWorkspaceProvisionerOptions {
 interface ActiveWorkspace {
   runId: string;
   workspacePath: string;
-  quotaBytes: number;
 }
 
 interface HelperReply {
@@ -140,26 +139,38 @@ export class LinuxQuotaWorkspaceProvisioner {
       throw new Error("Quota workspace root must be a real directory.");
     }
     const runId = randomUUID();
-    const reply = await this.invoke({
-      operation: "create",
-      runId,
-      workspaceRoot: root,
-      hardQuotaBytes: this.maxWorkspaceBytes,
-      hardQuotaInodes: 20_000,
-    });
-    if (typeof reply.workspacePath !== "string" || reply.quotaBytes !== this.maxWorkspaceBytes || reply.quotaInodes !== 20_000) {
-      throw new Error("Quota helper did not confirm the requested hard quota.");
+    try {
+      const reply = await this.invoke({
+        operation: "create",
+        runId,
+        workspaceRoot: root,
+        hardQuotaBytes: this.maxWorkspaceBytes,
+        hardQuotaInodes: 20_000,
+      });
+      if (typeof reply.workspacePath !== "string" || reply.quotaBytes !== this.maxWorkspaceBytes || reply.quotaInodes !== 20_000) {
+        throw new Error("Quota helper did not confirm the requested hard quota.");
+      }
+      const workspacePath = await realpath(reply.workspacePath);
+      const info = await lstat(workspacePath);
+      if (!info.isDirectory() || info.isSymbolicLink() || path.dirname(workspacePath) !== root) {
+        throw new Error("Quota helper returned a workspace outside the dedicated quota root.");
+      }
+      if ([...this.active.values()].some((entry) => entry.workspacePath === workspacePath)) {
+        throw new Error("Quota helper returned a workspace already assigned to another run.");
+      }
+      this.active.set(workspacePath, { runId, workspacePath });
+      return workspacePath;
+    } catch (error) {
+      // The helper may have allocated a quota before a response was lost or rejected.
+      // Abort by the unguessable run ID so partial allocations cannot leak silently.
+      try {
+        const cleanup = await this.invoke({ operation: "abort", runId, workspaceRoot: root });
+        if (cleanup.ok !== true) throw new Error("Quota helper did not confirm aborted allocation cleanup.");
+      } catch {
+        throw new Error("Workspace allocation failed and host cleanup could not be confirmed; operator intervention is required.", { cause: error });
+      }
+      throw error;
     }
-    const workspacePath = await realpath(reply.workspacePath);
-    const info = await lstat(workspacePath);
-    if (!info.isDirectory() || info.isSymbolicLink() || path.dirname(workspacePath) !== root) {
-      throw new Error("Quota helper returned a workspace outside the dedicated quota root.");
-    }
-    if ([...this.active.values()].some((entry) => entry.workspacePath === workspacePath)) {
-      throw new Error("Quota helper returned a workspace already assigned to another run.");
-    }
-    this.active.set(workspacePath, { runId, workspacePath, quotaBytes: this.maxWorkspaceBytes });
-    return workspacePath;
   }
 
   async disposeWorkspace(workspacePath: string): Promise<void> {
