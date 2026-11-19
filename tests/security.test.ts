@@ -137,7 +137,12 @@ it("shared tool-effect classification marks privileged actions consistently", ()
   assert.deepEqual(classifyToolEffects("workspace.write_file"), ["write"]);
   assert.deepEqual(classifyToolEffects("browser.open"), ["read"]);
     assert.deepEqual(classifyToolEffects("browser.goto"), ["network", "read"]);
-    assert.deepEqual(classifyToolEffects("browser.click"), ["browser", "network"]);
+    assert.deepEqual(classifyToolEffects("browser.click"), ["browser"]);
+  assert.deepEqual(classifyToolEffects("browser.type"), ["browser"]);
+  assert.deepEqual(classifyToolEffects("browser.action"), ["browser"]);
+  assert.deepEqual(classifyToolEffects("browser.login"), ["browser", "destructive"]);
+  assert.deepEqual(classifyToolEffects("browser.profile.revoke"), ["browser", "destructive"]);
+  assert.deepEqual(classifyToolEffects("browser.profile.list"), ["read"]);
   assert.deepEqual(classifyToolEffects("desktop.input.click"), ["destructive"]);
   assert.deepEqual(classifyToolEffects("workspace.read_file"), ["read"]);
 });
