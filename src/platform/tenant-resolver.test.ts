@@ -64,3 +64,24 @@ test("resolver rejects an issued context after its workspace is replaced by a sy
     await rm(outside, { recursive: true, force: true });
   }
 });
+
+
+test("resolver rejects an issued context when a parent directory is redirected", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-tenant-resolver-parent-"));
+  const outside = await mkdtemp(path.join(os.tmpdir(), "sofia-tenant-resolver-parent-outside-"));
+  try {
+    const resolver = createTenantResourceResolver(root);
+    const context = await resolver.resolve("principal-a");
+    const tenantDirectory = path.dirname(context.workspaceRoot);
+    const redirectedWorkspace = path.join(outside, "workspace");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(redirectedWorkspace);
+    await rm(tenantDirectory, { recursive: true, force: true });
+    await symlink(outside, tenantDirectory, "dir");
+    // The old absolute workspace path now traverses a symlinked parent.
+    assert.throws(() => resolver.assertContext(context), /workspace is missing or no longer a real directory/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
