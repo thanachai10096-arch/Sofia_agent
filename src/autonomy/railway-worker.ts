@@ -57,9 +57,13 @@ export async function runRailwayAutonomyWorker<TPayload = unknown>(
     throw new Error("Trusted autonomy worker dependencies are incomplete.");
   }
 
-  const workerId = config.workerId?.trim() ||
-    process.env.SOFIA_AUTONOMY_WORKER_ID?.trim() || `railway-${randomUUID()}`;
-  if (workerId.length > 200) throw new Error("Worker identity is too long.");
+  // A configured worker ID is a human-readable label, not a lease identity.
+  // Append a fresh process-session nonce so a restarted replica can never
+  // accidentally inherit the previous process's still-live lease ownership.
+  const workerLabel = config.workerId?.trim() ||
+    process.env.SOFIA_AUTONOMY_WORKER_ID?.trim() || "railway";
+  if (!workerLabel || workerLabel.length > 150) throw new Error("Worker label must be between 1 and 150 characters.");
+  const workerId = `${workerLabel}:${randomUUID()}`;
   const maxJobs = config.maxJobs ?? boundedInteger("SOFIA_AUTONOMY_MAX_JOBS_PER_SESSION", process.env.SOFIA_AUTONOMY_MAX_JOBS_PER_SESSION, 100, 1, 10_000);
   const idleDelayMs = config.idleDelayMs ?? boundedInteger("SOFIA_AUTONOMY_IDLE_DELAY_MS", process.env.SOFIA_AUTONOMY_IDLE_DELAY_MS, 2_000, 100, 60_000);
   const leaseMs = config.leaseMs ?? 30_000;
