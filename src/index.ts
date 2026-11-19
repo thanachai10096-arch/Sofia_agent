@@ -4,6 +4,8 @@ export { createManagedSkillLearningHandler } from "./brain/managed-skill-learnin
 export type { SkillLifecycleWorkflowOptions, SkillLifecycleWorkflowResult } from "./brain/skill-lifecycle-workflow.js";
 export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
 
+export { ApprovalBroker } from "./agent/approval.js";
+export type { ApprovalRequest, ApprovalHandler, PendingApproval, ApprovalDecision } from "./agent/approval.js";
 export { SofiaAgent } from "./agent/core.js";
 export { classifyTask } from "./agent/classifier.js";
 export { ModelRouter } from "./models/router.js";
