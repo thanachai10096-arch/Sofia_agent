@@ -42,11 +42,15 @@ export function riskFor(effects: readonly ToolEffect[], input: Record<string, un
   // Treat browser controls that can finalize a financial or irreversible workflow
   // as critical, rather than ordinary high-risk page interaction.
   if (effects.includes("browser")) {
-    const intent = [input.selector, input.action, input.value, input.text]
+    const intent = [input.selector, input.action, input.value, input.text, input.label, input.name, input.target]
       .filter((value) => typeof value === "string")
       .join(" ")
       .toLowerCase();
-    if (/\b(?:buy|purchase|pay|payment|checkout|place[-_ ]order|submit[-_ ]order|confirm[-_ ](?:order|payment|purchase)|transfer|send[-_ ]money|withdraw|subscribe|delete[-_ ]account)\b/.test(intent)) {
+    // Generic form submission is treated as a transaction boundary: the gateway
+    // cannot reliably infer whether a page's submit button places an order,
+    // transfers funds, or commits another irreversible operation.
+    if (/\b(?:submit|confirm|buy|purchase|pay|payment|checkout|place[-_ ]order|confirm[-_ ](?:order|payment|purchase)|transfer|send[-_ ]money|withdraw|subscribe|delete[-_ ]account|cancel[-_ ]subscription)\b/.test(intent) ||
+      /\[(?:type|role)=["']?submit\b/.test(intent)) {
       return "critical";
     }
   }
