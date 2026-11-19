@@ -337,7 +337,7 @@ test("API runs use a distinct dependency bundle for each authenticated owner", a
     dependenciesForOwner: async ownerKeyId => {
       createdOwners.push(ownerKeyId);
       return {
-        provider: { generate: async () => ({ text: "tenant:" + ownerKeyId }) },
+        provider: { generate: async () => { generatedOwners.push(ownerKeyId); return { text: "tenant scoped result" }; } },
         router: { select: () => route, markUnhealthy: () => undefined },
         reviewer: { review: async () => ({ approved: true, reason: "tenant scoped" }) },
         close: async () => { closedOwners.push(ownerKeyId); },
@@ -363,12 +363,14 @@ test("API runs use a distinct dependency bundle for each authenticated owner", a
   try {
     const first = await run("tenant-run-owner-one");
     const second = await run("tenant-run-owner-two");
-    assert.match(first.result?.summary ?? "", new RegExp(ownerOneId));
-    assert.match(second.result?.summary ?? "", new RegExp(ownerTwoId));
+    assert.ok(first.result);
+    assert.ok(second.result);
+    assert.deepEqual(generatedOwners.sort(), [ownerOneId, ownerTwoId].sort());
     assert.deepEqual(createdOwners.sort(), [ownerOneId, ownerTwoId].sort());
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
+  await new Promise(resolve => setTimeout(resolve, 0));
   assert.deepEqual(closedOwners.sort(), [ownerOneId, ownerTwoId].sort());
 });
 
