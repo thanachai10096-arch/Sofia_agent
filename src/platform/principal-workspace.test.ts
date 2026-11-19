@@ -153,3 +153,42 @@ test("named mutable-state directory refuses an existing symlink", async (t) => {
     await rm(temp, { recursive: true, force: true });
   }
 });
+
+test("named mutable-state directories reject permissive permissions", async (t) => {
+  if (process.platform === "win32") { t.skip("POSIX mode-bit permissions are unavailable on Windows."); return; }
+  const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-store-mode-"));
+  try {
+    const root = path.join(temp, "workspaces");
+    const resolver = new PrincipalWorkspaceResolver(root);
+    const workspace = await resolver.resolve("tenant:alice");
+    const stateRoot = path.join(workspace, ".sofia");
+    await mkdir(stateRoot, { mode: 0o700 });
+    const store = path.join(stateRoot, "memory");
+    await mkdir(store, { mode: 0o700 });
+    await chmod(store, 0o755);
+    await assert.rejects(resolver.resolveStoreDirectory("tenant:alice", "memory"), /group or other users/i);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test("named mutable-state directories reject a symlink state root", async (t) => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-state-link-"));
+  try {
+    const root = path.join(temp, "workspaces");
+    const outside = path.join(temp, "outside");
+    await mkdir(outside);
+    const resolver = new PrincipalWorkspaceResolver(root);
+    const workspace = await resolver.resolve("tenant:alice");
+    await symlink(outside, path.join(workspace, ".sofia"), "dir");
+    await assert.rejects(resolver.resolveStoreDirectory("tenant:alice", "memory"), /real directory|symbolic link/i);
+  } catch (error) {
+    if (["EPERM", "EACCES", "ENOTSUP"].includes((error as NodeJS.ErrnoException).code ?? "")) {
+      t.skip("Symlink creation is unavailable in this environment.");
+      return;
+    }
+    throw error;
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
