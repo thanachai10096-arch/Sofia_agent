@@ -88,7 +88,10 @@ const userWorkspaceRoot = path.resolve(
   process.env.SOFIA_USER_WORKSPACES_DIR ?? path.join(workspace, ".sofia", "user-workspaces"),
 );
 mkdirSync(userWorkspaceRoot, { recursive: true, mode: 0o700 });
-chmodSync(userWorkspaceRoot, 0o700);
+const restrictWorkspaceDirectory = (directory: string) => {
+  if (process.platform !== "win32") chmodSync(directory, 0o700);
+};
+restrictWorkspaceDirectory(userWorkspaceRoot);
 const maxCachedWorkspaces = (() => {
   const value = Number(process.env.SOFIA_MAX_CACHED_WORKSPACES ?? 256);
   if (!Number.isSafeInteger(value) || value < 1 || value > 5000) throw new Error("SOFIA_MAX_CACHED_WORKSPACES must be an integer from 1 to 5000.");
@@ -107,9 +110,9 @@ const resolveWorkspaceDependencies = async (principalId: string, workspaceId: st
     const projectRoot = path.join(ownerRoot, createHash("sha256").update(workspaceId).digest("hex"));
     mkdirSync(projectRoot, { recursive: true, mode: 0o700 });
     mkdirSync(path.join(projectRoot, ".sofia"), { recursive: true, mode: 0o700 });
-    chmodSync(ownerRoot, 0o700);
-    chmodSync(projectRoot, 0o700);
-    chmodSync(path.join(projectRoot, ".sofia"), 0o700);
+    restrictWorkspaceDirectory(ownerRoot);
+    restrictWorkspaceDirectory(projectRoot);
+    restrictWorkspaceDirectory(path.join(projectRoot, ".sofia"));
     pending = createSofiaAgentDependenciesWithSessions(
       projectRoot,
       approvalHandler,
