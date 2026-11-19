@@ -147,3 +147,64 @@ test("API rejects unknown model routes before starting a run", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API job endpoints hide another principal's jobs and block cross-principal actions", async () => {
+  const job = {
+    id: "tenant-job-1",
+    status: "failed",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    task: "private job",
+    ownerKeyId: createHash("sha256").update("key-one").digest("hex").slice(0, 32),
+    snapshot: { checkpointId: "private-checkpoint" },
+  };
+  const calls = { resume: 0, cancel: 0 };
+  const runtime = {
+    async get(id: string) { return id === job.id ? job : undefined; },
+    async list() { return [job]; },
+    async resume() { calls.resume += 1; return { ...job, status: "running" }; },
+    async cancel() { calls.cancel += 1; return true; },
+    async submit() { throw new Error("not used"); },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    jobRuntime: runtime as never,
+  }, {
+    apiKeys: {
+      "key-one": ["agent:run", "agent:read"],
+      "key-two": ["agent:run", "agent:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const request = (key: string, path: string, method = "GET") =>
+    fetch(baseUrl + path, { method, headers: { authorization: `Bearer ${key}` } });
+
+  try {
+    const ownerRead = await request("key-one", `/v1/jobs/${job.id}`);
+    assert.equal(ownerRead.status, 200);
+
+    const foreignRead = await request("key-two", `/v1/jobs/${job.id}`);
+    assert.equal(foreignRead.status, 404);
+
+    const foreignResume = await request("key-two", `/v1/jobs/${job.id}/resume`, "POST");
+    assert.equal(foreignResume.status, 404);
+
+    const foreignCancel = await request("key-two", `/v1/jobs/${job.id}/cancel`, "POST");
+    assert.equal(foreignCancel.status, 404);
+
+    const foreignList = await request("key-two", "/v1/jobs");
+    assert.equal(foreignList.status, 200);
+    assert.deepEqual(await foreignList.json(), { jobs: [] });
+
+    assert.deepEqual(calls, { resume: 0, cancel: 0 }, "unauthorized requests must not invoke job mutations");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
