@@ -7,6 +7,9 @@ export function validateAgentRunInput(value: unknown): { valid: true; input: Age
   const input = value as Record<string, unknown>;
   if (typeof input.task !== "string" || !input.task.trim()) return { valid: false, error: "task_required" };
   if (input.task.length > 100_000) return { valid: false, error: "task_too_long" };
+  // Workspace selection is intentionally server-owned until the API has a
+  // per-principal workspace resolver and filesystem isolation boundary.
+  if (input.workspace !== undefined) return { valid: false, error: "workspace_selection_unsupported" };
   if (input.context !== undefined && typeof input.context !== "string" && (input.context === null || typeof input.context !== "object" || Array.isArray(input.context))) {
     return { valid: false, error: "invalid_context" };
   }
