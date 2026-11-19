@@ -74,6 +74,8 @@ test("renew, assert, and release all compare tenant, instance, opaque token, and
     RUN_OWNERSHIP_ASSERT_SCRIPT,
     RUN_OWNERSHIP_RELEASE_SCRIPT,
   ]);
+  assert.equal(commands[0]?.[2], 2, "renew must atomically include the tenant-binding key");
+  assert.equal(commands[0]?.at(-1), 30 * 24 * 60 * 60_000, "renew must extend tenant binding retention");
   for (const script of [RUN_OWNERSHIP_RENEW_SCRIPT, RUN_OWNERSHIP_ASSERT_SCRIPT, RUN_OWNERSHIP_RELEASE_SCRIPT]) {
     assert.match(script, /principalId/u);
     assert.match(script, /instanceId/u);
