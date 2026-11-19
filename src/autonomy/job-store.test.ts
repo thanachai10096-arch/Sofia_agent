@@ -85,3 +85,22 @@ test("checkpoint survives worker interruption and remains principal-scoped", asy
     assert.equal(resumed?.checkpoint?.nextCycle, 2);
   });
 });
+
+test("lease-owned cancellation cannot cancel a job reclaimed by another worker", async () => {
+  await fixture(async (store) => {
+    const job = await store.enqueue({ principalId: "user-a", kind: "research", payload: {}, maxAttempts: 3 });
+    await store.claimNext("worker-old", 1_000);
+    await store.recoverExpired(new Date(Date.now() + 2_000));
+    const reclaimed = await store.claimNext("worker-new", 10_000);
+    assert.equal(reclaimed?.lease?.workerId, "worker-new");
+
+    const staleCancel = await store.cancelOwned("user-a", job.id, "worker-old");
+    assert.equal(staleCancel.status, "running");
+    assert.equal(staleCancel.lease?.workerId, "worker-new");
+
+    const ownerCancel = await store.cancelOwned("user-a", job.id, "worker-new");
+    assert.equal(ownerCancel.status, "cancelled");
+    assert.equal(ownerCancel.lease, undefined);
+  });
+});
+
