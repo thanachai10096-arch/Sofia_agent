@@ -31,6 +31,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** Parse the deliberately small host-helper response schema; unknown fields fail closed. */
+export function parseLinuxQuotaHelperReply(stdout: string): HelperReply {
+  const parsed: unknown = JSON.parse(stdout);
+  const allowedReplyKeys = new Set(["ok", "runId", "workspacePath", "quotaBytes", "quotaInodes"]);
+  if (!isRecord(parsed) || parsed.ok !== true ||
+      Object.keys(parsed).some((key) => !allowedReplyKeys.has(key)) ||
+      typeof parsed.runId !== "string" ||
+      (parsed.workspacePath !== undefined && typeof parsed.workspacePath !== "string") ||
+      (parsed.quotaBytes !== undefined && (!Number.isSafeInteger(parsed.quotaBytes) || parsed.quotaBytes < 1)) ||
+      (parsed.quotaInodes !== undefined && (!Number.isSafeInteger(parsed.quotaInodes) || parsed.quotaInodes < 1))) {
+    throw new Error("Quota helper returned an unexpected or malformed response.");
+  }
+  return parsed as HelperReply;
+}
+
 /**
  * Calls a narrowly-scoped, host-installed Linux helper. The helper must allocate
  * a unique XFS/ext4 project-quota ID, set hard block and inode limits, verify
@@ -133,17 +148,7 @@ export class LinuxQuotaWorkspaceProvisioner {
         if (settled) return;
         if (code !== 0) return finish(new Error("Quota helper failed with exit code " + String(code) + "."));
         try {
-          const parsed: unknown = JSON.parse(stdout);
-          if (!isRecord(parsed) || parsed.ok !== true) throw new Error("Quota helper did not confirm success.");
-          const allowedReplyKeys = new Set(["ok", "runId", "workspacePath", "quotaBytes", "quotaInodes"]);
-          if (Object.keys(parsed).some((key) => !allowedReplyKeys.has(key)) ||
-              typeof parsed.runId !== "string" ||
-              (parsed.workspacePath !== undefined && typeof parsed.workspacePath !== "string") ||
-              (parsed.quotaBytes !== undefined && (!Number.isSafeInteger(parsed.quotaBytes) || parsed.quotaBytes < 1)) ||
-              (parsed.quotaInodes !== undefined && (!Number.isSafeInteger(parsed.quotaInodes) || parsed.quotaInodes < 1))) {
-            throw new Error("Quota helper returned an unexpected or malformed response.");
-          }
-          finish(undefined, parsed as HelperReply);
+          finish(undefined, parseLinuxQuotaHelperReply(stdout));
         } catch (error) {
           finish(error instanceof Error ? error : new Error("Invalid quota helper response."));
         }
