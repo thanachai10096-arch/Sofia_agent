@@ -6,8 +6,8 @@ import { digestSkillCandidate, evaluateSkillCandidate } from "./skill-evaluator.
 const candidate: LearnedSkillCandidate = {
   name: "repair-build-failure",
   trigger: "A verified build failure occurs.",
-  category: "build",
-  strategy: "repair",
+  category: "runtime_error",
+  strategy: "fix-implementation",
   procedure: ["inspect trusted failure evidence", "apply isolated repair", "run verification"],
   verification: ["typecheck", "test", "build"],
   evidenceIds: ["run-42", "test-42"],
