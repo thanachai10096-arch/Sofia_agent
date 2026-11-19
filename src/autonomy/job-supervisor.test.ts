@@ -178,3 +178,68 @@ test("worker session exits cleanly when host requests shutdown", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("supervisor fails closed when the host kill-switch authority is unavailable", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-killswitch-error-"));
+  try {
+    const store = new FileAutonomyJobStore("kill-switch-error-test", root);
+    const job = await store.enqueue({ principalId: "tenant-1", kind: "research", payload: {} });
+    let executed = false;
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: {
+        runResearch: async () => {
+          executed = true;
+          return { completed: true, stoppedBy: "cycle-budget", cycles: [] };
+        },
+      },
+      resolveAdapters: async () => {
+        throw new Error("Adapters must not be resolved when the kill switch is unavailable.");
+      },
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+      isKilled: async () => { throw new Error("kill-switch authority unavailable"); },
+      leaseMs: 3_000,
+    });
+
+    const result = await supervisor.runNext("worker-1", new AbortController().signal);
+    assert.equal(result?.id, job.id);
+    assert.equal(result?.status, "cancelled");
+    assert.equal(executed, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("supervisor fails closed when kill-switch authority returns an invalid value", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-autonomy-killswitch-invalid-"));
+  try {
+    const store = new FileAutonomyJobStore("kill-switch-invalid-test", root);
+    const job = await store.enqueue({ principalId: "tenant-1", kind: "research", payload: {} });
+    let executed = false;
+    const supervisor = new AutonomyJobSupervisor({
+      store,
+      executor: {
+        runResearch: async () => {
+          executed = true;
+          return { completed: true, stoppedBy: "cycle-budget", cycles: [] };
+        },
+      },
+      resolveAdapters: async () => {
+        throw new Error("Adapters must not be resolved when kill-switch result is invalid.");
+      },
+      sandboxAvailable: async () => false,
+      budgetContext: () => ({}),
+      isKilled: async () => undefined as unknown as boolean,
+      leaseMs: 3_000,
+    });
+
+    const result = await supervisor.runNext("worker-1", new AbortController().signal);
+    assert.equal(result?.id, job.id);
+    assert.equal(result?.status, "cancelled");
+    assert.equal(executed, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
