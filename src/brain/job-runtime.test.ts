@@ -1107,12 +1107,12 @@ test("DurableJobRuntime persists desktop grants and intersects them with current
   assert.deepEqual(current?.desktopCapabilities, ["workspace:read", "workspace:write"]);
 
   const resumed = await runtime.resume(submitted.id, undefined, {
-    toolScopes: ["agent:run", "desktop:workspace:read"],
-    desktopCapabilities: ["workspace:read"],
+    toolScopes: ["agent:run", "desktop:workspace:read", "desktop:process:execute"],
+    desktopCapabilities: ["workspace:read", "process:execute"],
   });
   assert.equal(resumed.status, "completed");
   assert.deepEqual(factoryOptions[0]?.desktopCapabilities, ["workspace:read", "workspace:write"]);
-  assert.deepEqual(factoryOptions[1]?.desktopCapabilities, ["workspace:read"]);
+  assert.deepEqual(factoryOptions[1]?.desktopCapabilities, ["workspace:read"], "newly granted scopes must not expand an existing job");
   assert.deepEqual(factoryOptions[1]?.toolScopes, ["agent:run", "desktop:workspace:read"]);
   assert.equal(runCount, 2);
 });
