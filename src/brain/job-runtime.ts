@@ -429,6 +429,8 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly executions = new Set<Promise<void>>();
   private closed = false;
   private closePromise?: Promise<void>;
+  private pendingAdmissions = 0;
+  private admissionsDrained?: () => void;
   private readonly state: FileJobStateStore;
 
   constructor(
@@ -445,7 +447,8 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
-    if (this.closed) throw new Error("Job runtime is closed");
+    this.beginAdmission();
+    try {
     const id = randomUUID();
     const now = new Date().toISOString();
     const record: JobRecord = {
@@ -466,6 +469,9 @@ export class DurableJobRuntime implements JobRuntime {
     }
     void this.trackExecution(record, input);
     return publicJobRecord(record);
+    } finally {
+      this.endAdmission();
+    }
   }
 
   private async recoverInterrupted(record: JobRecord): Promise<JobRecord> {
@@ -531,7 +537,8 @@ export class DurableJobRuntime implements JobRuntime {
   }
 
   async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
-    if (this.closed) throw new Error("Job runtime is closed");
+    this.beginAdmission();
+    try {
     // Reserve the resume slot before the first await. Otherwise two callers can both
     // pass the guard while get() is pending and race to resume the same checkpoint.
     if (this.resuming.has(id)) throw new Error("Job is already being resumed");
@@ -556,6 +563,7 @@ export class DurableJobRuntime implements JobRuntime {
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
+      this.endAdmission();
     }
   }
 
@@ -583,6 +591,19 @@ export class DurableJobRuntime implements JobRuntime {
     return true;
   }
 
+  private beginAdmission(): void {
+    if (this.closed) throw new Error("Job runtime is closed");
+    this.pendingAdmissions += 1;
+  }
+
+  private endAdmission(): void {
+    this.pendingAdmissions -= 1;
+    if (this.pendingAdmissions === 0) {
+      this.admissionsDrained?.();
+      this.admissionsDrained = undefined;
+    }
+  }
+
   private trackExecution(
     record: JobRecord,
     input: Omit<BrainRunInput, "signal" | "resume">,
@@ -599,6 +620,9 @@ export class DurableJobRuntime implements JobRuntime {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
     this.closePromise = (async () => {
+      if (this.pendingAdmissions > 0) {
+        await new Promise<void>((resolve) => { this.admissionsDrained = resolve; });
+      }
       for (const controller of this.controllers.values()) {
         controller.abort(new Error("Job runtime is shutting down"));
       }
