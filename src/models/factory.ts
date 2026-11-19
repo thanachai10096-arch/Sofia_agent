@@ -31,6 +31,7 @@ import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-
 import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
 import { compareSkillRegressionBenchmark } from "../brain/skill-regression-benchmark.js";
+import { FileSkillBenchmarkHistory } from "../brain/skill-benchmark-history.js";
 import { AuditSkillEvidenceVerifier } from "../brain/skill-evidence.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
@@ -53,6 +54,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
+  const skillBenchmarkHistory = new FileSkillBenchmarkHistory(path.join(workspace, ".sofia", "skill-benchmark-history.json"));
   let skillLifecycle!: VersionedSkillLifecycle;
   skillLifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate, provenance) => {
     const checks: Array<{ name: string; passed: boolean; detail?: string }> = [
@@ -93,6 +95,30 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         passed: true,
         detail: "First managed version: its verified checks become the baseline for future upgrades.",
       });
+    }
+    checks.push({
+      name: "skill-benchmark-history",
+      passed: true,
+      detail: "Persisting this evaluation to the durable benchmark history.",
+    });
+    try {
+      skillBenchmarkHistory.append({
+        skillId: candidate.skill.id,
+        skillVersion: candidate.version,
+        evaluatedAt: new Date().toISOString(),
+        passed: checks.every((check) => check.passed),
+        checks,
+        ...(previous ? { baselineVersion: previous.package.version } : {}),
+        ...(provenance.runId ? { runId: provenance.runId } : {}),
+      });
+    } catch (error) {
+      const historyCheck = checks.find((check) => check.name === "skill-benchmark-history");
+      if (historyCheck) {
+        historyCheck.passed = false;
+        historyCheck.detail = error instanceof Error
+          ? "Durable benchmark history write failed: " + error.message
+          : "Durable benchmark history write failed.";
+      }
     }
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
