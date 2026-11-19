@@ -136,34 +136,50 @@ test("API resolves each project workspace inside the authenticated principal bou
 
 
 test("multi-project hosts reject shared durable job and cron routes", async () => {
+  let workspaceResolverCalls = 0;
   const server = createSofiaApi({
     provider: { generate: async () => ({ text: "unused" }) },
     router: { select: () => route, markUnhealthy: () => undefined },
     reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
   }, {
     apiKeys: { "workspace-key": ["agent:run", "agent:read", "cron:read", "cron:manage"] },
-    resolveWorkspaceDependencies: async () => ({
-      provider: { generate: async () => ({ text: "unused" }) },
-      router: { select: () => route, markUnhealthy: () => undefined },
-      reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
-    }),
+    resolveWorkspaceDependencies: async () => {
+      workspaceResolverCalls += 1;
+      return {
+        provider: { generate: async () => ({ text: "unused" }) },
+        router: { select: () => route, markUnhealthy: () => undefined },
+        reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+      };
+    },
   });
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   const baseUrl = "http://127.0.0.1:" + address.port;
+  const auth = { authorization: "Bearer workspace-key" };
   try {
-    const jobsResponse = await fetch(baseUrl + "/v1/jobs", {
-      headers: { authorization: "Bearer workspace-key" },
-    });
+    const jobsResponse = await fetch(baseUrl + "/v1/jobs", { headers: auth });
     assert.equal(jobsResponse.status, 400);
     assert.deepEqual(await jobsResponse.json(), { error: "workspace_required" });
-    const cronResponse = await fetch(baseUrl + "/v1/cron/schedules", {
-      headers: { authorization: "Bearer workspace-key" },
+
+    // A workspace selector must not accidentally opt into the host-global cron store.
+    const cronWithoutWorkspace = await fetch(baseUrl + "/v1/cron/schedules", { headers: auth });
+    assert.equal(cronWithoutWorkspace.status, 503);
+    assert.deepEqual(await cronWithoutWorkspace.json(), { error: "project_scoped_cron_unavailable" });
+
+    const cronWithWorkspace = await fetch(baseUrl + "/v1/cron/schedules?workspace=project-a", { headers: auth });
+    assert.equal(cronWithWorkspace.status, 503);
+    assert.deepEqual(await cronWithWorkspace.json(), { error: "project_scoped_cron_unavailable" });
+
+    const createCronWithWorkspace = await fetch(baseUrl + "/v1/cron/schedules?workspace=project-a", {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ name: "unsafe", task: "must not dispatch", cron: "* * * * *", timeZone: "Asia/Bangkok" }),
     });
-    assert.equal(cronResponse.status, 503);
-    assert.deepEqual(await cronResponse.json(), { error: "project_scoped_cron_unavailable" });
+    assert.equal(createCronWithWorkspace.status, 503);
+    assert.deepEqual(await createCronWithWorkspace.json(), { error: "project_scoped_cron_unavailable" });
+    assert.equal(workspaceResolverCalls, 0, "cron requests must fail closed before resolving or creating any project runtime");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
