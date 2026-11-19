@@ -3,6 +3,8 @@ import { redactSecrets } from "./guard.js";
 
 export type SecurityAuditEvent = {
   id: string;
+  /** Links a terminal execution event to its write-ahead execution_started receipt. */
+  relatedEventId?: string;
   at: string;
   runId: string;
   principalId?: string | undefined;
