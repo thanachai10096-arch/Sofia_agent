@@ -32,16 +32,19 @@ export const API_SCOPE_CATALOG: readonly ApiScopeDescriptor[] = [
 /** Return only hashed key identities; never return bearer tokens or mutable source objects. */
 export function summarizeApiKeyPermissions(apiKeys: Record<string, string[]>, hostPolicy: ExecutionPolicy) {
   return Object.entries(apiKeys)
-    .map(([token, scopes]) => ({
-      keyId: createHash("sha256").update(token).digest("hex").slice(0, 32),
-      scopes: [...new Set(scopes)].sort(),
-      effectiveTools: {
-        fileWrite: policyForToolScopes(hostPolicy, scopes).allowFileWrite,
-        shell: policyForToolScopes(hostPolicy, scopes).allowShell,
-        network: policyForToolScopes(hostPolicy, scopes).allowNetwork,
-        browser: policyForToolScopes(hostPolicy, scopes).allowBrowser,
-        destructive: policyForToolScopes(hostPolicy, scopes).allowDestructive,
-      },
-    }))
+    .map(([token, scopes]) => {
+      const effective = policyForToolScopes(hostPolicy, scopes);
+      return {
+        keyId: createHash("sha256").update(token).digest("hex").slice(0, 32),
+        scopes: [...new Set(scopes)].sort(),
+        effectiveTools: {
+          fileWrite: effective.allowFileWrite,
+          shell: effective.allowShell,
+          network: effective.allowNetwork,
+          browser: effective.allowBrowser,
+          destructive: effective.allowDestructive,
+        },
+      };
+    })
     .sort((a, b) => a.keyId.localeCompare(b.keyId));
 }
