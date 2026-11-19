@@ -237,6 +237,61 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
 }
 
+/**
+ * Build isolated dependency graphs for authenticated API principals.
+ * Pass only an ID derived from successful API-key authentication, never a
+ * request-body, query-string, or URL principal value.
+ *
+ * No automatic eviction is performed: disposing a graph while durable jobs
+ * or browser sessions are active would be unsafe. The API composition root
+ * must close this registry during graceful shutdown.
+ */
+export function createSofiaPrincipalDependencyRegistry(
+  configuredRoot: string,
+  approval?: AgentDependencies["approval"],
+) {
+  const resolver = new PrincipalWorkspaceResolver(path.resolve(configuredRoot));
+  const entries = new Map<string, Promise<AgentDependencies & { closeSessionStore: () => void }>>();
+  let closed = false;
+
+  return {
+    async forPrincipal(authenticatedPrincipalId: string) {
+      if (closed) throw new Error("Principal dependency registry is closed.");
+      if (typeof authenticatedPrincipalId !== "string" || !authenticatedPrincipalId.trim()) {
+        throw new Error("An authenticated principal ID is required.");
+      }
+      let pending = entries.get(authenticatedPrincipalId);
+      if (!pending) {
+        pending = (async () => {
+          const workspace = await resolver.resolve(authenticatedPrincipalId);
+          return createSofiaAgentDependenciesWithSessions(workspace, approval);
+        })();
+        entries.set(authenticatedPrincipalId, pending);
+        void pending.catch(() => {
+          if (entries.get(authenticatedPrincipalId) === pending) entries.delete(authenticatedPrincipalId);
+        });
+      }
+      return pending;
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      const pending = [...entries.values()];
+      entries.clear();
+      const settled = await Promise.allSettled(pending);
+      await Promise.allSettled(settled.flatMap((item) => item.status === "fulfilled"
+        ? [
+            Promise.resolve().then(() => item.value.closeSessionStore()),
+            item.value.closeBrowserProfiles?.() ?? Promise.resolve(),
+          ]
+        : []));
+    },
+    get size() {
+      return entries.size;
+    },
+  };
+}
+
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
 export async function createSofiaAgentDependenciesWithSessions(
   workspace = process.cwd(),
