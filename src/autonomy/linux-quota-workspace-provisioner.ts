@@ -6,7 +6,7 @@ import path from "node:path";
 export interface LinuxQuotaWorkspaceProvisionerOptions {
   /** Absolute path to a root-owned, non-writable host helper implementing the protocol below. */
   helperPath: string;
-  /** Dedicated quota-enabled filesystem mount; each workspace must be a direct child. */
+  /** Dedicated XFS filesystem mount with project quota accounting and enforcement enabled. */
   workspaceRoot: string;
   /** Hard per-run byte quota enforced by the host helper (not a post-run check). */
   maxWorkspaceBytes: number;
