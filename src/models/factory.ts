@@ -71,7 +71,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const principalNamespace = path.basename(principalWorkspace);
     mkdirSync(principalWorkspace, { recursive: true, mode: 0o700 });
     const principalRuntime = createNodeWorkspaceRuntime(principalWorkspace);
-    const runPolicy = policyForToolScopes(dependencies.policy, toolScopes);
+    // Local runs inherit the operator policy. API runs pass an explicit scope list,\n    // including [], so an unprivileged key cannot inherit host-enabled capabilities.\n    const runPolicy = toolScopes !== undefined\n      ? policyForToolScopes(dependencies.policy, toolScopes)\n      : dependencies.policy;
     const projectMemory = new FileProjectMemoryStore(
       "principal:" + principalNamespace + ":workspace:" + principalWorkspace,
     );
