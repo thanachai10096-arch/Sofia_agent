@@ -4,7 +4,7 @@ import { RegistryToolGateway } from "./registry-tool-gateway.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { createBuiltinTools } from "../tools/builtin.js";
-import { defaultPolicy } from "../security/policy.js";
+import { defaultPolicy, type ExecutionPolicy } from "../security/policy.js";
 import { SecurityController } from "../security/controller.js";
 import type { SecurityAuditEvent, SecurityAuditSink } from "../security/audit.js";
 import { MapToolRegistry } from "../tools/types.js";
@@ -577,7 +577,7 @@ test("per-tool maxRisk ceiling is enforced before execution", async () => {
 });
 
 test("stricter per-tool risk ceiling applied during approval wait blocks execution", async () => {
-  const policy = { ...defaultPolicy, permissions: { "workspace.write_file": { maxRisk: "high" as const } } };
+  const policy: ExecutionPolicy = { ...defaultPolicy, permissions: { "workspace.write_file": { maxRisk: "high" } } };
   let releaseApproval!: (approved: boolean) => void;
   let announceApproval!: () => void;
   const approvalReached = new Promise<void>((resolve) => { announceApproval = resolve; });
