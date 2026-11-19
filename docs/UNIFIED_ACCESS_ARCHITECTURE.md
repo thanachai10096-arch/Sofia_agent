@@ -26,6 +26,26 @@ These capabilities must be checked against current tests and deployment configur
 6. The client tracks the returned run ID through polling or streaming and formats status for its channel.
 7. Tool permissions and approval policy are enforced by Sofia regardless of the origin channel.
 
+## Workspace isolation status
+
+The current standalone API entrypoint constructs one Agent dependency graph from the
+server-owned `SOFIA_WORKSPACE`. API keys scope run ownership, sessions, quotas, and
+user memory, but that does **not** establish per-user filesystem/workspace isolation.
+The request-level `workspace` field is therefore rejected with
+`workspace_selection_unsupported`; callers cannot select an arbitrary host path.
+
+Until a per-principal workspace resolver is implemented and wired through every
+workspace-backed subsystem (Brain runtime, desktop tools, browser profiles, checkpoints,
+project memory, skill state, jobs, and sandbox mounts), deployments must treat the
+configured workspace as a single-tenant boundary. Do not expose a shared API key to
+untrusted end users or claim multi-tenant workspace isolation.
+
+The required follow-up is a server-owned principal-to-workspace mapping with canonical
+path and symlink containment, isolated mutable state, and tests proving principal A
+cannot read, write, list, execute in, or infer principal B's workspace. The resolver
+must be applied before constructing each principal's runtime/dependency graph; merely
+sanitizing a caller-provided path is insufficient.
+ 
 ## Channel implementation boundaries
 
 | Channel | Adapter responsibility | Must not do |
