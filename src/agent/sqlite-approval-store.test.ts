@@ -92,3 +92,33 @@ test("SQLite approval store refuses expired decisions and supports schema reopen
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("SQLite approval store initializes safely when two workers open a new database together", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-init-race-"));
+  const file = path.join(root, "approvals.sqlite");
+  let first: SqliteApprovalStore | undefined;
+  let second: SqliteApprovalStore | undefined;
+  try {
+    [first, second] = await Promise.all([
+      SqliteApprovalStore.open(file),
+      SqliteApprovalStore.open(file),
+    ]);
+    assert.equal(first.createPending(record), true);
+    assert.equal(second.history("owner-a").length, 1);
+  } finally {
+    first?.close();
+    second?.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("SQLite approval store supports explicit in-memory databases", async () => {
+  const store = await SqliteApprovalStore.open(":memory:");
+  try {
+    assert.equal(store.createPending(record), true);
+    assert.equal(store.pending("owner-a").length, 1);
+  } finally {
+    store.close();
+  }
+});
