@@ -69,6 +69,19 @@ export function findIndeterminateExecutions(events: readonly SecurityAuditEvent[
   return [...startsById.values()].filter((event) => !resolved.has(event.id));
 }
 
+/**
+ * Reads the durable audit journal and returns unresolved execution receipts.
+ * This function deliberately reports indeterminate actions only; it never replays them.
+ */
+export async function reconcileIndeterminateExecutions(
+  sink: SecurityAuditSink,
+): Promise<SecurityAuditEvent[]> {
+  if (sink.durable !== true || typeof sink.list !== "function") {
+    throw new Error("Execution reconciliation requires a durable, enumerable audit sink.");
+  }
+  return findIndeterminateExecutions(await sink.list());
+}
+
 export class MemorySecurityAudit implements SecurityAuditSink {
   readonly durable = false;
   private readonly events: SecurityAuditEvent[] = [];
