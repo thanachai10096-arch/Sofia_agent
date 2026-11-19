@@ -24,6 +24,8 @@ export interface AgentRequest {
   useBrain?: boolean;
   signal?: AbortSignal;
   onEvent?: (event: AgentEvent) => void;
+  /** Persist versioned Brain checkpoints while this API run is executing. */
+  onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
 }
 export interface AgentEvent { type:"run.started"|"task.classified"|"model.selected"|"model.completed"|"tool.started"|"tool.completed"|"tool.failed"|"tool.output_suspicious"|"tool.approval_required"|"review.started"|"review.completed"|"retry"|"run.completed"|"run.failed"; message:string; step?:number; metadata?:Record<string,unknown>; }
 export interface AgentResult {
