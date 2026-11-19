@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   InMemorySkillFeedbackStore,
   SkillFeedbackLedger,
+  proposeSkillImprovement,
   type SkillFeedbackInput,
 } from "./skill-feedback.js";
 
@@ -65,4 +66,48 @@ test("concurrent duplicate events are recorded exactly once", async () => {
   const results = await Promise.all([ledger.record(base), ledger.record(base), ledger.record(base)]);
   assert.equal(results.filter((result) => result.recorded).length, 1);
   assert.equal((await ledger.summarize("project-a", "repair-build", "v1"))?.total, 1);
+});
+
+
+test("feedback proposes a new candidate for evaluation without promoting it", async () => {
+  const ledger = new SkillFeedbackLedger(new InMemorySkillFeedbackStore());
+  for (let i = 0; i < 5; i += 1) {
+    await ledger.record({ ...base, outcome: i < 2 ? "succeeded" : "failed", idempotencyKey: `proposal-${i}` });
+  }
+  const summary = await ledger.summarize("project-a", "repair-build", "v1");
+  assert.ok(summary);
+  const proposal = await proposeSkillImprovement(
+    {
+      name: "repair-build", trigger: "Build fails", category: "runtime_error",
+      strategy: "fix-implementation", procedure: ["inspect logs"],
+      verification: ["run tests"], evidenceIds: [],
+    },
+    summary!,
+    async ({ current, feedback }) => ({
+      candidate: {
+        ...current,
+        procedure: ["inspect logs", "reproduce failure", "apply minimal fix"],
+        verification: ["run tests", "run build"],
+        evidenceIds: feedback.evidenceIds,
+      },
+      rationale: "Failure evidence shows the existing procedure skipped reproduction.",
+    }),
+  );
+  assert.ok(proposal);
+  assert.notEqual(proposal.proposedCandidate.procedure.length, 1);
+  assert.equal(proposal.feedbackEvidenceIds.length, 5);
+});
+
+test("feedback does not request revisions for insufficient or mismatched evidence", async () => {
+  const ledger = new SkillFeedbackLedger(new InMemorySkillFeedbackStore());
+  await ledger.record(base);
+  const summary = await ledger.summarize("project-a", "repair-build", "v1");
+  let called = false;
+  const result = await proposeSkillImprovement(
+    { name: "repair-build", trigger: "Build fails", category: "runtime_error", strategy: "fix-implementation", procedure: ["inspect"], verification: ["test"], evidenceIds: [] },
+    summary!,
+    async () => { called = true; throw new Error("must not run"); },
+  );
+  assert.equal(result, null);
+  assert.equal(called, false);
 });
