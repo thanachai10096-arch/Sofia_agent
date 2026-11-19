@@ -120,6 +120,8 @@ export interface BrainRunInput {
 export interface BrainRunOptions {
   dependencies: Dependencies;
   limits?: Partial<BrainLimits>;
+  /** Trusted host-assigned identifier; used to correlate approvals and cancellation. */
+  runId?: string;
 }
 
 function abortable<T>(
@@ -245,7 +247,7 @@ function priorReferenceContext(context?: string): { trust: "untrusted_reference_
 }
 
 export class SofiaBrain {
-  readonly runId = randomUUID();
+  readonly runId: string;
 
   private state: BrainState = "idle";
   private started = false;
@@ -276,7 +278,9 @@ export class SofiaBrain {
   constructor(
     private readonly dependencies: Dependencies,
     limits: Partial<BrainLimits> = {},
+    runId = randomUUID(),
   ) {
+    this.runId = runId;
     this.limits = { ...DEFAULT_LIMITS, ...limits };
 
     for (const [key, value] of Object.entries(this.limits)) {
@@ -1383,7 +1387,7 @@ export class SofiaBrain {
 export function createSofiaBrain(
   options: BrainRunOptions,
 ): SofiaBrain {
-  return new SofiaBrain(options.dependencies, options.limits);
+  return new SofiaBrain(options.dependencies, options.limits, options.runId);
 }
 
 export type { Dependencies as SofiaBrainDependencies };
