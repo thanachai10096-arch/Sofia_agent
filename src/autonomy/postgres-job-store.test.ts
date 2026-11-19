@@ -114,6 +114,16 @@ test("PostgreSQL cancellation is tenant-scoped and never exposes another tenant'
   assert.deepEqual(pool.calls[1].values, ["tenant-a", "job-from-tenant-b"]);
 });
 
+test("PostgreSQL checkpoint rejects incomplete or non-contiguous cycle history before opening a transaction", async () => {
+  const pool = new RecordingPool();
+  const store = createStore(pool);
+  await assert.rejects(
+    () => store.saveCheckpoint("tenant-a", "job-id", "worker-a", { nextCycle: 2, cycles: [{ cycle: 2 }] }),
+    /contiguous, completed cycle history/,
+  );
+  assert.equal(pool.calls.length, 0);
+});
+
 test("PostgreSQL recovery only requeues expired running leases and bounds exhausted attempts", async () => {
   const pool = new RecordingPool();
   const store = createStore(pool);
