@@ -102,6 +102,22 @@ test("capability mappings cannot downgrade a write tool to read-only", async () 
   assert.equal(writeStub.count(), 0);
 });
 
+
+test("network-only read tools cannot be relabeled as external side effects", async () => {
+  const sideEffect = { ...capability, id: "commerce.send", effect: "external_side_effect" as const, risk: "high" as const };
+  const stub = gatewayStub(["network", "read"]);
+  const gateway = new CapabilityGuardToolGateway(
+    stub.inner,
+    new CapabilityRegistry([sideEffect]),
+    async () => ({ ...authority, allowedCapabilityIds: ["commerce.send"] }),
+    () => "commerce.send",
+  );
+  const result = await gateway.execute({ tool: "browser.search", input: {} }, context);
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /effect does not match/i);
+  assert.equal(stub.count(), 0);
+});
+
 test("unmapped production tools fail closed", async () => {
   const stub = gatewayStub();
   const gateway = new CapabilityGuardToolGateway(
