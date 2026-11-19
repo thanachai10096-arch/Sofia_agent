@@ -183,7 +183,18 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
           ? (await this.options.store.get(job.principalId, job.id))
           : await this.options.store.cancelOwned(job.principalId, job.id, workerId);
       }
-      return await this.options.store.complete(job.principalId, job.id, workerId, report);
+      try {
+        return await this.options.store.complete(job.principalId, job.id, workerId, report);
+      } catch (completionError) {
+        // A user cancellation or lease recovery can win immediately after the
+        // final safety poll. Never turn that terminal/rerouted state into a
+        // worker error or attempt a stale failure write.
+        const current = await this.options.store.get(job.principalId, job.id);
+        if (current && (current.status !== "running" || current.lease?.workerId !== workerId)) {
+          return current;
+        }
+        throw completionError;
+      }
     } catch {
       if (controller.signal.aborted || signal.aborted) {
         return abortKind === "lease-lost" || abortKind === "user-cancel"
