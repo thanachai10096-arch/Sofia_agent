@@ -132,8 +132,26 @@ export class UpstashRunOwnershipStore implements RunOwnershipStore {
     return this.command(["EVAL", script, keys.length, ...keys, ...args]);
   }
 
+  private validateLease(lease: RunOwnershipLease): void {
+    if (!lease || typeof lease !== "object") throw new Error("Run ownership lease is invalid.");
+    this.keys(lease.runId);
+    if (typeof lease.principalId !== "string" || !lease.principalId.trim() ||
+        lease.principalId !== lease.principalId.trim() || lease.principalId.length > 256) {
+      throw new Error("Run ownership principal ID is invalid.");
+    }
+    if (typeof lease.instanceId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/u.test(lease.instanceId)) {
+      throw new Error("Run ownership instance ID is invalid.");
+    }
+    if (typeof lease.token !== "string" || !/^[A-Za-z0-9_-]{16,256}$/u.test(lease.token)) {
+      throw new Error("Run ownership token is invalid.");
+    }
+    if (!Number.isSafeInteger(lease.generation) || lease.generation < 1) {
+      throw new Error("Run ownership fencing generation is invalid.");
+    }
+  }
+
   async claim(input: { runId: string; principalId: string; instanceId: string; token: string; leaseMs: number }): Promise<RunOwnershipLease | undefined> {
-    if (!input.principalId.trim() || input.principalId.length > 256) throw new Error("Run ownership principal ID is invalid.");
+    if (typeof input.principalId !== "string" || !input.principalId.trim() || input.principalId !== input.principalId.trim() || input.principalId.length > 256) throw new Error("Run ownership principal ID is invalid.");
     if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(input.instanceId)) throw new Error("Run ownership instance ID is invalid.");
     if (!/^[A-Za-z0-9_-]{16,256}$/u.test(input.token)) throw new Error("Run ownership token is invalid.");
     if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs < 1000 || input.leaseMs > 300_000) throw new Error("Run ownership lease must be between 1000 and 300000 milliseconds.");
@@ -147,6 +165,7 @@ export class UpstashRunOwnershipStore implements RunOwnershipStore {
   }
 
   async renew(lease: RunOwnershipLease, leaseMs: number): Promise<boolean> {
+    this.validateLease(lease);
     if (!Number.isSafeInteger(leaseMs) || leaseMs < 1000 || leaseMs > 300_000) throw new Error("Run ownership lease must be between 1000 and 300000 milliseconds.");
     const result = await this.eval(RUN_OWNERSHIP_RENEW_SCRIPT, [this.keys(lease.runId)[0]], [
       lease.principalId, lease.instanceId, lease.token, String(lease.generation), String(leaseMs),
@@ -155,6 +174,7 @@ export class UpstashRunOwnershipStore implements RunOwnershipStore {
   }
 
   async assertCurrent(lease: RunOwnershipLease): Promise<boolean> {
+    this.validateLease(lease);
     const result = await this.eval(RUN_OWNERSHIP_ASSERT_SCRIPT, [this.keys(lease.runId)[0]], [
       lease.principalId, lease.instanceId, lease.token, String(lease.generation),
     ]);
@@ -162,6 +182,7 @@ export class UpstashRunOwnershipStore implements RunOwnershipStore {
   }
 
   async release(lease: RunOwnershipLease): Promise<boolean> {
+    this.validateLease(lease);
     const result = await this.eval(RUN_OWNERSHIP_RELEASE_SCRIPT, [this.keys(lease.runId)[0]], [
       lease.principalId, lease.instanceId, lease.token, String(lease.generation),
     ]);
