@@ -247,9 +247,21 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
  * or browser sessions are active would be unsafe. The API composition root
  * must close this registry during graceful shutdown.
  */
+type PrincipalDependencies = AgentDependencies & { closeSessionStore: () => void };
+
+type PrincipalDependencyFactory = (
+  workspace: string,
+  approval?: AgentDependencies["approval"],
+) => Promise<PrincipalDependencies>;
+
+/**
+ * Build a registry for authenticated principals. The optional factory keeps
+ * lifecycle/concurrency behavior testable without opening real model or DB resources.
+ */
 export function createSofiaPrincipalDependencyRegistry(
   configuredRoot: string,
   approval?: AgentDependencies["approval"],
+  createDependencies: PrincipalDependencyFactory = createSofiaAgentDependenciesWithSessions,
 ) {
   const resolver = new PrincipalWorkspaceResolver(path.resolve(configuredRoot));
   const entries = new Map<string, Promise<AgentDependencies & { closeSessionStore: () => void }>>();
@@ -265,7 +277,7 @@ export function createSofiaPrincipalDependencyRegistry(
       if (!pending) {
         pending = (async () => {
           const workspace = await resolver.resolve(authenticatedPrincipalId);
-          return createSofiaAgentDependenciesWithSessions(workspace, approval);
+          return createDependencies(workspace, approval);
         })();
         entries.set(authenticatedPrincipalId, pending);
         void pending.catch(() => {
