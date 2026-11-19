@@ -41,7 +41,9 @@ function validateRecord(value: unknown): SkillBenchmarkHistoryRecord {
         (check.detail === undefined || typeof check.detail === "string" && check.detail.length <= 1000)) ||
       new Set(value.checks.map((check) => (check as {name:string}).name.trim())).size !== value.checks.length ||
       (value.baselineVersion !== undefined && (typeof value.baselineVersion !== "string" || value.baselineVersion.length > 100)) ||
-      (value.runId !== undefined && (typeof value.runId !== "string" || value.runId.length > 500))) {
+      (value.runId !== undefined && (typeof value.runId !== "string" || value.runId.length > 500)) ||
+      (Array.isArray(value.checks) && typeof value.passed === "boolean" &&
+        value.passed !== value.checks.every((check) => isRecord(check) && check.passed === true))) {
     throw new Error("Invalid skill benchmark history record");
   }
   const checks = value.checks.map((check) => ({
