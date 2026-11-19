@@ -28,8 +28,16 @@ export function createProjectMemoryLearningRecorder(
     if (!project || project.length > 200) throw new Error("A valid project scope is required for research memory.");
     const id = createHash("sha256").update(principalId).update("\\0").update(project).update("\\0").update(idempotencyKey).digest("hex");
     const evidence = input.evidence
-      ? `Experiment: ${input.evidence.summary.slice(0, 1200)}\nPassed: ${input.evidence.passed}\nBenchmark: ${input.evidence.benchmarkBefore} -> ${input.evidence.benchmarkAfter}\nSafety incidents: ${input.evidence.safetyIncidents}\nArtifact: ${input.evidence.artifactVersion ?? "not provided"}`
-      : `Experiment skipped: ${(input.experimentSkippedReason ?? "not run").slice(0, 500)}`;
+      ? [
+          `Evidence classification: ${input.evidence.passed ? "EXPERIMENT-PASSED (sandbox result; not production validation)" : "EXPERIMENT-FAILED (negative evidence; do not promote)"}`,
+          `Experiment: ${input.evidence.summary.slice(0, 1200)}`,
+          `Passed: ${input.evidence.passed}`,
+          `Benchmark: ${input.evidence.benchmarkBefore} -> ${input.evidence.benchmarkAfter}`,
+          `Safety incidents: ${input.evidence.safetyIncidents}`,
+          `Artifact: ${input.evidence.artifactVersion ?? "not provided"}`,
+          `Rollback available: ${input.evidence.rollbackAvailable}`,
+        ].join("\\n")
+      : `Evidence classification: UNVERIFIED RESEARCH (no sandbox experiment)\\nExperiment skipped: ${(input.experimentSkippedReason ?? "not run").slice(0, 500)}`;
     const content = [
       `Research question: ${input.question.slice(0, 1000)}`,
       `Finding: ${input.finding.summary.slice(0, 1600)}`,
