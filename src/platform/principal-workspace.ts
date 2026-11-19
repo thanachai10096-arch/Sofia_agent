@@ -77,7 +77,9 @@ export class PrincipalWorkspaceResolver {
     }
 
     const root = await this.root();
-    const opaqueId = createHash("sha256").update(principalId, "utf8").digest("hex");
+    const normalizedPrincipalId = principalId.trim().normalize("NFC");
+    if (!normalizedPrincipalId) throw new Error("A valid authenticated principal ID is required.");
+    const opaqueId = createHash("sha256").update(normalizedPrincipalId, "utf8").digest("hex");
     const candidate = path.join(root, opaqueId);
     if (!within(root, candidate)) throw new Error("Principal workspace escapes its configured root.");
 
