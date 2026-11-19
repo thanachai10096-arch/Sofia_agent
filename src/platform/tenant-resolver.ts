@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
 import { createTenantWorkspace } from "./tenant-workspace.js";
 
 /**
@@ -54,6 +55,18 @@ export function createTenantResourceResolver(tenantsRoot: string): TenantResourc
         context.tenantId !== expectedTenantId
       ) {
         throw new Error("Invalid tenant resource context.");
+      }
+
+      // Revalidate the filesystem boundary every time an issued context is used.
+      // A previously valid workspace may have been replaced or redirected later.
+      try {
+        const workspaceStat = lstatSync(context.workspaceRoot);
+        if (!workspaceStat.isDirectory() || workspaceStat.isSymbolicLink() ||
+            realpathSync(context.workspaceRoot) !== context.workspaceRoot) {
+          throw new Error("Tenant workspace boundary changed.");
+        }
+      } catch {
+        throw new Error("Tenant workspace is missing or no longer a real directory.");
       }
     },
   });
