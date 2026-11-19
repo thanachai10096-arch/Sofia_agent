@@ -10,6 +10,8 @@ import { RegistryToolGateway } from "../brain/registry-tool-gateway.js";
 import { MapToolRegistry } from "../tools/types.js";
 import { defaultPolicy } from "../security/policy.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
+import type { BrainRunSnapshot } from "../brain/run-state.js";
+import type { SofiaBrain } from "../brain/executor.js";
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -296,6 +298,69 @@ test("approval API lists and resolves only requests owned by the authenticated p
 });
 
 
+
+test("async API runs durably persist redacted Brain checkpoints", async () => {
+  const apiKey = "checkpoint-owner-key";
+  const saved: Array<{ id: string; snapshot?: BrainRunSnapshot }> = [];
+  const snapshot: BrainRunSnapshot = {
+    version: 1,
+    runId: "brain-run-checkpoint-01",
+    task: "inspect workspace",
+    understanding: {
+      objective: "inspect workspace", constraints: [], assumptions: [], requiredCapabilities: [],
+      requiredTools: [], risk: "low", successCriteria: [], ambiguities: [],
+    },
+    plan: { strategy: "initial", reason: "test", steps: [] },
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "workspace-checkpoint-01",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [], diagnoses: [], decisions: [], recoveryRounds: 0, trace: [],
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    brainFactory: (options) => ({
+      runId: "brain-run-checkpoint-01",
+      run: async () => {
+        await options.onRunSnapshot?.(snapshot);
+        return {
+          completed: true, state: "completed", summary: "Checkpoint persisted.",
+          changedFiles: [], changedFilesKnown: true, verification: [], remainingRisks: [],
+          usage: snapshot.usage,
+        };
+      },
+    } as unknown as SofiaBrain),
+  }, {
+    apiKeys: { [apiKey]: ["agent:run", "agent:read"] },
+    runStore: {
+      save: async (record) => { saved.push({ id: record.id, snapshot: record.snapshot }); },
+      remove: async () => {},
+      loadAllSync: () => [],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const started = await fetch("http://127.0.0.1:" + address.port + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" },
+      body: JSON.stringify({ task: "inspect workspace", async: true }),
+    });
+    assert.equal(started.status, 202);
+    const body = await started.json() as { id: string };
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (saved.some((record) => record.id === body.id && record.snapshot?.checkpointId === snapshot.checkpointId)) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.ok(saved.some((record) => record.id === body.id && record.snapshot?.checkpointId === snapshot.checkpointId));
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
 
 test("server restart marks persisted in-flight runs interrupted instead of replaying side effects", async () => {
   const ownerKey = "restart-owner-key";
