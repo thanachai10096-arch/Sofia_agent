@@ -136,8 +136,9 @@ export function authorizeCapability(
     }
   }
 
+  // A valid delegation already authorizes routine external actions. Ask only
+  // when the capability explicitly requires approval or the action is critical.
   const requiresApproval = capability.approvalRequired === true ||
-    capability.effect === "external_side_effect" ||
     capability.effect === "financial" ||
     capability.risk === "critical";
   return { allowed: true, requiresApproval, reason: requiresApproval
