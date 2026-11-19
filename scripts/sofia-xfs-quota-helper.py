@@ -197,20 +197,23 @@ def create(root, state_root, request):
     if project_id is None:
         fail("project ID allocation range exhausted")
     workspace = root / ("run-" + run_id)
-    workspace.mkdir(mode=0o700)
+    # Persist the reservation before any filesystem side effect. A crash at
+    # any later point is therefore recoverable by the adapter's abort call.
+    allocation = {"project_id": project_id, "workspace": str(workspace), "bytes": byte_limit, "inodes": inode_limit, "status": "allocating"}
+    allocations[run_id] = allocation
+    save_allocations(state_root, allocations)
     try:
+        workspace.mkdir(mode=0o700)
         run(["xfs_quota", "-x", "-c", "project -s -p " + str(workspace) + " " + str(project_id), str(root)])
         run(["xfs_quota", "-x", "-c", "limit -p bhard=" + str(byte_limit) + "B ihard=" + str(inode_limit) + " " + str(project_id), str(root)])
         verify_quota(root, project_id, byte_limit, inode_limit)
-        allocations[run_id] = {"project_id": project_id, "workspace": str(workspace), "bytes": byte_limit, "inodes": inode_limit}
+        allocation["status"] = "active"
         save_allocations(state_root, allocations)
     except Exception:
-        # Keep any uncertain allocation recorded for operator recovery; never recycle its ID.
-        allocations[run_id] = {"project_id": project_id, "workspace": str(workspace), "bytes": byte_limit, "inodes": inode_limit, "needs_recovery": True}
+        allocation["status"] = "needs_recovery"
         save_allocations(state_root, allocations)
         raise
     return {"ok": True, "runId": run_id, "workspacePath": str(workspace), "quotaBytes": byte_limit, "quotaInodes": inode_limit}
-
 
 def dispose(root, state_root, request, abort=False):
     run_id = validate_run_id(request["runId"])
@@ -218,7 +221,7 @@ def dispose(root, state_root, request, abort=False):
     entry = allocations.get(run_id)
     if entry is None:
         return {"ok": True, "runId": run_id}
-    if not isinstance(entry, dict) or set(entry) - {"project_id", "workspace", "bytes", "inodes", "needs_recovery"}:
+    if not isinstance(entry, dict) or set(entry) - {"project_id", "workspace", "bytes", "inodes", "needs_recovery", "status"}:
         fail("allocation record is malformed")
     workspace = root / ("run-" + run_id)
     if entry.get("workspace") != str(workspace) or type(entry.get("project_id")) is not int:
