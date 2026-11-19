@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ContainerSandbox, ProcessSandbox, type SandboxLimits } from "./sandbox.js";
+import { ContainerSandbox, ProcessSandbox, RemoteSandbox, type SandboxLimits } from "./sandbox.js";
 
 function limits(overrides: Partial<SandboxLimits> = {}): SandboxLimits {
   return {
@@ -219,4 +219,81 @@ test("ProcessSandbox rejects malformed allowed environment variable names", asyn
     () => sandbox.run(process.execPath, ["-e", "process.exit(0)"], limits({ allowedEnvironmentVariables: ["SAFE=NO"] })),
     /valid identifiers/i,
   );
+});
+
+
+test("RemoteSandbox sends a bounded snapshot and accepts only existing project files", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-remote-sandbox-"));
+  await mkdir(path.join(root, "src"));
+  await writeFile(path.join(root, "src", "value.ts"), "export const value = 1;");
+  let captured: Record<string, unknown> | undefined;
+  const sandbox = new RemoteSandbox({
+    endpoint: "https://runner.example.test",
+    token: "test-token-with-at-least-thirty-two-characters",
+    fetcher: async (input, init) => {
+      assert.equal(String(input), "https://runner.example.test/v1/sandbox/execute");
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-token-with-at-least-thirty-two-characters");
+      captured = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      const requestId = captured.requestId;
+      return new Response(JSON.stringify({
+        protocolVersion: 1,
+        requestId,
+        stdout: "tests passed",
+        stderr: "",
+        code: 0,
+        files: [{ path: "src/value.ts", contentBase64: Buffer.from("export const value = 2;").toString("base64") }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  try {
+    const result = await sandbox.run("npm", ["test"], limits({ workspaceRoot: root, allowNetwork: false }));
+    assert.equal(result.stdout, "tests passed");
+    assert.equal(result.code, 0);
+    assert.equal(captured?.protocolVersion, 1);
+    assert.equal(captured?.allowNetwork, false);
+    assert.equal(await readFile(path.join(root, "src", "value.ts"), "utf8"), "export const value = 2;");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("RemoteSandbox rejects path traversal before modifying the project", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-remote-sandbox-path-"));
+  await writeFile(path.join(root, "safe.txt"), "original");
+  const sandbox = new RemoteSandbox({
+    endpoint: "https://runner.example.test",
+    token: "test-token-with-at-least-thirty-two-characters",
+    fetcher: async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { requestId: string };
+      return new Response(JSON.stringify({
+        protocolVersion: 1, requestId: body.requestId, stdout: "", stderr: "", code: 0,
+        files: [{ path: "../escape.txt", contentBase64: Buffer.from("owned").toString("base64") }],
+      }), { status: 200 });
+    },
+  });
+  try {
+    await assert.rejects(
+      () => sandbox.run("true", [], limits({ workspaceRoot: root })),
+      /path outside the project snapshot/,
+    );
+    assert.equal(await readFile(path.join(root, "safe.txt"), "utf8"), "original");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("RemoteSandbox permits plaintext HTTP only for loopback and never sends tokens over other schemes", () => {
+  const token = "test-token-with-at-least-thirty-two-characters";
+  for (const endpoint of ["ftp://localhost:8080", "ftp://127.0.0.1:8080", "http://runner.example.test"]) {
+    assert.throws(
+      () => new RemoteSandbox({ endpoint, token }),
+      /must use HTTPS/,
+      endpoint,
+    );
+  }
+  assert.doesNotThrow(() => new RemoteSandbox({ endpoint: "http://localhost:8080", token }));
+  assert.doesNotThrow(() => new RemoteSandbox({ endpoint: "http://127.0.0.1:8080", token }));
+  assert.doesNotThrow(() => new RemoteSandbox({ endpoint: "http://[::1]:8080", token }));
+  assert.doesNotThrow(() => new RemoteSandbox({ endpoint: "https://runner.example.test", token }));
 });

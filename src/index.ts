@@ -1,3 +1,16 @@
+export { LinuxQuotaWorkspaceProvisioner } from "./autonomy/linux-quota-workspace-provisioner.js";
+export type { LinuxQuotaWorkspaceProvisionerOptions } from "./autonomy/linux-quota-workspace-provisioner.js";
+export { defaultAutonomyProfile, evaluateAutonomyRequest, evaluateSkillPromotion } from "./autonomy/controller.js";
+export type { AutonomyAction, AutonomyBudget, AutonomyProfile, AutonomyContext, SkillPromotionEvidence, AutonomyDecision } from "./autonomy/controller.js";
+export { runIndependentResearchLoop } from "./autonomy/research-loop.js";
+export type { ResearchObservation, ResearchFinding, ResearchHypothesis, ExperimentEvidence, ResearchLoopAdapters, ResearchLoopOptions, ResearchCycleResult, ResearchLoopReport } from "./autonomy/research-loop.js";
+export { SofiaAutonomyRuntime } from "./autonomy/runtime.js";
+export { AutonomyJobSupervisor } from "./autonomy/job-supervisor.js";
+export type { AutonomyJobSupervisorOptions, AutonomyResearchExecutor, AutonomyWorkerSessionOptions, AutonomyWorkerSessionResult } from "./autonomy/job-supervisor.js";
+export { createProjectMemoryLearningRecorder } from "./autonomy/project-memory-adapter.js";
+export { createBrainAutonomyAuthorizer } from "./autonomy/brain-adapter.js";
+export type { BrainAutonomyAdapterOptions } from "./autonomy/brain-adapter.js";
+export type { AutonomyAuditEvent, AutonomyResearchRequest, SofiaAutonomyRuntimeOptions } from "./autonomy/runtime.js";
 export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
 export { runSkillLifecycleWorkflow } from "./brain/skill-lifecycle-workflow.js";
 export { createManagedSkillLearningHandler } from "./brain/managed-skill-learning.js";
@@ -31,7 +44,7 @@ export { BoundedSubagentCoordinator } from "./brain/subagent-coordinator.js";
 export type { SubagentTask, SubagentBatchItem, SubagentCoordinatorOptions, SubagentRuntimeFactory } from "./brain/subagent-coordinator.js";
 export { PlaywrightBrowserRuntime } from "./browser/runtime.js";
 export { createBrowserTools } from "./browser/tools.js";
-export { ContainerSandbox, PolicySandbox, ProcessSandbox } from "./sandbox.js";
+export { ContainerSandbox, PolicySandbox, ProcessSandbox, RemoteSandbox } from "./sandbox.js";
 export { InMemorySkillsPlatform } from "./skills/platform.js";
 export { FileSkillsPlatform } from "./skills/file-platform.js";
 export { LocalJobBackend } from "./platform/cloud-execution.js";
@@ -128,3 +141,14 @@ export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHA
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { SandboxSupervisor } from "./autonomy/sandbox-supervisor.js";
+export type { SandboxSupervisorOptions, SandboxSupervisorBudget, SandboxRunIdentity, SandboxAttestation } from "./autonomy/sandbox-supervisor.js";
+
+export { createSandboxTools } from "./autonomy/sandbox-tools.js";
+
+export { runRailwayAutonomyWorker, runRailwayAutonomyWorkerWithProcessSignals } from "./autonomy/railway-worker.js";
+export type { RailwayAutonomyWorkerConfig } from "./autonomy/railway-worker.js";
+
+export { createRemoteSandboxRunnerServer } from "./autonomy/remote-runner-server.js";
+export type { RemoteSandboxRunnerOptions } from "./autonomy/remote-runner-server.js";

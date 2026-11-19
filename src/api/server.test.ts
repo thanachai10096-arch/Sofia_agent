@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
+import { FileAutonomyJobStore } from "../autonomy/job-store.js";
+import type { AutonomyJobStore } from "../autonomy/job-store.js";
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -143,6 +148,160 @@ test("API rejects unknown model routes before starting a run", async () => {
     });
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { error: "invalid_model_route" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("autonomy queue API derives tenant identity from auth and supports idempotent enqueue", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-api-autonomy-"));
+  const queue = new FileAutonomyJobStore("api-test", root);
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {
+      "autonomy-key-one": ["autonomy:run", "autonomy:read"],
+      "autonomy-key-two": ["autonomy:run", "autonomy:read"],
+      "read-only": ["autonomy:read"],
+    },
+    autonomyJobStore: queue,
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  try {
+    const enqueue = () => fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer autonomy-key-one",
+        "content-type": "application/json",
+        "idempotency-key": "same-request",
+      },
+      body: JSON.stringify({ topic: "Improve worker reliability", principalId: "attacker-controlled" }),
+    });
+    const rejected = await enqueue();
+    assert.equal(rejected.status, 400);
+    const created = await fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer autonomy-key-one",
+        "content-type": "application/json",
+        "idempotency-key": "same-request",
+      },
+      body: JSON.stringify({ topic: "Improve worker reliability", context: "Focus on retries" }),
+    });
+    assert.equal(created.status, 202);
+    const first = await created.json() as { job: { id: string; payload: { topic: string }; principalId?: string } };
+    assert.equal(first.job.payload.topic, "Improve worker reliability");
+    assert.equal(first.job.principalId, undefined);
+
+    const repeated = await fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer autonomy-key-one",
+        "content-type": "application/json",
+        "idempotency-key": "same-request",
+      },
+      body: JSON.stringify({ topic: "Improve worker reliability", context: "Focus on retries" }),
+    });
+    assert.equal(repeated.status, 202);
+    const second = await repeated.json() as { job: { id: string } };
+    assert.equal(second.job.id, first.job.id);
+
+    const conflict = await fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer autonomy-key-one",
+        "content-type": "application/json",
+        "idempotency-key": "same-request",
+      },
+      body: JSON.stringify({ topic: "A different research question" }),
+    });
+    assert.equal(conflict.status, 409);
+
+    const listed = await fetch(base + "/v1/autonomy/jobs", {
+      headers: { authorization: "Bearer autonomy-key-one" },
+    });
+    assert.equal(listed.status, 200);
+    const list = await listed.json() as { jobs: Array<{ id: string }> };
+    assert.equal(list.jobs.length, 1);
+
+    const ownedRead = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
+      headers: { authorization: "Bearer autonomy-key-one" },
+    });
+    assert.equal(ownedRead.status, 200);
+    const ownedPayload = await ownedRead.json() as { job: { id: string } };
+    assert.equal(ownedPayload.job.id, first.job.id);
+
+    const crossTenant = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
+      headers: { authorization: "Bearer autonomy-key-two" },
+    });
+    assert.equal(crossTenant.status, 404);
+    const crossTenantCancel = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
+      method: "DELETE",
+      headers: { authorization: "Bearer autonomy-key-two" },
+    });
+    assert.equal(crossTenantCancel.status, 404);
+
+    const cancelled = await fetch(base + "/v1/autonomy/jobs/" + first.job.id, {
+      method: "DELETE",
+      headers: { authorization: "Bearer autonomy-key-one" },
+    });
+    assert.equal(cancelled.status, 200);
+    const cancelledBody = await cancelled.json() as { job: { status: string } };
+    assert.equal(cancelledBody.job.status, "cancelled");
+
+    const forbidden = await fetch(base + "/v1/autonomy/jobs", {
+      method: "POST",
+      headers: { authorization: "Bearer read-only", "content-type": "application/json" },
+      body: JSON.stringify({ topic: "This must not enqueue" }),
+    });
+    assert.equal(forbidden.status, 403);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+
+test("autonomy queue API returns generic 503 responses when the store is unavailable", async () => {
+  const unavailableStore = {
+    enqueue: async () => { throw new Error("database password must never be exposed"); },
+    list: async () => { throw new Error("database password must never be exposed"); },
+    get: async () => { throw new Error("database password must never be exposed"); },
+    cancel: async () => { throw new Error("database password must never be exposed"); },
+  } as unknown as AutonomyJobStore;
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { "queue-outage-key": ["autonomy:run", "autonomy:read"] },
+    autonomyJobStore: unavailableStore,
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  const headers = { authorization: "Bearer queue-outage-key", "content-type": "application/json" };
+  try {
+    const requests: Array<Promise<Response>> = [
+      fetch(base + "/v1/autonomy/jobs", { method: "POST", headers, body: JSON.stringify({ topic: "Check queue recovery" }) }),
+      fetch(base + "/v1/autonomy/jobs", { headers }),
+      fetch(base + "/v1/autonomy/jobs/00000000-0000-4000-8000-000000000001", { headers }),
+      fetch(base + "/v1/autonomy/jobs/00000000-0000-4000-8000-000000000001", { method: "DELETE", headers }),
+    ];
+    for (const request of requests) {
+      const response = await request;
+      assert.equal(response.status, 503);
+      const payload = await response.json() as { error: string; message?: string };
+      assert.deepEqual(payload, { error: "autonomy_queue_unavailable" });
+      assert.equal(JSON.stringify(payload).includes("database password"), false);
+    }
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

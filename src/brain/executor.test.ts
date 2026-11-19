@@ -1002,3 +1002,76 @@ test("explicit Thai file-edit requests stay on the action path even if the model
   assert.ok(!phases.includes("respond"));
   assert.ok(report.usage.toolCalls > 0);
 });
+
+
+test("Brain autonomy gate denies a tool before ToolGateway execution", async () => {
+  let executions = 0;
+  const tools = makeTools();
+  const guardedTools: ToolGateway = {
+    ...tools,
+    async execute(call, context) {
+      executions += 1;
+      return tools.execute(call, context);
+    },
+  };
+  let authorizationCalls = 0;
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: guardedTools,
+      autonomyAuthorizer: async ({ toolCall, effects, principalId }) => {
+        authorizationCalls += 1;
+        if (authorizationCalls === 1) {
+          assert.equal(toolCall.tool, "workspace.write_file");
+          assert.deepEqual(effects, ["write"]);
+          assert.equal(principalId, "tenant-a");
+        }
+        return { allowed: false, reason: "No trusted isolated workspace attestation." };
+      },
+    },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 0, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({ task: "Create hello.txt", principalId: "tenant-a" });
+  assert.equal(report.completed, false);
+  assert.ok(authorizationCalls >= 1);
+  assert.equal(executions, 0);
+});
+
+test("Brain autonomy gate allows a tool without weakening gateway approval", async () => {
+  let executions = 0;
+  let approvalRequired: boolean | undefined;
+  const tools = makeTools();
+  const guardedTools: ToolGateway = {
+    ...tools,
+    async execute(call, context) {
+      executions += 1;
+      approvalRequired = context.requireApproval;
+      return tools.execute(call, context);
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools: guardedTools,
+      autonomyAuthorizer: async () => ({ allowed: true, reason: "Host policy permits this scoped action." }),
+    },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 0, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists", description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) { return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" }; },
+    }],
+  });
+  assert.equal(report.completed, true, report.summary);
+  assert.equal(executions, 2); // write action plus verification probe
+  assert.equal(approvalRequired, false); // final probe remains read-only
+});

@@ -11,6 +11,7 @@ import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import type { AutonomyJob } from "../autonomy/job-store.js";
 
 interface ActiveRun {
   id: string;
@@ -25,6 +26,23 @@ interface ActiveRun {
   /** Hashed owner-scoped idempotency key; raw client key is never persisted. */
   idempotencyId?: string;
   requestFingerprint?: string;
+}
+
+function publicAutonomyJob(job: AutonomyJob): Record<string, unknown> {
+  return {
+    id: job.id,
+    kind: job.kind,
+    status: job.status,
+    payload: job.payload,
+    ...(job.result !== undefined ? { result: job.result } : {}),
+    ...(job.error ? { error: job.error } : {}),
+    attempts: job.attempts,
+    maxAttempts: job.maxAttempts,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    availableAt: job.availableAt,
+    ...(job.checkpoint ? { checkpoint: { nextCycle: job.checkpoint.nextCycle, cycleCount: job.checkpoint.cycles.length, updatedAt: job.checkpoint.updatedAt } } : {}),
+  };
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -343,6 +361,98 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (!memoryId || memoryId.length > 256) return json(res, 400, { error: "invalid_memory_id" }, origin, config);
           const deleted = await deps.userMemoryStore.delete(auth.keyId, memoryId);
           return deleted ? json(res, 200, { deleted: true }, origin, config) : json(res, 404, { error: "memory_not_found" }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
+
+      const isAutonomyJobCollection = requestUrl.pathname === "/v1/autonomy/jobs";
+      const autonomyJobIdMatch = requestUrl.pathname.match(/^\/v1\/autonomy\/jobs\/([^/]+)$/);
+      const isAutonomyJobRead = req.method === "GET" && (isAutonomyJobCollection || autonomyJobIdMatch !== null);
+      const isAutonomyJobWrite = (req.method === "POST" && isAutonomyJobCollection) ||
+        (req.method === "DELETE" && autonomyJobIdMatch !== null);
+      if (isAutonomyJobRead && !auth.scopes.some((scope) => scope === "autonomy:read" || scope === "autonomy:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "autonomy:read" }, origin, config);
+      }
+      if (isAutonomyJobWrite && !auth.scopes.includes("autonomy:run")) {
+        return json(res, 403, { error: "forbidden", requiredScope: "autonomy:run" }, origin, config);
+      }
+      if (isAutonomyJobCollection || autonomyJobIdMatch) {
+        const store = config.autonomyJobStore;
+        if (!store) return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config);
+        if (req.method === "POST" && isAutonomyJobCollection) {
+          const raw = await body(req, Math.min(maxBytes, 64 * 1024));
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+            return json(res, 400, { error: "invalid_autonomy_job" }, origin, config);
+          }
+          const input = raw as Record<string, unknown>;
+          if (Object.keys(input).some((key) => !["topic", "context"].includes(key)) ||
+              typeof input.topic !== "string" || input.topic.trim().length < 3 || input.topic.length > 1000 ||
+              (input.context !== undefined && (typeof input.context !== "string" || input.context.length > 4000))) {
+            return json(res, 400, { error: "invalid_autonomy_job", message: "topic (3-1000 chars) and optional context (up to 4000 chars) are supported" }, origin, config);
+          }
+          const header = req.headers["idempotency-key"];
+          const rawKey = Array.isArray(header) ? header[0] : header;
+          const idempotencyKey = rawKey?.trim();
+          if (idempotencyKey && (idempotencyKey.length > 128 || /[\\x00-\\x1f\\x7f]/.test(idempotencyKey))) {
+            return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
+          }
+          const stableKey = idempotencyKey
+            ? createHash("sha256").update(auth.keyId).update(":autonomy:").update(idempotencyKey).digest("hex")
+            : undefined;
+          try {
+            const payload = { topic: input.topic.trim(), ...(input.context !== undefined ? { context: input.context } : {}) };
+            const job = await store.enqueue({
+              principalId: auth.keyId,
+              kind: "research",
+              payload,
+              ...(stableKey ? { idempotencyKey: stableKey } : {}),
+              maxAttempts: 3,
+            });
+            if (stableKey && JSON.stringify(job.payload) !== JSON.stringify(payload)) {
+              return json(res, 409, { error: "idempotency_key_conflict" }, origin, config);
+            }
+            return json(res, 202, { job: publicAutonomyJob(job) }, origin, config);
+          } catch {
+            // Queue infrastructure failures are server errors. Do not expose SQL,
+            // connection, schema, or driver details to an API caller.
+            return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config);
+          }
+        }
+        if (req.method === "GET" && isAutonomyJobCollection) {
+          try {
+            const jobs = await store.list(auth.keyId);
+            return json(res, 200, { jobs: jobs.slice(0, 100).map(publicAutonomyJob) }, origin, config);
+          } catch {
+            return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config);
+          }
+        }
+        if (autonomyJobIdMatch && req.method === "GET") {
+          let jobId: string;
+          try { jobId = decodeURIComponent(autonomyJobIdMatch[1]!); }
+          catch { return json(res, 400, { error: "invalid_job_id" }, origin, config); }
+          try {
+            const job = await store.get(auth.keyId, jobId);
+            return job
+              ? json(res, 200, { job: publicAutonomyJob(job) }, origin, config)
+              : json(res, 404, { error: "autonomy_job_not_found" }, origin, config);
+          } catch {
+            return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config);
+          }
+        }
+        if (autonomyJobIdMatch && req.method === "DELETE") {
+          let jobId: string;
+          try { jobId = decodeURIComponent(autonomyJobIdMatch[1]!); }
+          catch { return json(res, 400, { error: "invalid_job_id" }, origin, config); }
+          let existing;
+          try { existing = await store.get(auth.keyId, jobId); }
+          catch { return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config); }
+          if (!existing) return json(res, 404, { error: "autonomy_job_not_found" }, origin, config);
+          try {
+            const cancelled = await store.cancel(auth.keyId, jobId);
+            return json(res, 200, { job: publicAutonomyJob(cancelled) }, origin, config);
+          } catch {
+            return json(res, 503, { error: "autonomy_queue_unavailable" }, origin, config);
+          }
         }
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }

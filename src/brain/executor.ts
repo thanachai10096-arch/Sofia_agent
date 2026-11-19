@@ -81,7 +81,27 @@ class RecoverableFailure extends Error {
   }
 }
 
+export interface AutonomyToolAuthorizationRequest {
+  runId: string;
+  principalId?: string;
+  toolCall: ToolCall;
+  effects: readonly string[];
+}
+
+export interface AutonomyToolAuthorizationDecision {
+  allowed: boolean;
+  reason: string;
+}
+
 interface Dependencies {
+  /**
+   * Optional host-owned autonomy policy gate. The host must derive sandbox
+   * attestations and resource telemetry from trusted runtime state; the Brain
+   * never infers isolation from tool names or effect labels.
+   */
+  autonomyAuthorizer?: (
+    request: AutonomyToolAuthorizationRequest,
+  ) => Promise<AutonomyToolAuthorizationDecision>;
   reasoner: BrainReasoner;
   tools: ToolGateway;
   allowShell?: boolean;
@@ -669,6 +689,31 @@ export class SofiaBrain {
         "tool_error",
         `Unknown tool: ${step.call.tool}`,
       );
+    }
+
+    // Autonomy is an additional pre-execution gate, never a replacement for
+    // ToolGateway's ExecutionPolicy, audit, capability checks or approvals.
+    // Missing/throwing/malformed host decisions fail closed.
+    if (this.dependencies.autonomyAuthorizer) {
+      let decision: AutonomyToolAuthorizationDecision;
+      try {
+        decision = await this.wait(() => this.dependencies.autonomyAuthorizer!({
+          runId: this.runId,
+          ...(principalId ? { principalId } : {}),
+          toolCall: { tool: step.call.tool, input: structuredClone(step.call.input) },
+          effects: [...descriptor.effects],
+        }));
+      } catch (error) {
+        if (this.signal.aborted) throw error;
+        throw new RecoverableFailure("permission_error", "Autonomy authorization failed closed: " + errorMessage(error));
+      }
+      if (!decision || typeof decision.allowed !== "boolean" ||
+          typeof decision.reason !== "string" || !decision.reason.trim()) {
+        throw new RecoverableFailure("permission_error", "Autonomy authorization returned a malformed decision; execution denied.");
+      }
+      if (!decision.allowed) {
+        throw new RecoverableFailure("permission_error", "Autonomy policy denied " + step.call.tool + ": " + decision.reason);
+      }
     }
 
     this.emit({
