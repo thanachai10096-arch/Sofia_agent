@@ -70,6 +70,17 @@ export class LinuxQuotaWorkspaceProvisioner {
   private async verifyHelper(): Promise<void> {
     const resolved = await realpath(this.helperPath);
     if (resolved !== this.helperPath) throw new Error("Quota helper path and all parent components must be canonical, not symlinked.");
+    let parent = path.dirname(resolved);
+    while (true) {
+      const parentInfo = await lstat(parent);
+      if (!parentInfo.isDirectory() || parentInfo.isSymbolicLink() || parentInfo.uid !== 0 ||
+          (parentInfo.mode & 0o022) !== 0) {
+        throw new Error("Every quota helper parent directory must be root-owned and not writable by group or others.");
+      }
+      const next = path.dirname(parent);
+      if (next === parent) break;
+      parent = next;
+    }
     const info = await lstat(resolved);
     if (!info.isFile() || info.isSymbolicLink() || info.uid !== 0 || (info.mode & 0o022) !== 0 || (info.mode & 0o111) === 0) {
       throw new Error("Quota helper must be an executable, root-owned file not writable by group or others.");
