@@ -30,6 +30,13 @@ class QuotaHelperTests(unittest.TestCase):
         with self.assertRaises(HELPER.HelperError):
             HELPER.extract_hard_limit("123456 0 0 unlimited 00", 123456)
 
+
+    def test_strict_json_rejects_duplicate_keys_and_non_finite_numbers(self):
+        with self.assertRaises(HELPER.HelperError):
+            HELPER.strict_json_loads('{"operation":"probe","operation":"dispose"}')
+        with self.assertRaises(HELPER.HelperError):
+            HELPER.strict_json_loads('{"hardQuotaBytes":NaN}')
+
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
         self.assertEqual(HELPER.PROJECT_ID_MAX, 299999)
