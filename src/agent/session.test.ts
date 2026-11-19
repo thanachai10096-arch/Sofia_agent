@@ -105,6 +105,48 @@ test("SofiaAgent keeps concurrent turns for one session in transcript order", as
 });
 
 
+
+test("SofiaAgent isolates transcript history for different authenticated principals sharing a session id", async () => {
+  const sessions = new MemorySessionStore();
+  const contexts: Array<{ principalId: string; context: string }> = [];
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async (request) => {
+        contexts.push({ principalId: request.principalId ?? "", context: request.context ?? "" });
+        return { text: `Private answer for ${request.principalId}` };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await agent.run({ task: "Owner A private context", principalId: "owner-a", sessionId: "same-client-session" });
+  await agent.run({ task: "Owner A follow-up", principalId: "owner-a", sessionId: "same-client-session" });
+  await agent.run({ task: "Owner B private context", principalId: "owner-b", sessionId: "same-client-session" });
+
+  assert.match(contexts[1]?.context ?? "", /Owner A private context/);
+  assert.doesNotMatch(contexts[2]?.context ?? "", /Owner A private context/);
+  assert.doesNotMatch(contexts[2]?.context ?? "", /Private answer for owner-a/);
+  assert.match(contexts[2]?.context ?? "", /Prior conversation history/);
+  assert.deepEqual(
+    sessions.get(JSON.stringify(["owner-a", "same-client-session"]))?.messages,
+    [
+      "user: Owner A private context",
+      "assistant: Private answer for owner-a",
+      "user: Owner A follow-up",
+      "assistant: Private answer for owner-a",
+    ],
+  );
+  assert.deepEqual(
+    sessions.get(JSON.stringify(["owner-b", "same-client-session"]))?.messages,
+    [
+      "user: Owner B private context",
+      "assistant: Private answer for owner-b",
+    ],
+  );
+});
+
 test("Sofia injects only relevant memories owned by the authenticated principal", async () => {
   const root = await mkdtemp(join(tmpdir(), "sofia-memory-context-"));
   try {
