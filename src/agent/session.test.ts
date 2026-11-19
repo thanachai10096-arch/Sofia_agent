@@ -236,3 +236,38 @@ test("SofiaAgent isolates concurrent identical session labels across principals"
   assert.match(contexts.get("owner-b")?.[1] ?? "", /owner-b initial private turn/);
   assert.doesNotMatch(contexts.get("owner-b")?.[1] ?? "", /owner-a initial private turn/);
 });
+
+
+test("SofiaAgent serializes concurrent turns for the same principal and session", async () => {
+  const sessions = new MemorySessionStore();
+  let active = 0;
+  let maxActive = 0;
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async ({ task }) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { text: `Completed: ${task}` };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await Promise.all([
+    agent.run({ task: "first tenant turn", principalId: "owner-a", sessionId: "tenant-session" }),
+    agent.run({ task: "second tenant turn", principalId: "owner-a", sessionId: "tenant-session" }),
+  ]);
+
+  assert.equal(maxActive, 1, "same-principal turns must share one serialization queue");
+  const stored = [...sessions.get(JSON.stringify(["owner-a", "tenant-session"]))!.messages];
+  assert.deepEqual(stored, [
+    "user: first tenant turn",
+    "assistant: Completed: first tenant turn",
+    "user: second tenant turn",
+    "assistant: Completed: second tenant turn",
+  ]);
+});
