@@ -127,7 +127,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const agent = new SofiaAgent(deps);
   const agentForWorkspace = async (principalId: string, workspaceId?: string): Promise<SofiaAgent> => {
     if (!config.resolveWorkspaceDependencies) {
-      if (workspaceId !== undefined) throw new Error("Workspace isolation is not configured on this host.");
+      if (workspaceId !== undefined || Object.keys(config.apiKeys).length > 1) {
+        throw new Error("Per-user workspace isolation is not configured on this host.");
+      }
       return agent;
     }
     const resolved = await config.resolveWorkspaceDependencies(principalId, workspaceId ?? "default");
