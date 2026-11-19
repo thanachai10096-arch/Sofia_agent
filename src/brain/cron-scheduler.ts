@@ -67,6 +67,8 @@ export interface CronSchedulerOptions {
   maxConcurrent?: number;
   maxSchedulesPerOwner?: number;
   audit?: (event: CronAuditEvent) => void | Promise<void>;
+  /** Resolve current host/API-key grants at dispatch time; missing owners receive no grants. */
+  resolveAuthorization?: (ownerKeyId: string) => Promise<{ toolScopes: string[]; desktopCapabilities: DesktopCapability[] }> | { toolScopes: string[]; desktopCapabilities: DesktopCapability[] };
 }
 
 /** File-backed store. Exclusive lock + atomic rename serializes claims across local processes. */
@@ -222,6 +224,7 @@ export class CronScheduler {
   private readonly maxConcurrent: number;
   private readonly maxSchedulesPerOwner: number;
   private readonly auditCallback?: CronSchedulerOptions["audit"];
+  private readonly resolveAuthorization: NonNullable<CronSchedulerOptions["resolveAuthorization"]>;
   private ticking = false;
   private readonly active = new Map<string, AbortController>();
 
@@ -232,6 +235,7 @@ export class CronScheduler {
     this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
     this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
     this.auditCallback = options.audit;
+    this.resolveAuthorization = options.resolveAuthorization ?? (() => ({ toolScopes: [], desktopCapabilities: [] }));
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
     state.audit.push(event);
@@ -550,11 +554,16 @@ export class CronScheduler {
           break;
         }
         try {
+          const currentAuthorization = await this.resolveAuthorization(schedule.ownerKeyId);
+          // Revoke capabilities immediately when the API key loses them. Newly added
+          // grants do not expand an existing schedule beyond its original consent.
+          const toolScopes = (schedule.toolScopes ?? []).filter((scope) => currentAuthorization.toolScopes.includes(scope));
+          const desktopCapabilities = (schedule.desktopCapabilities ?? []).filter((capability) => currentAuthorization.desktopCapabilities.includes(capability));
           const submitted = await this.runtime.submit({
             task: schedule.task,
             ownerKeyId: schedule.ownerKeyId,
-            toolScopes: [...(schedule.toolScopes ?? [])],
-            desktopCapabilities: [...(schedule.desktopCapabilities ?? [])],
+            toolScopes,
+            desktopCapabilities,
           });
           job = submitted;
           if (controller.signal.aborted) {
