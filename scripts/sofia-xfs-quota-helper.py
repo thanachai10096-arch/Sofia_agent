@@ -61,15 +61,27 @@ def load_config():
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
     if not isinstance(config, dict) or set(config) != {"workspace_root", "state_root"}:
         fail("configuration has an unexpected schema")
-    root = Path(config["workspace_root"])
-    state = Path(config["state_root"])
-    if not root.is_absolute() or not state.is_absolute():
+    root_input = Path(config["workspace_root"])
+    state_input = Path(config["state_root"])
+    if not root_input.is_absolute() or not state_input.is_absolute():
         fail("configured paths must be absolute")
-    root = root.resolve(strict=True)
-    state.mkdir(mode=0o700, parents=True, exist_ok=True)
-    state = state.resolve(strict=True)
-    secure_directory(root)
-    secure_directory(state)
+    root = root_input.resolve(strict=True)
+    if str(root_input) != str(root):
+        fail("workspace root must be canonical and contain no symlink components")
+    state_input.mkdir(mode=0o700, parents=True, exist_ok=True)
+    state = state_input.resolve(strict=True)
+    if str(state_input) != str(state):
+        fail("state root must be canonical and contain no symlink components")
+    for configured in (root, state):
+        current = configured
+        while True:
+            secure_directory(current)
+            parent = current.parent
+            if parent == current:
+                break
+            current = parent
+    if not re.fullmatch(r"[A-Za-z0-9_./-]+", str(root)):
+        fail("workspace root may contain only safe path characters")
     if root == state or root in state.parents or state in root.parents:
         fail("workspace and state directories must be separate")
     return root, state
@@ -178,6 +190,14 @@ def create(root, state_root, request):
     if run_id in allocations:
         fail("runId already has an allocation")
     used = {entry.get("project_id") for entry in allocations.values() if isinstance(entry, dict)}
+    # Never assume the private registry is the only source of project IDs.
+    report = run(["xfs_quota", "-x", "-c", "report -p -n", str(root)])
+    for line in report.splitlines():
+        fields = line.split()
+        if fields and fields[0].isdigit():
+            existing_id = int(fields[0])
+            if PROJECT_ID_MIN <= existing_id <= PROJECT_ID_MAX and existing_id not in used:
+                fail("reserved project ID range contains an untracked allocation")
     project_id = next((candidate for candidate in range(PROJECT_ID_MIN, PROJECT_ID_MAX + 1) if candidate not in used), None)
     if project_id is None:
         fail("project ID allocation range exhausted")
@@ -212,14 +232,16 @@ def dispose(root, state_root, request, abort=False):
         fail("dispose workspace path does not match run identity")
     try:
         info = workspace.lstat()
+    except FileNotFoundError:
+        info = None
+    if info is not None:
         if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
             fail("workspace is not a real directory")
         run(["xfs_quota", "-x", "-c", "project -C -p " + str(workspace) + " " + str(entry["project_id"]), str(root)])
         shutil.rmtree(workspace)
-        # Reset both limits before returning the project ID to the allocator.
-        run(["xfs_quota", "-x", "-c", "limit -p bhard=0B ihard=0 " + str(entry["project_id"]), str(root)])
-    except FileNotFoundError:
-        pass
+    # Reset limits before returning the project ID, even after interrupted removal.
+    # A failed reset preserves the registry entry.
+    run(["xfs_quota", "-x", "-c", "limit -p bhard=0B ihard=0 " + str(entry["project_id"]), str(root)])
     allocations.pop(run_id, None)
     save_allocations(state_root, allocations)
     return {"ok": True, "runId": run_id}
