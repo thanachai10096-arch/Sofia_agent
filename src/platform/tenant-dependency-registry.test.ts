@@ -111,7 +111,7 @@ test("tenant dependency registry waits for in-flight construction before closing
     const [resolved] = await Promise.all([pending, closing]);
     assert.ok(resolved);
     assert.equal(closeCalls, 1);
-    await assert.rejects(registry.get(context), /registry is closed/);
+    assert.throws(() => registry.get(context), /registry is closed/);
   } finally {
     release();
     await registry.close().catch(() => undefined);
