@@ -1,9 +1,10 @@
-import type { AgentResult } from "../agent/types.js";
+import type { AgentDependencies, AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 
 export interface AgentRunInput {
   task: string;
+  /** Project identifier; the host resolves it inside this authenticated principal's workspace root. */
   workspace?: string;
   context?: string;
   /** Configured route ID from GET /v1/models; omit or use auto for automatic routing. */
@@ -56,6 +57,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Resolve an isolated Agent dependency graph for an authenticated owner and project ID. */
+  resolveWorkspaceDependencies?: (principalId: string, workspaceId: string) => Promise<AgentDependencies>;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;
