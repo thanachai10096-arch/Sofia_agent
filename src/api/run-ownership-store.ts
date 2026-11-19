@@ -179,7 +179,7 @@ export class UpstashRunOwnershipStore implements RunOwnershipStore {
     if (!Number.isSafeInteger(leaseMs) || leaseMs < 1000 || leaseMs > 300_000) throw new Error("Run ownership lease must be between 1000 and 300000 milliseconds.");
     const [, , principalKey] = this.keys(lease.runId);
     const result = await this.eval(RUN_OWNERSHIP_RENEW_SCRIPT, [this.keys(lease.runId)[0], principalKey], [
-      lease.principalId, lease.instanceId, lease.token, String(lease.generation), String(leaseMs), String(this.bindingTtlMs),
+      lease.principalId, lease.instanceId, lease.token, String(lease.generation), String(leaseMs), String(Math.max(this.bindingTtlMs, leaseMs)),
     ]);
     return Number(result) === 1;
   }
