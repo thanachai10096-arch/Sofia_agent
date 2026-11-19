@@ -10,6 +10,7 @@ import {
   type DelegatedAuthority,
 } from "./capability-registry.js";
 import { riskFor, type RiskLevel } from "./guard.js";
+import { markDelegatedExecution } from "../brain/delegated-context.js";
 
 /**
  * Adds principal-bound capability authorization in front of the existing Brain
@@ -115,16 +116,16 @@ export class CapabilityGuardToolGateway implements ToolGateway {
       };
     }
 
-    return this.inner.execute(call, {
+    const executionContext: ToolExecutionContext = {
       ...context,
       requireApproval: context.requireApproval || decision.requiresApproval,
-      // The downstream gateway may skip its generic approval prompt only for
-      // this server-verified, non-critical delegated capability. Its other
-      // policy, path, host, and risk checks remain in force.
-      ...(!decision.requiresApproval && capability?.risk !== "critical"
-        ? { delegatedCapabilityId: capabilityId }
-        : {}),
-    });
+    };
+    // Mark the exact context object out-of-band. A caller cannot forge this by
+    // adding a similarly named property to a plain execution-context object.
+    if (!decision.requiresApproval && capability.risk !== "critical") {
+      markDelegatedExecution(executionContext);
+    }
+    return this.inner.execute(call, executionContext);
   }
 
   snapshot(signal: AbortSignal) { return this.inner.snapshot(signal); }
