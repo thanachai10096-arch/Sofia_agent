@@ -28,7 +28,7 @@ export class SofiaAgent {
     this.sessionTails.set(storageSessionId, tail);
     await previous.catch(() => undefined);
     try {
-      return await this.runUnlocked(request);
+      return await this.runUnlocked({ ...request, sessionId: storageSessionId });
     } finally {
       release();
       if (this.sessionTails.get(storageSessionId) === tail) this.sessionTails.delete(storageSessionId);
