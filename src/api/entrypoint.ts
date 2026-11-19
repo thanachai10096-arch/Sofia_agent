@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
@@ -37,7 +37,11 @@ if (rawApiKeys) {
 } else {
   const apiKey = process.env.SOFIA_API_KEY?.trim();
   if (!apiKey) throw new Error("Set SOFIA_API_KEY or SOFIA_API_KEYS_JSON.");
-  apiKeys[apiKey] = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+  const fallbackScopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+  if (fallbackScopes.length === 0 || !fallbackScopes.every((scope) => /^[a-z][a-z0-9:_-]{0,63}$/u.test(scope))) {
+    throw new Error("SOFIA_API_SCOPES contains an invalid scope.");
+  }
+  apiKeys[apiKey] = [...new Set(fallbackScopes)];
 }
 if (Object.keys(apiKeys).length === 0) throw new Error("At least one API key is required.");
 const configuredScopes = new Set(Object.values(apiKeys).flat());
@@ -84,6 +88,12 @@ const userWorkspaceRoot = path.resolve(
   process.env.SOFIA_USER_WORKSPACES_DIR ?? path.join(workspace, ".sofia", "user-workspaces"),
 );
 mkdirSync(userWorkspaceRoot, { recursive: true, mode: 0o700 });
+chmodSync(userWorkspaceRoot, 0o700);
+const maxCachedWorkspaces = (() => {
+  const value = Number(process.env.SOFIA_MAX_CACHED_WORKSPACES ?? 256);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 5000) throw new Error("SOFIA_MAX_CACHED_WORKSPACES must be an integer from 1 to 5000.");
+  return value;
+})();
 type WorkspaceDependencies = Awaited<ReturnType<typeof createSofiaAgentDependenciesWithSessions>>;
 const workspaceDependencies = new Map<string, Promise<WorkspaceDependencies>>();
 const resolveWorkspaceDependencies = async (principalId: string, workspaceId: string) => {
@@ -92,10 +102,14 @@ const resolveWorkspaceDependencies = async (principalId: string, workspaceId: st
   const cacheKey = principalId + ":" + workspaceId;
   let pending = workspaceDependencies.get(cacheKey);
   if (!pending) {
+    if (workspaceDependencies.size >= maxCachedWorkspaces) throw new Error("Workspace runtime capacity reached; increase SOFIA_MAX_CACHED_WORKSPACES or restart after cleanup.");
     const ownerRoot = path.join(userWorkspaceRoot, principalId);
     const projectRoot = path.join(ownerRoot, createHash("sha256").update(workspaceId).digest("hex"));
     mkdirSync(projectRoot, { recursive: true, mode: 0o700 });
     mkdirSync(path.join(projectRoot, ".sofia"), { recursive: true, mode: 0o700 });
+    chmodSync(ownerRoot, 0o700);
+    chmodSync(projectRoot, 0o700);
+    chmodSync(path.join(projectRoot, ".sofia"), 0o700);
     pending = createSofiaAgentDependenciesWithSessions(
       projectRoot,
       approvalHandler,
