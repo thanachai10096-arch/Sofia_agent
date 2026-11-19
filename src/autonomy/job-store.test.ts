@@ -86,6 +86,30 @@ test("checkpoint survives worker interruption and remains principal-scoped", asy
   });
 });
 
+test("local checkpoint rejects gaps, regressions and skipped cycle numbers", async () => {
+  await fixture(async (store) => {
+    const job = await store.enqueue({ principalId: "user-a", kind: "research", payload: {} });
+    await store.claimNext("worker-1", 10_000);
+    await assert.rejects(
+      () => store.saveCheckpoint("user-a", job.id, "worker-1", { nextCycle: 2, cycles: [{ cycle: 2 }] }),
+      /contiguous, completed cycle history/,
+    );
+    await store.saveCheckpoint("user-a", job.id, "worker-1", { nextCycle: 2, cycles: [{ cycle: 1 }] });
+    await assert.rejects(
+      () => store.saveCheckpoint("user-a", job.id, "worker-1", { nextCycle: 2, cycles: [{ cycle: 1 }] }),
+      /advance exactly one completed cycle/,
+    );
+    await assert.rejects(
+      () => store.saveCheckpoint("user-a", job.id, "worker-1", { nextCycle: 4, cycles: [{ cycle: 1 }, { cycle: 2 }, { cycle: 3 }] }),
+      /advance exactly one completed cycle/,
+    );
+    const advanced = await store.saveCheckpoint("user-a", job.id, "worker-1", {
+      nextCycle: 3, cycles: [{ cycle: 1 }, { cycle: 2 }],
+    });
+    assert.equal(advanced.checkpoint?.nextCycle, 3);
+  });
+});
+
 test("lease-owned cancellation cannot cancel a job reclaimed by another worker", async () => {
   await fixture(async (store) => {
     const job = await store.enqueue({ principalId: "user-a", kind: "research", payload: {}, maxAttempts: 3 });
