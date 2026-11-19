@@ -1,6 +1,6 @@
 # API Distributed Run Ownership
 
-Status: design proposal; not implemented by this document. The current `SofiaApiConfig.runStore` remains single-instance only.
+Status: partially implemented foundation. `src/api/run-ownership-store.ts` now provides an Upstash Redis lease adapter with atomic claim, renewal, assertion, release, principal binding, and fencing generations. It is not yet wired into API Run execution or recovery. The current `SofiaApiConfig.runStore` remains single-instance only.
 
 ## Problem
 
@@ -34,6 +34,10 @@ Lease identity must include the tenant principal. Run IDs alone are not globally
 ## Adapter strategy
 
 ### First adapter: Upstash Redis
+
+Implemented foundation: `UpstashRunOwnershipStore` in `src/api/run-ownership-store.ts` uses Redis Lua scripts for claim, renew, assert-current, and release. The claim script binds a run ID to a principal for a configurable retention window, increments a persistent fencing counter, and stores the active lease with Redis TTL. All keys for a run use the same Redis Cluster hash tag.
+
+The adapter is not yet connected to `createSofiaApi`, RunRecord persistence, tool execution, checkpoint writes, or approval recovery. The tests currently mock the Upstash REST transport; they are not a live Redis integration test.
 
 Use a Redis Lua script for each state transition. Keep all keys used by one script in the same Redis Cluster hash slot. The script, not the application process, performs compare-and-set checks and increments the fencing generation. Use server-side Redis time where supported; never compare expiry using a worker's local clock.
 
@@ -73,4 +77,4 @@ The existing file-backed Run Store remains explicitly single-instance. A local l
 - Chaos tests: kill owner during tool call, heartbeat, checkpoint, and terminal persistence.
 - End-to-end tests across at least two independent API processes against a real Redis instance.
 
-Until these checks pass, Sofia must describe API Run persistence as single-instance and must not claim multi-instance Run recovery is supported.
+Until the adapter is wired into every Run state transition and the multi-process checks pass, Sofia must describe API Run persistence as single-instance and must not claim multi-instance Run recovery is supported.
