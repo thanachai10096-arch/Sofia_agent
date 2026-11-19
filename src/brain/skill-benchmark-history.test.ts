@@ -78,6 +78,21 @@ test("benchmark history rejects a pass flag that disagrees with its checks", () 
   } finally { f.cleanup(); }
 });
 
+test("benchmark history rejects inconsistent capability metrics", () => {
+  const f = fixture();
+  try {
+    const history = new FileSkillBenchmarkHistory(f.file);
+    assert.throws(() => history.append(record({
+      capability: {
+        score: 100, passRate: 0.5, baselineCoverage: 1,
+        passedChecks: 2, totalChecks: 2, baselineChecks: 0,
+        missingBaselineChecks: [], failedChecks: [],
+      },
+    })), /Invalid skill benchmark history record/);
+    assert.equal(history.list().length, 0);
+  } finally { f.cleanup(); }
+});
+
 test("benchmark history refuses to overwrite corrupt persisted data", () => {
   const f = fixture();
   try {
