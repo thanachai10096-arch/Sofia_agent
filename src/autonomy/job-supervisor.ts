@@ -163,9 +163,12 @@ export class AutonomyJobSupervisor<TPayload = unknown> {
       if (controller.signal.aborted || signal.aborted) {
         return await this.options.store.cancel(job.principalId, job.id);
       }
+      // Adapter/provider errors can contain API keys, database URLs, prompts or user data.
+      // Persist only a fixed public-safe message; diagnostics belong in trusted host logs.
+      void error;
       return await this.options.store.fail(
         job.principalId, job.id, workerId,
-        error instanceof Error ? error.message : "Unknown autonomy worker failure", true,
+        "Autonomy job failed; inspect trusted host diagnostics.", true,
       );
     } finally {
       clearInterval(heartbeat);
