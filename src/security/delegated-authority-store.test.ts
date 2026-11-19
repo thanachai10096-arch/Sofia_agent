@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { SqliteDelegatedAuthorityStore } from "./delegated-authority-store.js";
+import { SqliteDelegatedAuthorityStore, createTenantAuthorityResolver } from "./delegated-authority-store.js";
+import { createTenantResourceResolver } from "../platform/tenant-resolver.js";
 import type { DelegatedAuthority } from "./capability-registry.js";
 
 const grant: DelegatedAuthority = {
@@ -37,4 +38,22 @@ test("authority store rejects principal spoofing and ignores expired grants", as
   assert.throws(() => store.grant("tenant-a", "principal-b", grant), /does not match/);
   store.grant("tenant-a", "principal-a", { ...grant, expiresAt: 10 });
   assert.equal(store.get("tenant-a", "principal-a", 10), undefined);
+});
+
+test("tenant-bound authority resolver cannot read another principal's grant", async (t) => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-tenant-authority-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const tenantResolver = createTenantResourceResolver(root);
+  const context = await tenantResolver.resolve("principal-a");
+  const bound = await createTenantAuthorityResolver(tenantResolver, context);
+  t.after(() => bound.close());
+
+  const store = await SqliteDelegatedAuthorityStore.open(
+    path.join(context.workspaceRoot, ".sofia", "delegated-authority.sqlite"),
+  );
+  store.grant(context.tenantId, "principal-a", grant);
+  t.after(() => store.close());
+
+  assert.deepEqual(await bound.resolveAuthority("principal-a"), grant);
+  assert.equal(await bound.resolveAuthority("principal-b"), undefined);
 });
