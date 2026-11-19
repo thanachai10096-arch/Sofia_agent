@@ -30,6 +30,20 @@ test("agent retries after reviewer rejection and succeeds on fallback", async ()
 });
 
 
+test("legacy agent preserves a trusted host-assigned run ID for approval cancellation", async () => {
+  const agent = new SofiaAgent({
+    provider: { async generate() { return { text: "Completed." }; } },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["general"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: { async review() { return { approved: true, reason: "Output verified." }; } },
+  });
+
+  const result = await agent.run({ task: "complete a simple task", runId: "api-run-123" });
+  assert.equal(result.runId, "api-run-123");
+});
+
+
 test("security kill switch aborts active model calls and blocks new runs", async () => {
   const { SecurityController } = await import("../src/security/controller.js");
   const securityController = new SecurityController();
