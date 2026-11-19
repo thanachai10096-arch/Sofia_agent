@@ -1061,8 +1061,12 @@ test("DurableJobRuntime close aborts active work, waits for shutdown, and reject
 
 test("DurableJobRuntime close waits for a submit already admitted but still persisting", async () => {
   const namespace = "job-runtime-close-admission-" + randomUUID();
+  let brainStarted = false;
   const brain = {
-    run: async () => ({ completed: true, state: "completed" }),
+    run: async () => {
+      brainStarted = true;
+      return { completed: true, state: "completed" };
+    },
   } as unknown as SofiaBrain;
   const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
   const internals = runtime as unknown as {
@@ -1090,7 +1094,8 @@ test("DurableJobRuntime close waits for a submit already admitted but still pers
     releaseSave();
     const submitted = await submitting;
     await closing;
-    assert.ok(["cancelled", "completed"].includes((await runtime.get(submitted.id))?.status ?? ""));
+    assert.equal((await runtime.get(submitted.id))?.status, "cancelled");
+    assert.equal(brainStarted, false, "a submission admitted before close must not dispatch after shutdown");
     await assert.rejects(runtime.submit({ task: "late submit" }), /runtime is closed/i);
   } finally {
     releaseSave();
