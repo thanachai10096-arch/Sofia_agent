@@ -111,6 +111,21 @@ test("principal workspace resolver rejects a symlink root", async (t) => {
   }
 });
 
+test("principal IDs are normalized consistently before deriving workspace paths", async () => {
+  const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-normalize-"));
+  try {
+    const resolver = new PrincipalWorkspaceResolver(path.join(temp, "workspaces"));
+    const plain = await resolver.resolve(" tenant:alice ");
+    const normalized = await resolver.resolve("tenant:alice");
+    assert.equal(plain, normalized);
+    const composed = await resolver.resolve("tenant:caf\u00e9");
+    const decomposed = await resolver.resolve("tenant:cafe\u0301");
+    assert.equal(composed, decomposed);
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
 test("named mutable-state directories stay inside their principal workspace", async () => {
   const temp = await mkdtemp(path.join(os.tmpdir(), "sofia-principal-stores-"));
   try {
