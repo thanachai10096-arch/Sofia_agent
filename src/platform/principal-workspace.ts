@@ -6,6 +6,13 @@ function within(root: string, candidate: string): boolean {
   return candidate === root || candidate.startsWith(root + path.sep);
 }
 
+function assertPrivateDirectory(info: Awaited<ReturnType<typeof lstat>>, description: string): void {
+  // POSIX mode bits are meaningful on Unix. Windows ACLs are managed separately.
+  if (process.platform !== "win32" && (info.mode & 0o077) !== 0) {
+    throw new Error(description + " must not grant group or other users access.");
+  }
+}
+
 /**
  * Maps an authenticated principal to an opaque, stable workspace directory.
  * This is a resolver primitive only: callers must construct all per-user
@@ -30,8 +37,8 @@ export class PrincipalWorkspaceResolver {
         if (!info.isDirectory() || info.isSymbolicLink()) {
           throw new Error("Principal workspace root must be a real directory, not a symbolic link.");
         }
-        const canonical = await realpath(configured);
-        return canonical;
+        assertPrivateDirectory(info, "Principal workspace root");
+        return realpath(configured);
       })();
     }
     return this.rootPromise;
@@ -53,6 +60,7 @@ export class PrincipalWorkspaceResolver {
     if (!info.isDirectory() || info.isSymbolicLink()) {
       throw new Error("Principal workspace must be a real directory, not a symbolic link.");
     }
+    assertPrivateDirectory(info, "Principal workspace");
     const canonical = await realpath(candidate);
     if (!within(root, canonical)) throw new Error("Principal workspace escapes its configured root.");
     return canonical;
