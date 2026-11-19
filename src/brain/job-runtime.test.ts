@@ -1054,3 +1054,65 @@ test("DurableJobRuntime preserves API-key tool scopes for background execution",
   assert.deepEqual(observedScopes, [scopes]);
   assert.deepEqual(current?.toolScopes, scopes);
 });
+
+
+test("DurableJobRuntime persists desktop grants and intersects them with current grants on resume", async () => {
+  const namespace = "job-runtime-desktop-grants-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "desktop-grants-" + randomUUID(),
+    task: "resume with reduced desktop grants",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "desktop-grants-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const factoryOptions: Array<{ toolScopes?: string[]; desktopCapabilities?: string[] }> = [];
+  let runCount = 0;
+  const runtime = new DurableJobRuntime((options) => {
+    factoryOptions.push(options);
+    return {
+      run: async ({ resume, onRunSnapshot }: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+        runCount += 1;
+        if (!resume) {
+          await onRunSnapshot?.(snapshot);
+          return { completed: false, state: "failed" };
+        }
+        return { completed: true, state: "completed" };
+      },
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({
+    task: "resume with reduced desktop grants",
+    ownerKeyId: "owner-a",
+    toolScopes: ["agent:run", "desktop:workspace:read", "desktop:workspace:write"],
+    desktopCapabilities: ["workspace:read", "workspace:write"],
+  });
+
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+  assert.deepEqual(current?.desktopCapabilities, ["workspace:read", "workspace:write"]);
+
+  const resumed = await runtime.resume(submitted.id, undefined, {
+    toolScopes: ["agent:run", "desktop:workspace:read"],
+    desktopCapabilities: ["workspace:read"],
+  });
+  assert.equal(resumed.status, "completed");
+  assert.deepEqual(factoryOptions[0]?.desktopCapabilities, ["workspace:read", "workspace:write"]);
+  assert.deepEqual(factoryOptions[1]?.desktopCapabilities, ["workspace:read"]);
+  assert.deepEqual(factoryOptions[1]?.toolScopes, ["agent:run", "desktop:workspace:read"]);
+  assert.equal(runCount, 2);
+});
