@@ -1096,3 +1096,70 @@ test("DurableJobRuntime close waits for a submit already admitted but still pers
     releaseSave();
   }
 });
+
+
+test("DurableJobRuntime close aborts a resumed execution without waiting on its admission", async () => {
+  const namespace = "job-runtime-close-resume-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "close-resume-" + randomUUID(),
+    task: "resume while shutting down",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "close-resume-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  let resumeStarted!: () => void;
+  const resumedRunStarted = new Promise<void>((resolve) => { resumeStarted = resolve; });
+  const brain = {
+    run: async (input: {
+      signal?: AbortSignal;
+      resume?: import("./run-state.js").BrainRunSnapshot;
+    }) => {
+      if (!input.resume) {
+        await snapshot && undefined;
+        return { completed: false, state: "failed" };
+      }
+      resumeStarted();
+      if (!input.signal) throw new Error("Runtime did not pass a resume abort signal");
+      await new Promise<void>((resolve) => {
+        if (input.signal!.aborted) resolve();
+        else input.signal!.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return { completed: false, state: "cancelled" };
+    },
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const first = await runtime.submit({ task: "resume while shutting down" });
+  let current = await runtime.get(first.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(first.id);
+  }
+  assert.equal(current?.status, "failed");
+  // Seed a valid checkpoint on the canonical persisted record for this lifecycle test.
+  const internals = runtime as unknown as {
+    jobs: Map<string, import("./job-runtime.js").JobRecord>;
+    state: { save: (record: import("./job-runtime.js").JobRecord) => Promise<boolean> };
+  };
+  const record = internals.jobs.get(first.id);
+  assert.ok(record);
+  record.snapshot = snapshot;
+  await internals.state.save(record);
+
+  const resuming = runtime.resume(first.id);
+  await resumedRunStarted;
+  const closing = runtime.close();
+  const resumed = await resuming;
+  await closing;
+  assert.equal(resumed.status, "cancelled");
+  assert.equal((await runtime.get(first.id))?.status, "cancelled");
+});
