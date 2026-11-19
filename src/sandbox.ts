@@ -391,8 +391,10 @@ export class RemoteSandbox implements Sandbox {
   constructor(private readonly options: RemoteSandboxOptions) {
     let parsed: URL;
     try { parsed = new URL(options.endpoint); } catch { throw new Error("Remote sandbox endpoint must be a valid URL."); }
-    if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") {
-      throw new Error("Remote sandbox endpoint must use HTTPS.");
+    const isLoopbackHttp = parsed.protocol === "http:" &&
+      (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "[::1]");
+    if (parsed.protocol !== "https:" && !isLoopbackHttp) {
+      throw new Error("Remote sandbox endpoint must use HTTPS (HTTP is allowed only for loopback tests).");
     }
     if (parsed.username || parsed.password || parsed.search || parsed.hash) {
       throw new Error("Remote sandbox endpoint cannot contain credentials, query parameters, or fragments.");
