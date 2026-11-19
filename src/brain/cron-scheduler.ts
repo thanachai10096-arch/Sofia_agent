@@ -254,6 +254,18 @@ export class CronScheduler {
     if (!await this.authorize(actor, "create")) throw new Error("Not authorized to create cron schedule");
     if (input.ownerKeyId !== actor) throw new Error("Schedule owner must match the authenticated API key");
     if (!input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim()) throw new Error("name, task and ownerKeyId are required");
+    if (input.name.length > 200) throw new Error("Schedule name must not exceed 200 characters");
+    if (input.task.length > 20_000) throw new Error("Schedule task must not exceed 20000 characters");
+    if (typeof input.timeZone !== "string" || input.timeZone.length > 100) throw new Error("A valid IANA timeZone is required");
+    if (input.misfirePolicy !== undefined && input.misfirePolicy !== "skip" && input.misfirePolicy !== "run-once") {
+      throw new Error("misfirePolicy must be skip or run-once");
+    }
+    if (input.maxRetries !== undefined && (!Number.isInteger(input.maxRetries) || input.maxRetries < 0 || input.maxRetries > 10)) {
+      throw new Error("maxRetries must be an integer from 0 to 10");
+    }
+    if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || input.timeoutMs < 1_000 || input.timeoutMs > 3_600_000)) {
+      throw new Error("timeoutMs must be an integer from 1000 to 3600000");
+    }
     const hasCron = input.cron !== undefined;
     const hasRunAt = input.runAt !== undefined;
     if (hasCron === hasRunAt) throw new Error("Provide exactly one of cron or runAt");
