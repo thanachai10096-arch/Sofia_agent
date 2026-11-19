@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdtemp, mkdir, open, lstat, realpath, rm } from "node:fs/promises";
+import { mkdir, open, lstat, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { Sandbox } from "../sandbox.js";
@@ -23,8 +23,11 @@ export interface RemoteSandboxRunnerOptions {
   allowNetwork?: boolean;
   /** Operator attestation that host firewall blocks private, link-local and metadata destinations. */
   publicInternetEgressEnforced?: boolean;
-  /** Operator attestation that tempRoot is on a filesystem with a hard per-run disk quota. */
-  diskQuotaEnforced?: boolean;
+  /** Host-owned provisioner that creates each workspace on a hard quota-limited filesystem. */
+  workspaceProvisioner?: {
+    createWorkspace(): Promise<string>;
+    disposeWorkspace(workspacePath: string): Promise<void>;
+  };
 }
 
 interface RequestFile { path: string; contentBase64: string; }
@@ -208,8 +211,10 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
   if (allowNetwork && options.publicInternetEgressEnforced !== true) {
     throw new Error("Networked runner requires an operator-confirmed public-internet-only egress firewall.");
   }
-  if (options.diskQuotaEnforced !== true) {
-    throw new Error("Remote runner requires an operator-confirmed hard disk quota for each run workspace.");
+  if (!options.workspaceProvisioner ||
+      typeof options.workspaceProvisioner.createWorkspace !== "function" ||
+      typeof options.workspaceProvisioner.disposeWorkspace !== "function") {
+    throw new Error("Remote runner requires a host-owned workspace provisioner backed by a hard per-run disk quota.");
   }
   let activeRuns = 0;
   const tempRoot = path.resolve(options.tempRoot ?? path.join(os.tmpdir(), "sofia-remote-runner"));
@@ -268,7 +273,15 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
       }
       await mkdir(tempRoot, { recursive: true, mode: 0o700 });
       const trustedTempRoot = await realpath(tempRoot);
-      workspace = await mkdtemp(path.join(trustedTempRoot, "run-"));
+      workspace = await options.workspaceProvisioner!.createWorkspace();
+      const trustedWorkspace = await realpath(workspace);
+      const workspaceParent = path.dirname(trustedWorkspace);
+      const workspaceInfo = await lstat(trustedWorkspace);
+      if (!workspaceInfo.isDirectory() || workspaceInfo.isSymbolicLink() ||
+          trustedWorkspace === trustedTempRoot || workspaceParent !== trustedTempRoot) {
+        throw new Error("Workspace provisioner must return a fresh direct child of the configured runner temp root.");
+      }
+      workspace = trustedWorkspace;
       const originalFiles = await stageFiles(workspace, job.files);
       const workingDirectory = path.resolve(workspace, ...job.cwd.split("/").filter((part) => part && part !== "."));
       const relativeCwd = path.relative(workspace, workingDirectory);
@@ -303,7 +316,7 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
         json(response, status, { error: status === 413 ? "payload_too_large" : "invalid_or_failed_request" });
       }
     } finally {
-      if (workspace) await rm(workspace, { recursive: true, force: true }).catch(() => undefined);
+      if (workspace) await options.workspaceProvisioner!.disposeWorkspace(workspace).catch(() => undefined);
       activeRuns -= 1;
     }
   });
