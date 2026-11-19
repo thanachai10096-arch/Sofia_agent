@@ -133,6 +133,7 @@ export class SofiaAgent {
       ...(request.principalId ? { principalId: request.principalId } : {}),
       ...(request.modelRouteId && request.modelRouteId !== "auto" ? { modelRouteId: request.modelRouteId } : {}),
       ...(request.desktopCapabilities?.length ? { desktopCapabilities: request.desktopCapabilities } : {}),
+      ...(request.onRunSnapshot ? { onRunSnapshot: request.onRunSnapshot } : {}),
       onEvent: (event) => {
         if (event.type === "brain.tool.started") {
           emit({ type: "tool.started", message: "Running Brain tool.", metadata: { stepId: event.stepId } });
