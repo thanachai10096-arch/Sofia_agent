@@ -289,7 +289,24 @@ export async function createSofiaAgentDependenciesWithOwnerSessions(
       }
     }
     const dependencies = createSofiaAgentDependencies(workspace, approval);
-    return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
+    let closed = false;
+    const closeSessionStore = (): void => {
+      if (closed) return;
+      closed = true;
+      sessionStore.close();
+    };
+    return {
+      ...dependencies,
+      sessionStore,
+      closeSessionStore,
+      close: async () => {
+        try {
+          await dependencies.close?.();
+        } finally {
+          closeSessionStore();
+        }
+      },
+    };
   } catch (error) {
     sessionStore.close();
     throw error;
