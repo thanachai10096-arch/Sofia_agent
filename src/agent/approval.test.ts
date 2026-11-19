@@ -39,3 +39,44 @@ test("approval broker cancels only the matching owner's pending run", async () =
   assert.equal(broker.cancelRun("run-1","owner-a"),1);
   assert.equal(await result,false);
 });
+
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { FileApprovalJournal } from "./approval.js";
+
+test("file-backed approval journal marks pending approvals interrupted after restart", async () => {
+  const root=await mkdtemp(path.join(os.tmpdir(),"sofia-approval-journal-"));
+  const file=path.join(root,"approvals.json");
+  try {
+    const first=new ApprovalBroker(120_000,new FileApprovalJournal(file));
+    const result=first.handle(request);
+    const [pending]=first.pending("owner-a");
+    assert.ok(pending);
+    const raw=await readFile(file,"utf8");
+    assert.equal(raw.includes("approved"),false,"journal must not persist proposed tool input");
+    const restarted=new ApprovalBroker(120_000,new FileApprovalJournal(file));
+    assert.deepEqual(restarted.pending("owner-a"),[]);
+    assert.equal(restarted.history("owner-a")[0]?.status,"interrupted");
+    assert.equal(await result,false);
+  } finally {
+    await rm(root,{recursive:true,force:true});
+  }
+});
+
+test("file-backed approval journal persists decisions before settling", async () => {
+  const root=await mkdtemp(path.join(os.tmpdir(),"sofia-approval-journal-"));
+  const file=path.join(root,"approvals.json");
+  try {
+    const broker=new ApprovalBroker(120_000,new FileApprovalJournal(file));
+    const result=broker.handle(request);
+    const [pending]=broker.pending("owner-a");
+    assert.ok(pending);
+    assert.equal(broker.decide({approvalId:pending.id,principalId:"owner-a",actionHash:request.actionHash,approved:true}),true);
+    assert.equal(await result,true);
+    const restarted=new ApprovalBroker(120_000,new FileApprovalJournal(file));
+    assert.equal(restarted.history("owner-a")[0]?.status,"approved");
+  } finally {
+    await rm(root,{recursive:true,force:true});
+  }
+});
