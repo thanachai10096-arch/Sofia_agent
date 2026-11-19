@@ -44,6 +44,8 @@ test("Upstash run ownership claim uses one cluster slot and returns a fencing ge
   assert.ok(keys.every((key) => key.startsWith("sofia:")));
   assert.match(RUN_OWNERSHIP_CLAIM_SCRIPT, /INCR/u);
   assert.match(RUN_OWNERSHIP_CLAIM_SCRIPT, /PEXPIRE/u);
+  assert.match(RUN_OWNERSHIP_CLAIM_SCRIPT, /PTTL/u, "reclaim must inspect the remaining tenant-binding TTL");
+  assert.match(RUN_OWNERSHIP_CLAIM_SCRIPT, /bindingTtl < tonumber\(ARGV\[5\]\)/u, "reclaim may extend but never shorten tenant binding");
   assert.ok(Number(command[10]) >= input.leaseMs, "tenant binding must live at least as long as the lease");
   assert.ok(
     RUN_OWNERSHIP_CLAIM_SCRIPT.indexOf("EXISTS', KEYS[1]") <
