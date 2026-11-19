@@ -44,6 +44,7 @@ import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import { PrincipalWorkspaceResolver } from "../platform/principal-workspace.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
