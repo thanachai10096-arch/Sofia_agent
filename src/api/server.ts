@@ -12,6 +12,7 @@ import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 import { API_SCOPE_CATALOG, summarizeApiKeyPermissions } from "./scopes.js";
+import { loadExecutionPolicyFromEnv } from "../security/policy.js";
 
 interface ActiveRun {
   id: string;
@@ -388,7 +389,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
         return json(res, 200, {
           scopes: API_SCOPE_CATALOG,
-          apiKeys: summarizeApiKeyPermissions(config.apiKeys),
+          apiKeys: summarizeApiKeyPermissions(config.apiKeys, deps.policy ?? loadExecutionPolicyFromEnv()),
           note: "Permission changes are managed by the trusted server operator through deployment configuration. Bearer tokens are never returned.",
         }, origin, config);
       }
