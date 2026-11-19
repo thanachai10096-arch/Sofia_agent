@@ -80,3 +80,19 @@ test("file-backed approval journal persists decisions before settling", async ()
     await rm(root,{recursive:true,force:true});
   }
 });
+
+test("graceful host shutdown interrupts all pending approvals", async () => {
+  const root=await mkdtemp(path.join(os.tmpdir(),"sofia-approval-shutdown-"));
+  const file=path.join(root,"approvals.json");
+  try {
+    const broker=new ApprovalBroker(120_000,new FileApprovalJournal(file));
+    const result=broker.handle(request);
+    assert.equal(broker.pending("owner-a").length,1);
+    assert.equal(broker.interruptAll(),1);
+    assert.equal(await result,false);
+    assert.deepEqual(broker.pending("owner-a"),[]);
+    assert.equal(broker.history("owner-a")[0]?.status,"interrupted");
+  } finally {
+    await rm(root,{recursive:true,force:true});
+  }
+});
