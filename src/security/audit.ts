@@ -53,22 +53,20 @@ export class CompositeSecurityAudit implements SecurityAuditSink {
  * These records are indeterminate, not safe to replay automatically.
  */
 export function findIndeterminateExecutions(events: readonly SecurityAuditEvent[]): SecurityAuditEvent[] {
+  const startsById = new Map(
+    events.filter((event) => event.decision === "execution_started").map((event) => [event.id, event]),
+  );
   const resolved = new Set<string>();
   for (const event of events) {
     if ((event.decision !== "completed" && event.decision !== "failed") || !event.relatedEventId) continue;
-    const start = events.find((candidate) =>
-      candidate.id === event.relatedEventId &&
-      candidate.decision === "execution_started" &&
-      candidate.runId === event.runId &&
-      candidate.principalId === event.principalId &&
-      candidate.toolName === event.toolName &&
-      candidate.actionHash === event.actionHash,
-    );
-    if (start) resolved.add(start.id);
+    const start = startsById.get(event.relatedEventId);
+    if (start && start.runId === event.runId &&
+        start.principalId === event.principalId && start.toolName === event.toolName &&
+        start.actionHash === event.actionHash) {
+      resolved.add(start.id);
+    }
   }
-  return events.filter((event) =>
-    event.decision === "execution_started" && !resolved.has(event.id),
-  );
+  return [...startsById.values()].filter((event) => !resolved.has(event.id));
 }
 
 export class MemorySecurityAudit implements SecurityAuditSink {
