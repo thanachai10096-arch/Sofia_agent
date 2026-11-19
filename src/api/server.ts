@@ -121,7 +121,7 @@ function pathId(url: string): string | null {
 }
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
-  const agent = new SofiaAgent(deps);
+  const agent = new SofiaAgent(config.approvalBroker ? { ...deps, approval: config.approvalBroker.handle } : deps);
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
   const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
@@ -343,6 +343,33 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           if (!memoryId || memoryId.length > 256) return json(res, 400, { error: "invalid_memory_id" }, origin, config);
           const deleted = await deps.userMemoryStore.delete(auth.keyId, memoryId);
           return deleted ? json(res, 200, { deleted: true }, origin, config) : json(res, 404, { error: "memory_not_found" }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
+
+      const isApprovalRequest = requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/");
+      if (isApprovalRequest) {
+        const broker = config.approvalBroker;
+        if (!broker) return json(res, 503, { error: "approval_broker_unavailable" }, origin, config);
+        if (req.method === "GET" && requestUrl.pathname === "/v1/approvals") {
+          if (!auth.scopes.includes("approval:read")) return json(res, 403, { error: "forbidden", requiredScope: "approval:read" }, origin, config);
+          return json(res, 200, { approvals: broker.pending(auth.keyId) }, origin, config);
+        }
+        const decisionMatch = requestUrl.pathname.match(/^\\/v1\\/approvals\\/([^/]+)\\/decision$/);
+        if (req.method === "POST" && decisionMatch) {
+          if (!auth.scopes.includes("approval:decide")) return json(res, 403, { error: "forbidden", requiredScope: "approval:decide" }, origin, config);
+          let approvalId: string;
+          try { approvalId = decodeURIComponent(decisionMatch[1]!); } catch { return json(res, 400, { error: "invalid_approval_id" }, origin, config); }
+          if (!approvalId || approvalId.length > 128) return json(res, 400, { error: "invalid_approval_id" }, origin, config);
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          const input = raw as Record<string, unknown>;
+          if (typeof input.actionHash !== "string" || input.actionHash.length < 1 || input.actionHash.length > 256 ||
+              typeof input.approved !== "boolean") return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          const accepted = broker.decide({ approvalId, principalId: auth.keyId, actionHash: input.actionHash, approved: input.approved });
+          return accepted
+            ? json(res, 200, { approvalId, status: input.approved ? "approved" : "rejected" }, origin, config)
+            : json(res, 404, { error: "approval_not_found_or_expired" }, origin, config);
         }
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
