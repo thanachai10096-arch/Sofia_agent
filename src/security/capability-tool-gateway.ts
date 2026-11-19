@@ -69,6 +69,19 @@ export class CapabilityGuardToolGateway implements ToolGateway {
     if (capability.transport === "desktop" && !call.tool.startsWith("desktop.")) {
       return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Desktop capability is mapped to a non-desktop tool." } };
     }
+    // Payment execution stays disabled until the persistent atomic spend
+    // ledger, idempotent provider adapter, and reconciliation path are wired.
+    if (capability.effect === "financial") {
+      return {
+        ok: false,
+        data: null,
+        evidenceId: "",
+        error: {
+          category: "permission_error",
+          message: "Financial execution is disabled until an atomic transaction executor and provider reconciliation adapter are configured.",
+        },
+      };
+    }
     const authority = await this.resolveAuthority(context.principalId);
     const input = call.input as Record<string, unknown>;
     const decision = authorizeCapability(
@@ -85,18 +98,6 @@ export class CapabilityGuardToolGateway implements ToolGateway {
 
     if (!decision.allowed) {
       return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: decision.reason } };
-    }
-
-    if (capability.effect === "financial") {
-      return {
-        ok: false,
-        data: null,
-        evidenceId: "",
-        error: {
-          category: "permission_error",
-          message: "Financial execution is disabled until an atomic transaction executor and provider reconciliation adapter are configured.",
-        },
-      };
     }
 
     if (decision.requiresApproval && !context.requireApproval) {
