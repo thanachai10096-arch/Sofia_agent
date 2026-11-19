@@ -99,3 +99,27 @@ test("PostgreSQL lease transactions roll back and release the client on ownershi
   assert.equal(pool.calls[2].sql, "ROLLBACK");
   assert.equal(pool.released, true);
 });
+
+
+test("PostgreSQL cancellation is tenant-scoped and never exposes another tenant's job", async () => {
+  const pool = new RecordingPool();
+  const store = createStore(pool);
+
+  await assert.rejects(() => store.cancel("tenant-a", "job-from-tenant-b"), /Autonomy job not found/);
+
+  assert.equal(pool.calls.length, 2);
+  assert.match(pool.calls[0].sql, /WHERE principal_id=\$1 AND id=\$2 AND status IN \('queued','running'\)/);
+  assert.deepEqual(pool.calls[0].values, ["tenant-a", "job-from-tenant-b"]);
+  assert.match(pool.calls[1].sql, /WHERE principal_id=\$1 AND id=\$2/);
+  assert.deepEqual(pool.calls[1].values, ["tenant-a", "job-from-tenant-b"]);
+});
+
+test("PostgreSQL recovery only requeues expired running leases and bounds exhausted attempts", async () => {
+  const pool = new RecordingPool();
+  const store = createStore(pool);
+
+  assert.equal(await store.recoverExpired(), 0);
+  assert.match(pool.calls[0].sql, /status='running' AND lease_expires_at <= now\(\)/);
+  assert.match(pool.calls[0].sql, /CASE WHEN attempts < max_attempts THEN 'queued' ELSE 'failed' END/);
+  assert.equal(pool.calls[0].values, undefined);
+});
