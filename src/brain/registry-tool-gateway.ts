@@ -46,10 +46,10 @@ export class RegistryToolGateway implements ToolGateway {
       effect === "write" || effect === "shell" || effect === "network" ||
       effect === "browser" || effect === "destructive",
     ) ?? false;
-    if (production && effectfulForAudit && (!this.audit?.durable || !this.audit.read)) {
+    if (production && effectfulForAudit && (!this.audit?.durable || !this.audit.read || !this.audit.list)) {
       return {
         ok: false, data: null, evidenceId: "",
-        error: { category: "permission_error", message: "Production effectful tool execution requires a durable, readable security audit sink." },
+        error: { category: "permission_error", message: "Production effectful tool execution requires a durable, readable, enumerable security audit sink for recovery." },
       };
     }
     // Bind the approval hash and actual execution to one immutable input snapshot.
