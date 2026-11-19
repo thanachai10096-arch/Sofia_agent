@@ -63,8 +63,9 @@ export class FileApprovalJournal implements ApprovalJournal {
 
   save(records:readonly ApprovalAuditRecord[]):void {
     const directory=path.dirname(this.filePath);
+    // Do not chmod an arbitrary caller-supplied parent directory (it may be shared).
+    // Restrict the journal file itself; newly-created directories use owner-only mode.
     mkdirSync(directory,{recursive:true,mode:0o700});
-    chmodSync(directory,0o700);
     const temporary=this.filePath+"."+randomUUID()+".tmp";
     try {
       writeFileSync(temporary,JSON.stringify(records),{encoding:"utf8",mode:0o600,flag:"wx"});
