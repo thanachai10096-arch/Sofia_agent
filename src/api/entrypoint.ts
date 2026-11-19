@@ -44,7 +44,18 @@ if (rawApiKeys) {
   apiKeys[apiKey] = [...new Set(fallbackScopes)];
 }
 if (Object.keys(apiKeys).length === 0) throw new Error("At least one API key is required.");
-const configuredScopes = new Set(Object.values(apiKeys).flat());
+const allApiScopes = Object.values(apiKeys).flat();
+if (Object.keys(apiKeys).length > 1) {
+  // Process-mode child commands share the service account's filesystem view.
+  // Require a container boundary before accepting multiple independent tenants.
+  if (process.env.SOFIA_SANDBOX_MODE !== "docker") {
+    throw new Error("Multiple API principals require SOFIA_SANDBOX_MODE=docker; process mode does not isolate tenant filesystems.");
+  }
+  if (allApiScopes.some((scope) => scope.startsWith("desktop:"))) {
+    throw new Error("Desktop scopes are disabled for multi-principal API hosts until desktop execution has a per-tenant OS boundary.");
+  }
+}
+const configuredScopes = new Set(allApiScopes);
 const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
