@@ -477,6 +477,7 @@ test("production blocks an approved write when approval audit readback cannot be
       durable: true,
       record() {},
       read() { return undefined; },
+      list() { return []; },
     };
     const gateway = new RegistryToolGateway(
       { runtime: runtime(), tools: registry },
