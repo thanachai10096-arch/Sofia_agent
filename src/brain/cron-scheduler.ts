@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { JobRuntime, JobRecord } from "./job-runtime.js";
+import type { DesktopCapability } from "../desktop/types.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 export type MisfirePolicy = "skip" | "run-once";
@@ -15,6 +16,9 @@ export interface CronScheduleInput {
   runAt?: string;
   timeZone: string;
   ownerKeyId: string;
+  /** Explicit API-key grants captured when the schedule is created. */
+  toolScopes?: string[];
+  desktopCapabilities?: DesktopCapability[];
   enabled?: boolean;
   misfirePolicy?: MisfirePolicy;
   maxRetries?: number;
@@ -267,7 +271,11 @@ export class CronScheduler {
     if (hasRunAt) new Intl.DateTimeFormat("en-US", { timeZone: input.timeZone }).format(initialRun);
     const now = this.now().toISOString();
     const schedule: CronSchedule = {
-      ...input, enabled: undefined, misfirePolicy: input.misfirePolicy ?? "skip",
+      ...input,
+      // Never let an owner-only schedule inherit installation-wide host permissions.
+      toolScopes: [...(input.toolScopes ?? [])],
+      desktopCapabilities: [...(input.desktopCapabilities ?? [])],
+      enabled: undefined, misfirePolicy: input.misfirePolicy ?? "skip",
       maxRetries: Math.max(0, Math.min(10, Math.floor(input.maxRetries ?? 0))),
       timeoutMs: Math.max(1_000, Math.min(3_600_000, Math.floor(input.timeoutMs ?? 120_000))),
       id: randomUUID(), status: input.enabled === false ? "disabled" : "enabled",
@@ -542,7 +550,12 @@ export class CronScheduler {
           break;
         }
         try {
-          const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
+          const submitted = await this.runtime.submit({
+            task: schedule.task,
+            ownerKeyId: schedule.ownerKeyId,
+            toolScopes: [...(schedule.toolScopes ?? [])],
+            desktopCapabilities: [...(schedule.desktopCapabilities ?? [])],
+          });
           job = submitted;
           if (controller.signal.aborted) {
             await this.runtime.cancel(submitted.id).catch(() => false);
