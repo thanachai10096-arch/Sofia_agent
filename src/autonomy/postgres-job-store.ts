@@ -35,6 +35,16 @@ function mapJob<TPayload = unknown, TResult = unknown>(row: JobRow): AutonomyJob
   };
 }
 
+function validateCheckpoint(checkpoint: { nextCycle: number; cycles: unknown[] }): void {
+  if (!Number.isSafeInteger(checkpoint.nextCycle) || checkpoint.nextCycle < 2 ||
+      !Array.isArray(checkpoint.cycles) || checkpoint.cycles.length > 100 ||
+      checkpoint.cycles.length !== checkpoint.nextCycle - 1 ||
+      checkpoint.cycles.some((cycle, index) => !cycle || typeof cycle !== "object" ||
+        (cycle as { cycle?: unknown }).cycle !== index + 1)) {
+    throw new Error("Research checkpoint must contain a contiguous, completed cycle history.");
+  }
+}
+
 const columns = `version, id, principal_id, kind, status, payload, result, error,
   idempotency_key, attempts, max_attempts, created_at, updated_at, available_at,
   lease_worker_id, lease_expires_at, checkpoint`;
@@ -172,11 +182,16 @@ export class PostgresAutonomyJobStore implements AutonomyJobStore {
   }
 
   async saveCheckpoint(principalId: string, jobId: string, workerId: string, checkpoint: { nextCycle: number; cycles: unknown[] }): Promise<AutonomyJob> {
-    if (!Number.isSafeInteger(checkpoint.nextCycle) || checkpoint.nextCycle < 1 || !Array.isArray(checkpoint.cycles) || checkpoint.cycles.length > 100) throw new Error("Invalid autonomy research checkpoint.");
+    validateCheckpoint(checkpoint);
     const json = JSON.stringify({ ...checkpoint, updatedAt: new Date().toISOString() });
     if (Buffer.byteLength(json, "utf8") > 2 * 1024 * 1024) throw new Error("Research checkpoint exceeds 2 MiB.");
     return this.transaction(async (client) => {
-      await this.owned(client, principalId, jobId, workerId);
+      const owned = await this.owned(client, principalId, jobId, workerId);
+      const priorCheckpoint = owned.checkpoint;
+      const expectedNextCycle = (priorCheckpoint?.nextCycle ?? 1) + 1;
+      if (checkpoint.nextCycle !== expectedNextCycle) {
+        throw new Error("Research checkpoint must advance exactly one completed cycle.");
+      }
       const result = await client.query<JobRow>(
         `UPDATE ${this.table} SET checkpoint=$4::jsonb, updated_at=now() WHERE id=$1 AND principal_id=$2 AND lease_worker_id=$3 RETURNING ${columns}`,
         [jobId, principalId.trim(), workerId, json],
