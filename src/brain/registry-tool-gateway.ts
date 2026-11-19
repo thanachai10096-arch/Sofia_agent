@@ -11,6 +11,7 @@ import type { SecurityAuditSink } from "../security/audit.js";
 import { SecurityController } from "../security/controller.js";
 import type { ToolGateway, ToolExecutionContext, ToolResult, WorkspaceSnapshot, WorkspaceCheckpoint, ToolCall } from "./types.js";
 import { RuntimeCheckpointManager, type CheckpointManager } from "./checkpoint.js";
+import { isDelegatedExecution } from "./delegated-context.js";
 
 function digest(value:string){return createHash("sha256").update(value).digest("hex");}
 function deepFreeze<T>(value:T):T {
@@ -68,7 +69,7 @@ export class RegistryToolGateway implements ToolGateway {
     // A capability guard may suppress only the generic approval prompt for a
     // valid delegated action. Explicit per-tool approval, critical risk, denied
     // policy, host/path checks, and all other security checks remain mandatory.
-    const delegatedRoutine = Boolean(context.delegatedCapabilityId) &&
+    const delegatedRoutine = isDelegatedExecution(context) &&
       assessment.risk !== "critical" &&
       permission.requireApproval !== true;
     const requiresApproval = permission.requireApproval === true ||
