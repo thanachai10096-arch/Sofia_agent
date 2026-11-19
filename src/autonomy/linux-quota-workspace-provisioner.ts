@@ -52,7 +52,7 @@ export function parseLinuxQuotaHelperReply(stdout: string): HelperReply {
 
 /**
  * Calls a narrowly-scoped, host-installed Linux helper. The helper must allocate
- * a unique XFS/ext4 project-quota ID, set hard block and inode limits, verify
+ * a unique XFS project-quota ID, set hard block and inode limits, verify
  * those limits, and only then return the workspace path.
  *
  * This adapter intentionally does not implement quotas in Node: the application
