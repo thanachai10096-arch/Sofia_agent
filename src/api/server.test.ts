@@ -544,3 +544,59 @@ test("API fails closed when orphaned approval recovery storage is unavailable", 
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API fails closed when interrupted Run persistence fails during startup recovery", async () => {
+  const ownerKey = "run-persistence-failure-owner-key";
+  const ownerId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
+  const broker = new ApprovalBroker({ store: new InMemoryApprovalDecisionStore(), pollIntervalMs: 25 });
+  const controller = new AbortController();
+  const waiting = broker.handle({
+    runId: "run-persistence-failure",
+    principalId: ownerId,
+    toolName: "workspace.write_file",
+    input: { path: "persistence.txt", content: "must remain blocked" },
+    actionHash: "f".repeat(64),
+    risk: "high",
+    signal: controller.signal,
+  });
+  const [pending] = await broker.listPending(ownerId);
+  assert.ok(pending);
+
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    approvalBroker: broker,
+  }, {
+    apiKeys: { [ownerKey]: ["approval:manage"] },
+    runStore: {
+      async save() { throw new Error("simulated run-store outage"); },
+      async remove() {},
+      loadAllSync: () => [{
+        id: "run-persistence-failure",
+        status: "running" as const,
+        createdAt: Date.now() - 5_000,
+        updatedAt: Date.now() - 1_000,
+        ownerKeyId: ownerId,
+        desktopCapabilities: [],
+      }],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const inbox = await fetch("http://127.0.0.1:" + address.port + "/v1/approvals", {
+      headers: { authorization: "Bearer " + ownerKey },
+    });
+    assert.equal(inbox.status, 503);
+    assert.deepEqual(await inbox.json(), { error: "approval_recovery_unavailable" });
+    assert.equal((await broker.get(pending.id))?.status, "cancelled");
+  } finally {
+    controller.abort(new Error("test cleanup"));
+    await waiting;
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
