@@ -262,6 +262,7 @@ test("ordinary API keys cannot access security-admin endpoints", async () => {
     apiKeys: {
       "ordinary-key": ["agent:run", "agent:read", "memory:read"],
       "security-admin-key": ["security:admin"],
+      "writer-key": ["agent:run", "tool:write"],
     },
   });
 
@@ -289,14 +290,17 @@ test("ordinary API keys cannot access security-admin endpoints", async () => {
     assert.equal(permissions.status, 200);
     const inventory = await permissions.json() as {
       scopes: Array<{ scope: string; elevated: boolean }>;
-      apiKeys: Array<{ keyId: string; scopes: string[] }>;
+      apiKeys: Array<{ keyId: string; scopes: string[]; effectiveTools: { fileWrite: boolean; shell: boolean; network: boolean; browser: boolean; destructive: boolean } }>;
       note: string;
     };
     assert.ok(inventory.scopes.some((scope) => scope.scope === "tool:shell" && scope.elevated));
     assert.ok(inventory.scopes.some((scope) => scope.scope === "agent:run" && !scope.elevated));
-    assert.equal(inventory.apiKeys.length, 2);
+    assert.equal(inventory.apiKeys.length, 3);
     assert.ok(inventory.apiKeys.every((key) => /^[a-f0-9]{32}$/.test(key.keyId)));
     assert.ok(inventory.apiKeys.some((key) => key.scopes.includes("security:admin")));
+    const writer = inventory.apiKeys.find((key) => key.scopes.includes("tool:write"));
+    assert.equal(writer?.effectiveTools.fileWrite, true);
+    assert.equal(writer?.effectiveTools.shell, false);
     assert.ok(!JSON.stringify(inventory).includes("security-admin-key"));
     assert.match(inventory.note, /trusted server operator/);
   } finally {
