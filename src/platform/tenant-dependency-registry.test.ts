@@ -12,7 +12,7 @@ function dependencies(onClose: () => void): AgentDependencies {
     provider: { generate: async () => ({ text: "ok" }) },
     router: { select: () => { throw new Error("unused"); }, markUnhealthy: () => undefined },
     reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
-    closeBrowserProfiles: async () => onClose(),
+    close: async () => onClose(),
   };
 }
 
