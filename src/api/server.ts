@@ -159,12 +159,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   };
   const interruptedRuns: Array<{ runId: string; principalId: string }> = [];
   const interruptedRunPersistence: Promise<void>[] = [];
+  const invalidRunCleanup: Promise<void>[] = [];
   if (runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
         !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string")) {
-      void runStore.remove(record.id); continue;
+      // A corrupt record must not create an unhandled rejection or be silently
+      // treated as recovered when its removal fails.
+      invalidRunCleanup.push(Promise.resolve().then(() => runStore.remove(record.id)));
+      continue;
     }
     if (interrupted) interruptedRuns.push({ runId: record.id, principalId: record.ownerKeyId });
     const run: ActiveRun = {
@@ -184,6 +188,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   // Both recovery steps are required; a failure in either keeps the approval API unavailable.
   const approvalRecovery = Promise.allSettled([
     Promise.all(interruptedRunPersistence),
+    Promise.all(invalidRunCleanup),
     deps.approvalBroker
       ? Promise.all(interruptedRuns.map(({ runId, principalId }) => deps.approvalBroker!.cancelRun(runId, principalId)))
       : Promise.resolve([]),
