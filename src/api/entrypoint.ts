@@ -51,6 +51,9 @@ if (Object.keys(apiKeys).length > 1) {
   if (process.env.SOFIA_SANDBOX_MODE !== "docker") {
     throw new Error("Multiple API principals require SOFIA_SANDBOX_MODE=docker; process mode does not isolate tenant filesystems.");
   }
+  if (!/^.+@sha256:[a-f0-9]{64}$/u.test(process.env.SOFIA_SANDBOX_IMAGE?.trim() ?? "")) {
+    throw new Error("Multiple API principals require SOFIA_SANDBOX_IMAGE to be pinned by sha256 digest.");
+  }
   if (allApiScopes.some((scope) => scope.startsWith("desktop:"))) {
     throw new Error("Desktop scopes are disabled for multi-principal API hosts until desktop execution has a per-tenant OS boundary.");
   }
