@@ -23,6 +23,8 @@ export interface RemoteSandboxRunnerOptions {
   allowNetwork?: boolean;
   /** Operator attestation that host firewall blocks private, link-local and metadata destinations. */
   publicInternetEgressEnforced?: boolean;
+  /** Operator attestation that tempRoot is on a filesystem with a hard per-run disk quota. */
+  diskQuotaEnforced?: boolean;
 }
 
 interface RequestFile { path: string; contentBase64: string; }
@@ -205,6 +207,9 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
   const allowNetwork = options.allowNetwork === true;
   if (allowNetwork && options.publicInternetEgressEnforced !== true) {
     throw new Error("Networked runner requires an operator-confirmed public-internet-only egress firewall.");
+  }
+  if (options.diskQuotaEnforced !== true) {
+    throw new Error("Remote runner requires an operator-confirmed hard disk quota for each run workspace.");
   }
   let activeRuns = 0;
   const tempRoot = path.resolve(options.tempRoot ?? path.join(os.tmpdir(), "sofia-remote-runner"));
