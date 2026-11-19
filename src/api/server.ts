@@ -122,6 +122,15 @@ function pathId(url: string): string | null {
 }
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
+  // A single AgentDependencies bundle owns one workspace, Brain factory, runtime,
+  // and tool registry. Reusing it for multiple authenticated principals would
+  // expose shared project state even when API records and quotas are owner-scoped.
+  // Until the host can resolve and lifecycle-manage a tenant bundle per request,
+  // reject this unsafe configuration rather than implying multi-tenant isolation.
+  if (Object.keys(config.apiKeys).length > 1 &&
+      (deps.brainFactory || deps.jobRuntime || deps.runtime || deps.tools)) {
+    throw new Error("multi_tenant_agent_runtime_not_supported: provide tenant-scoped AgentDependencies per authenticated principal before configuring multiple API keys.");
+  }
   const agent = new SofiaAgent(deps);
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
