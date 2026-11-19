@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createTenantResourceResolver } from "./tenant-resolver.js";
@@ -47,4 +47,36 @@ test("resolver rejects forged and foreign contexts", async () => {
 
 test("resolver rejects non-absolute tenant roots", () => {
   assert.throws(() => createTenantResourceResolver("relative"), /absolute path/i);
+});
+
+test("resolver rejects an issued context after its workspace is replaced by a symlink", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-tenant-resolver-replaced-"));
+  const outside = await mkdtemp(path.join(os.tmpdir(), "sofia-tenant-resolver-outside-"));
+  try {
+    const resolver = createTenantResourceResolver(root);
+    const context = await resolver.resolve("principal-a");
+    await rm(context.workspaceRoot, { recursive: true, force: true });
+    await symlink(outside, context.workspaceRoot, "dir");
+    assert.throws(() => resolver.assertContext(context), /workspace is missing or no longer a real directory/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("resolver rejects an issued context when a parent directory is redirected", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-tenant-resolver-parent-"));
+  const outside = await mkdtemp(path.join(os.tmpdir(), "sofia-tenant-resolver-parent-outside-"));
+  try {
+    const resolver = createTenantResourceResolver(root);
+    const context = await resolver.resolve("principal-a");
+    const tenantDirectory = path.dirname(context.workspaceRoot);
+    await mkdir(path.join(outside, "workspace"));
+    await rm(tenantDirectory, { recursive: true, force: true });
+    await symlink(outside, tenantDirectory, "dir");
+    assert.throws(() => resolver.assertContext(context), /workspace is missing or no longer a real directory/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  }
 });
