@@ -30,6 +30,21 @@ class HelperError(Exception):
 def fail(message):
     raise HelperError(message)
 
+def reject_duplicate_keys(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            fail("JSON object contains a duplicate key")
+        result[key] = value
+    return result
+
+def strict_json_loads(value):
+    return json.loads(
+        value,
+        object_pairs_hook=reject_duplicate_keys,
+        parse_constant=lambda _value: fail("JSON contains a non-finite number"),
+    )
+
 
 def run(argv, timeout=COMMAND_TIMEOUT):
     result = subprocess.run(
@@ -121,9 +136,21 @@ def load_allocations(state_root):
         fail("allocation state is not a private root-owned regular file")
     if info.st_size > 4 * 1024 * 1024:
         fail("allocation state is too large")
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = strict_json_loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         fail("allocation state is malformed")
+    seen_ids = set()
+    for run_id, entry in data.items():
+        if validate_run_id(run_id) != run_id or not isinstance(entry, dict):
+            fail("allocation state contains an invalid run record")
+        if set(entry) - {"project_id", "workspace", "bytes", "inodes", "status", "needs_recovery"}:
+            fail("allocation state contains unknown record fields")
+        project_id = entry.get("project_id")
+        if type(project_id) is not int or not PROJECT_ID_MIN <= project_id <= PROJECT_ID_MAX or project_id in seen_ids:
+            fail("allocation state contains an invalid or duplicate project ID")
+        if not isinstance(entry.get("workspace"), str):
+            fail("allocation state contains an invalid workspace path")
+        seen_ids.add(project_id)
     return data
 
 
@@ -252,7 +279,7 @@ def main():
     raw = sys.stdin.buffer.read(MAX_INPUT + 1)
     if len(raw) > MAX_INPUT:
         fail("request exceeds size limit")
-    request = json.loads(raw.decode("utf-8"))
+    request = strict_json_loads(raw.decode("utf-8"))
     if not isinstance(request, dict) or not isinstance(request.get("operation"), str):
         fail("request must be a JSON object with an operation")
     root, state_root = load_config()
