@@ -539,30 +539,36 @@ export class DurableJobRuntime implements JobRuntime {
   async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
     this.beginAdmission();
     try {
-    // Reserve the resume slot before the first await. Otherwise two callers can both
-    // pass the guard while get() is pending and race to resume the same checkpoint.
-    if (this.resuming.has(id)) throw new Error("Job is already being resumed");
-    this.resuming.add(id);
-    try {
-      const fetched = await this.get(id);
-      if (!fetched) throw new Error("Unknown job");
-      // get() returns a defensive copy; mutations must target the canonical live record.
-      const record = this.jobs.get(id) ?? fetched;
-      if (record.status === "completed") return publicJobRecord(record);
-      if (record.status === "cancelled") throw new Error("Cancelled jobs cannot be resumed");
-      if (!record.snapshot) throw new Error("Job has no resumable snapshot");
-      // A terminal status may be persisted just before the previous worker's finally block
-      // removes its controller. Only the canonical status determines whether resume is blocked.
-      if (record.status === "running") throw new Error("Job is already running");
-      // A resumed job needs a fresh completion notice; do not inherit the prior
-      // attempt's delivery marker if this attempt later finishes after a restart.
-      record.notificationDelivered = false;
-      const saved = await this.state.save(record);
-      if (!saved) throw new Error("Job state changed before resume could be scheduled");
-      await this.trackExecution(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
-      return publicJobRecord(record);
+      // Reserve the resume slot before the first await so concurrent callers cannot
+      // both pass the guard while get() is pending.
+      if (this.resuming.has(id)) throw new Error("Job is already being resumed");
+      this.resuming.add(id);
+      try {
+        const fetched = await this.get(id);
+        if (!fetched) throw new Error("Unknown job");
+        const record = this.jobs.get(id) ?? fetched;
+        if (record.status === "completed") return publicJobRecord(record);
+        if (record.status === "cancelled") throw new Error("Cancelled jobs cannot be resumed");
+        if (!record.snapshot) throw new Error("Job has no resumable snapshot");
+        if (record.status === "running") throw new Error("Job is already running");
+        record.notificationDelivered = false;
+        const saved = await this.state.save(record);
+        if (!saved) throw new Error("Job state changed before resume could be scheduled");
+        await this.trackExecution(
+          record,
+          {
+            task: record.task,
+            ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}),
+            acceptanceCriteria: record.snapshot.acceptanceCriteria,
+          },
+          signal,
+          record.snapshot,
+        );
+        return publicJobRecord(record);
+      } finally {
+        this.resuming.delete(id);
+      }
     } finally {
-      this.resuming.delete(id);
       this.endAdmission();
     }
   }
