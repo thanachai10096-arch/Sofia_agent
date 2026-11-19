@@ -6,6 +6,37 @@ import { ModelRouter } from "../src/models/router.js";
 import { Reviewer } from "../src/review/reviewer.js";
 import type { ModelProvider } from "../src/models/types.js";
 
+test("Brain factory preserves explicit empty API scopes without changing local runs", async () => {
+  const observed: Array<string[] | undefined> = [];
+  const agent = new SofiaAgent({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([
+      { id: "test", capabilities: ["coding", "reasoning", "tool-use"], costWeight: 1, latencyWeight: 1, qualityWeight: 10, healthy: true },
+    ]),
+    reviewer: new Reviewer(),
+    brainFactory: ((options: { toolScopes?: string[] }) => {
+      observed.push(options.toolScopes);
+      return {
+        run: async () => ({
+          completed: true,
+          state: "completed",
+          summary: "Verified.",
+          changedFiles: [],
+          changedFilesKnown: true,
+          verification: [],
+          remainingRisks: [],
+          usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+        }),
+        runId: "test-run",
+      } as never;
+    }) as never,
+  });
+
+  await agent.run({ task: "API key with no elevated scopes", toolScopes: [] });
+  await agent.run({ task: "Local operator run" });
+  assert.deepEqual(observed, [[], undefined]);
+});
+
 test("agent retries after reviewer rejection and succeeds on fallback", async () => {
   let calls = 0;
   const provider: ModelProvider = {
