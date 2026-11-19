@@ -193,7 +193,8 @@ test("remote runner becomes unready and refuses new work after quota cleanup fai
   const baseProvisioner = testWorkspaceProvisioner();
   const provisioner = {
     createWorkspace: () => baseProvisioner.createWorkspace(),
-    async disposeWorkspace() {
+    async disposeWorkspace(workspacePath: string) {
+      await baseProvisioner.disposeWorkspace(workspacePath);
       throw new Error("host quota release failed");
     },
   };
