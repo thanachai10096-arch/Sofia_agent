@@ -225,7 +225,9 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
       : undefined;
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,evidenceVerifier,profileSessions});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
-  const userMemoryStore = new FileUserMemoryStore();
+  // User memory follows the same workspace boundary as the rest of this
+  // dependency set; the store still hashes each authenticated principal ID.
+  const userMemoryStore = new FileUserMemoryStore(path.join(workspace, ".sofia", "user-memory"));
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
 }
 
@@ -236,6 +238,10 @@ export async function createSofiaAgentDependenciesWithSessions(
   databasePath?: string,
 ): Promise<AgentDependencies & { closeSessionStore: () => void }> {
   const dependencies = createSofiaAgentDependencies(workspace, approval);
-  const sessionStore = await SqliteSessionStore.open(databasePath);
+  // Keep every mutable store beneath the workspace selected by the composition
+  // root. The global SqliteSessionStore default is useful for local CLI use, but
+  // would silently place API transcripts outside an explicitly supplied workspace.
+  const sessionDatabasePath = databasePath ?? path.join(workspace, ".sofia", "sessions", "sessions.sqlite");
+  const sessionStore = await SqliteSessionStore.open(sessionDatabasePath);
   return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
 }
