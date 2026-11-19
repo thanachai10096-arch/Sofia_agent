@@ -320,3 +320,55 @@ test("API refuses a shared persistent run store when multiple API keys are confi
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+test("API runs use a distinct dependency bundle for each authenticated owner", async () => {
+  const createdOwners: string[] = [];
+  const closedOwners: string[] = [];
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "shared fallback must not run" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {
+      "tenant-run-owner-one": ["agent:run", "agent:read"],
+      "tenant-run-owner-two": ["agent:run", "agent:read"],
+    },
+    dependenciesForOwner: async ownerKeyId => {
+      createdOwners.push(ownerKeyId);
+      return {
+        provider: { generate: async () => ({ text: "tenant:" + ownerKeyId }) },
+        router: { select: () => route, markUnhealthy: () => undefined },
+        reviewer: { review: async () => ({ approved: true, reason: "tenant scoped" }) },
+        close: async () => { closedOwners.push(ownerKeyId); },
+      };
+    },
+  });
+
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const run = async (key: string) => {
+    const response = await fetch(baseUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer " + key, "content-type": "application/json" },
+      body: JSON.stringify({ task: "owner scoped task" }),
+    });
+    assert.equal(response.status, 200);
+    return response.json() as Promise<{ result?: { summary?: string } }>;
+  };
+  const ownerOneId = createHash("sha256").update("tenant-run-owner-one").digest("hex").slice(0, 32);
+  const ownerTwoId = createHash("sha256").update("tenant-run-owner-two").digest("hex").slice(0, 32);
+  try {
+    const first = await run("tenant-run-owner-one");
+    const second = await run("tenant-run-owner-two");
+    assert.match(first.result?.summary ?? "", new RegExp(ownerOneId));
+    assert.match(second.result?.summary ?? "", new RegExp(ownerTwoId));
+    assert.deepEqual(createdOwners.sort(), [ownerOneId, ownerTwoId].sort());
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+  assert.deepEqual(closedOwners.sort(), [ownerOneId, ownerTwoId].sort());
+});
+
