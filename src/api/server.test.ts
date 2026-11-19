@@ -198,7 +198,7 @@ test("durable jobs are routed to the authenticated owner's selected project runt
     router: { select: () => route, markUnhealthy: () => undefined },
     reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
   }, {
-    apiKeys: Object.fromEntries(keys.map((key) => [key, ["agent:run", "agent:read"]])),
+    apiKeys: { ...Object.fromEntries(keys.map((key) => [key, ["agent:run", "agent:read"]])), "read-only-job-key": ["agent:read"] },
     resolveWorkspaceDependencies: async (principalId, workspaceId) => ({
       provider: { generate: async () => ({ text: "unused" }) },
       router: { select: () => route, markUnhealthy: () => undefined },
@@ -214,6 +214,12 @@ test("durable jobs are routed to the authenticated owner's selected project runt
   const ownerId = createHash("sha256").update(keys[0]!).digest("hex").slice(0, 32);
   const otherId = createHash("sha256").update(keys[1]!).digest("hex").slice(0, 32);
   try {
+    const forbiddenSubmit = await fetch(baseUrl + "/v1/jobs?workspace=project-a", {
+      method: "POST",
+      headers: { authorization: "Bearer read-only-job-key", "content-type": "application/json" },
+      body: JSON.stringify({ task: "must not be accepted", workspace: "project-a" }),
+    });
+    assert.equal(forbiddenSubmit.status, 403);
     const submit = async (key: string) => fetch(baseUrl + "/v1/jobs", {
       method: "POST",
       headers: { authorization: "Bearer " + key, "content-type": "application/json" },
