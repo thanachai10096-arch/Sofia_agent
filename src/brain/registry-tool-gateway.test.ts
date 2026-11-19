@@ -871,7 +871,7 @@ test("approval broker keeps effectful tools blocked until the exact pending acti
     await new Promise((resolve) => setTimeout(resolve, 5));
     pending = await broker.listPending(principalId);
   }
-  assert.equal(pending.length, 1, "the gateway must publish a durable approval request");
+  assert.equal(pending.length, 1, "the gateway must publish a pending approval request");
   assert.equal(pending[0]?.runId, "approval-broker-e2e-run");
   assert.equal(pending[0]?.toolName, "custom.write");
   assert.equal(pending[0]?.input.value, "approved-value");
