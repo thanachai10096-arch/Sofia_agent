@@ -125,6 +125,14 @@ function pathId(url: string): string | null {
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
+  const agentForWorkspace = async (principalId: string, workspaceId?: string): Promise<SofiaAgent> => {
+    if (!config.resolveWorkspaceDependencies) {
+      if (workspaceId !== undefined) throw new Error("Workspace isolation is not configured on this host.");
+      return agent;
+    }
+    const resolved = await config.resolveWorkspaceDependencies(principalId, workspaceId ?? "default");
+    return new SofiaAgent(resolved);
+  };
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
   const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
@@ -219,7 +227,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
-        const result = await agent.run({
+        const runAgent = await agentForWorkspace(run.ownerKeyId, input.workspace);
+        const result = await runAgent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
@@ -540,7 +549,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         res.on("close", abortOnDisconnect);
         try {
           run.status = "running";
-          const result = await agent.run({
+          const runAgent = await agentForWorkspace(auth.keyId, input.workspace);
+          const result = await runAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
@@ -663,7 +673,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const runId = randomUUID();
         try {
-          const result = await agent.run({
+          const runAgent = await agentForWorkspace(auth.keyId, input.workspace);
+          const result = await runAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
