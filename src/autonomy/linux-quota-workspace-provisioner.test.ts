@@ -63,3 +63,28 @@ test("Linux quota helper parser rejects unknown fields and malformed attestation
   assert.throws(() => parseLinuxQuotaHelperReply(JSON.stringify({ ok: false, runId: "run" })));
   assert.throws(() => parseLinuxQuotaHelperReply("not-json"));
 });
+
+test("Linux quota helper parser accepts a positive XFS project-quota readiness probe", () => {
+  assert.deepEqual(parseLinuxQuotaHelperReply(JSON.stringify({
+    ok: true,
+    filesystemType: "xfs",
+    projectQuotaEnabled: true,
+  })), {
+    ok: true,
+    filesystemType: "xfs",
+    projectQuotaEnabled: true,
+  });
+});
+
+test("Linux quota helper parser rejects malformed readiness claims", () => {
+  assert.throws(() => parseLinuxQuotaHelperReply(JSON.stringify({
+    ok: true,
+    filesystemType: "ext4",
+    projectQuotaEnabled: true,
+  })), /unexpected or malformed/);
+  assert.throws(() => parseLinuxQuotaHelperReply(JSON.stringify({
+    ok: true,
+    filesystemType: "xfs",
+    projectQuotaEnabled: "true",
+  })), /unexpected or malformed/);
+});
