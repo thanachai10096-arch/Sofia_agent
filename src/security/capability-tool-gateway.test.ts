@@ -62,14 +62,29 @@ test("guarded gateway denies missing principal, missing grant, and unregistered 
   assert.equal(stub.count(), 0);
 });
 
-test("guarded gateway requires the caller's human approval gate for external side effects", async () => {
+test("bounded delegated external actions execute without repeated approval", async () => {
   const sideEffect = { ...capability, id: "commerce.submit", effect: "external_side_effect" as const, risk: "high" as const };
   const stub = gatewayStub();
   const gateway = new CapabilityGuardToolGateway(stub.inner, new CapabilityRegistry([sideEffect]), async () => ({
     ...authority, scopes: ["internet:read"], allowedCapabilityIds: ["commerce.submit"],
   }), () => "commerce.submit");
+  assert.equal((await gateway.execute({ tool: "browser.search", input: {} }, context)).ok, true);
+  assert.equal(stub.count(), 1);
+});
+
+test("explicit approval and critical capabilities still require approval", async () => {
+  const explicit = { ...capability, id: "commerce.confirm", effect: "external_side_effect" as const, risk: "high" as const, approvalRequired: true };
+  const stub = gatewayStub();
+  const gateway = new CapabilityGuardToolGateway(stub.inner, new CapabilityRegistry([explicit]), async () => ({
+    ...authority, scopes: ["internet:read"], allowedCapabilityIds: ["commerce.confirm"],
+  }), () => "commerce.confirm");
   assert.equal((await gateway.execute({ tool: "browser.search", input: {} }, context)).ok, false);
   assert.equal((await gateway.execute({ tool: "browser.search", input: {} }, { ...context, requireApproval: true })).ok, true);
+  const critical = { ...explicit, id: "system.destroy", approvalRequired: false, risk: "critical" as const };
+  const criticalGateway = new CapabilityGuardToolGateway(stub.inner, new CapabilityRegistry([critical]), async () => ({
+    ...authority, scopes: ["internet:read"], allowedCapabilityIds: ["system.destroy"],
+  }), () => "system.destroy");
+  assert.equal((await criticalGateway.execute({ tool: "browser.search", input: {} }, context)).ok, false);
 });
 
 test("guarded gateway blocks financial execution until transaction executor is integrated", async () => {
