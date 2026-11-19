@@ -134,6 +134,38 @@ test("API resolves each project workspace inside the authenticated principal bou
   }
 });
 
+
+test("multi-project hosts reject shared durable job and cron routes", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { "workspace-key": ["agent:run", "agent:read", "cron:read", "cron:manage"] },
+    resolveWorkspaceDependencies: async () => ({
+      provider: { generate: async () => ({ text: "unused" }) },
+      router: { select: () => route, markUnhealthy: () => undefined },
+      reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    }),
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  try {
+    for (const path of ["/v1/jobs", "/v1/cron/schedules"]) {
+      const response = await fetch(baseUrl + path, {
+        headers: { authorization: "Bearer workspace-key" },
+      });
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: "project_scoped_jobs_unavailable" });
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("API rejects filesystem paths masquerading as project workspace IDs", async () => {
   const server = createSofiaApi({
     provider: { generate: async () => ({ text: "must not run" }) },
