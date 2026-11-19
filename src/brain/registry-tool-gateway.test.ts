@@ -483,3 +483,35 @@ test("tool permission revocation while awaiting approval prevents execution", as
   assert.match(result.error?.message ?? "", /revoked/i);
   assert.equal(executions, 0);
 });
+
+
+test("global tool kill policy revocation while awaiting approval prevents execution", async () => {
+  const policy = { ...defaultPolicy, allowTools: true };
+  let releaseApproval!: (approved: boolean) => void;
+  let announceApproval!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { announceApproval = resolve; });
+  const approvalDecision = new Promise<boolean>((resolve) => { releaseApproval = resolve; });
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write after approval",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() { executions += 1; return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry }, policy,
+    async () => { announceApproval(); return approvalDecision; },
+  );
+  const execution = gateway.execute(
+    { tool: "workspace.write_file", input: { path: "safe.txt", content: "approved" } },
+    { runId: "global-policy-revocation-test", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  await approvalReached;
+  policy.allowTools = false;
+  releaseApproval(true);
+  const result = await execution;
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.match(result.error?.message ?? "", /disabled/i);
+  assert.equal(executions, 0);
+});
