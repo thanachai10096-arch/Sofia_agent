@@ -75,7 +75,7 @@ test("inspection tools are available without write approval", async () => {
 
 
 
-test("verified delegated capability skips generic approval for a routine write", async () => {
+test("caller-supplied delegated marker cannot bypass generic approval", async () => {
   let approvalCalls = 0;
   const registry = new MapToolRegistry([{
     name: "workspace.write_file",
@@ -88,19 +88,21 @@ test("verified delegated capability skips generic approval for a routine write",
     defaultPolicy,
     async () => { approvalCalls += 1; return false; },
   );
+  const context = {
+    runId: "forged-delegated-write-test",
+    principalId: "principal-1",
+    signal: new AbortController().signal,
+    requireApproval: false,
+    notifyApproval() {},
+  };
+  // Simulate an untrusted caller trying to recreate the old public marker.
+  Object.assign(context, { delegatedCapabilityId: "workspace.write_file" });
   const result = await gateway.execute(
-    { tool: "workspace.write_file", input: { path: "src/delegated.txt", content: "approved by delegated scope" } },
-    {
-      runId: "delegated-write-test",
-      principalId: "principal-1",
-      signal: new AbortController().signal,
-      requireApproval: false,
-      delegatedCapabilityId: "workspace.write_file",
-      notifyApproval() {},
-    },
+    { tool: "workspace.write_file", input: { path: "src/forged.txt", content: "must not bypass approval" } },
+    context,
   );
-  assert.equal(result.ok, true);
-  assert.equal(approvalCalls, 0);
+  assert.equal(result.ok, false);
+  assert.equal(approvalCalls, 1);
 });
 
 test("delegated capability does not bypass explicit per-tool approval", async () => {
