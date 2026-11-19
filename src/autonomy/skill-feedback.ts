@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import type { LearnedSkillCandidate } from "../brain/learning.js";
+import { digestSkillCandidate } from "./skill-evaluator.js";
 
 export type SkillExecutionOutcome = "succeeded" | "failed" | "aborted";
 
@@ -150,4 +152,48 @@ export class InMemorySkillFeedbackStore implements SkillFeedbackStore {
       if (this.queues.get(scope) === queued) this.queues.delete(scope);
     }
   }
+}
+
+
+export interface SkillImprovementProposal {
+  currentCandidateDigest: string;
+  proposedCandidate: LearnedSkillCandidate;
+  feedbackEvidenceIds: string[];
+  rationale: string;
+}
+
+/**
+ * Asks a host-supplied reasoning adapter to draft a revision from measured
+ * feedback. The result is only a candidate: caller must run the normal
+ * evaluator and explicit promotion flow. This function cannot mutate registry.
+ */
+export async function proposeSkillImprovement(
+  current: LearnedSkillCandidate,
+  summary: SkillFeedbackSummary,
+  propose: (input: {
+    current: LearnedSkillCandidate;
+    feedback: SkillFeedbackSummary;
+  }) => Promise<{ candidate: LearnedSkillCandidate; rationale: string }>,
+): Promise<SkillImprovementProposal | null> {
+  if (!current || !summary || summary.skillName !== current.name ||
+      summary.recommendation === "retain" || summary.recommendation === "insufficient-data" ||
+      summary.evidenceIds.length === 0 || digestSkillCandidate(current) !== summary.candidateDigest) {
+    return null;
+  }
+  const result = await propose({ current: structuredClone(current), feedback: structuredClone(summary) });
+  if (!result || !result.candidate || result.candidate.name !== current.name ||
+      !Array.isArray(result.candidate.procedure) || result.candidate.procedure.length === 0 ||
+      !Array.isArray(result.candidate.verification) || result.candidate.verification.length === 0 ||
+      !Array.isArray(result.candidate.evidenceIds) ||
+      !summary.evidenceIds.every((id) => result.candidate.evidenceIds.includes(id)) ||
+      digestSkillCandidate(result.candidate) === summary.candidateDigest ||
+      typeof result.rationale !== "string" || !result.rationale.trim() || result.rationale.length > 2000) {
+    throw new Error("Skill improvement adapter returned an invalid or ungrounded candidate.");
+  }
+  return {
+    currentCandidateDigest: summary.candidateDigest,
+    proposedCandidate: structuredClone(result.candidate),
+    feedbackEvidenceIds: [...summary.evidenceIds],
+    rationale: result.rationale,
+  };
 }
