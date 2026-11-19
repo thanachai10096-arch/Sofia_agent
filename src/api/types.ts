@@ -57,7 +57,7 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
-  /** Optional in-memory approval broker shared with the agent execution gateway. */
+  /** Optional approval broker shared with the agent execution gateway; use FileApprovalJournal for restart-safe audit history. */
   approvalBroker?: ApprovalBroker;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
