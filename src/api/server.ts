@@ -196,10 +196,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.error ? { error: run.error } : {}),
   });
 
-  const modelSelectionError = (input: AgentRunInput): { status: number; error: string } | undefined => {
+  const modelSelectionError = (input: AgentRunInput, modelDeps: AgentDependencies = deps): { status: number; error: string } | undefined => {
     const requested = input.modelRouteId?.trim();
     if (!requested || requested === "auto") return undefined;
-    const routes = requestDeps.router.listRoutes?.();
+    const routes = modelDeps.router.listRoutes?.();
     if (!routes) return { status: 503, error: "model_selection_unavailable" };
     const route = routes.find((item) => item.id === requested);
     if (!route) return { status: 400, error: "invalid_model_route" };
@@ -207,14 +207,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     return undefined;
   };
 
-  const startRun = (run: ActiveRun, input: AgentRunInput) => {
+  const startRun = (run: ActiveRun, input: AgentRunInput, runAgent: SofiaAgent = agent) => {
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
       void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
-        const result = await requestAgent.run({
+        const result = await runAgent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
@@ -473,7 +473,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
-        const selectionError = modelSelectionError(input);
+        const selectionError = modelSelectionError(input, requestDeps);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch {
@@ -499,7 +499,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         res.on("close", abortOnDisconnect);
         try {
           run.status = "running";
-          const result = await agent.run({
+          const result = await requestAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
@@ -610,7 +610,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) }
               : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
-          });
+          }, requestAgent);
           return json(res, 202, publicResponse(run), origin, config);
         }
 
