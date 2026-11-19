@@ -14,8 +14,8 @@ export function policyForToolScopes(base: ExecutionPolicy, scopes: readonly stri
     ...base,
     // Read-only tools remain available when tools are enabled. Every elevated
     // effect requires both host enablement and an explicit per-key scope.
-    allowFileWrite: base.allowFileWrite && granted.has("tool:write"),
-    allowShell: base.allowShell && granted.has("tool:shell"),
+    allowFileWrite: base.allowFileWrite && (granted.has("tool:write") || granted.has("desktop:workspace:write")),
+    allowShell: base.allowShell && (granted.has("tool:shell") || granted.has("desktop:process:execute")),
     allowNetwork: base.allowNetwork && granted.has("tool:network"),
     allowBrowser: base.allowBrowser && granted.has("tool:browser"),
     allowDestructive: base.allowDestructive && granted.has("tool:destructive"),
@@ -73,7 +73,8 @@ export function classifyToolEffects(name: string): ToolEffect[] {
       name === "desktop.workspace.read_file" || name === "desktop.screen.capture") return ["read"];
   if (name === "desktop.workspace.write_file" || name === "workspace.write_file" ||
       name === "workspace.apply_patch") return ["write"];
-  if (name === "desktop.process.run" || name === "terminal.run") return ["shell", "network"];
+  if (name === "desktop.process.run") return ["shell"];
+  if (name === "terminal.run") return ["shell", "network"];
   if (name === "desktop.app.launch") return ["shell", "destructive"];
   if (name === "desktop.input.click" || name === "desktop.input.type_text" ||
       name === "desktop.input.press_key") return ["destructive"];
