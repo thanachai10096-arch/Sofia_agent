@@ -21,6 +21,7 @@ interface ActiveWorkspace {
 
 interface HelperReply {
   ok: boolean;
+  runId?: string;
   workspacePath?: string;
   quotaBytes?: number;
   quotaInodes?: number;
@@ -158,7 +159,7 @@ export class LinuxQuotaWorkspaceProvisioner {
         hardQuotaBytes: this.maxWorkspaceBytes,
         hardQuotaInodes: 20_000,
       });
-      if (typeof reply.workspacePath !== "string" || reply.quotaBytes !== this.maxWorkspaceBytes || reply.quotaInodes !== 20_000) {
+      if (reply.runId !== runId || typeof reply.workspacePath !== "string" || reply.quotaBytes !== this.maxWorkspaceBytes || reply.quotaInodes !== 20_000) {
         throw new Error("Quota helper did not confirm the requested hard quota.");
       }
       const workspacePath = await realpath(reply.workspacePath);
@@ -176,7 +177,7 @@ export class LinuxQuotaWorkspaceProvisioner {
       // Abort by the unguessable run ID so partial allocations cannot leak silently.
       try {
         const cleanup = await this.invoke({ operation: "abort", runId, workspaceRoot: root });
-        if (cleanup.ok !== true) throw new Error("Quota helper did not confirm aborted allocation cleanup.");
+        if (cleanup.ok !== true || cleanup.runId !== runId) throw new Error("Quota helper did not confirm aborted allocation cleanup.");
       } catch {
         throw new Error("Workspace allocation failed and host cleanup could not be confirmed; operator intervention is required.", { cause: error });
       }
@@ -192,7 +193,7 @@ export class LinuxQuotaWorkspaceProvisioner {
       runId: workspace.runId,
       workspacePath: workspace.workspacePath,
     });
-    if (reply.ok !== true) throw new Error("Quota helper did not confirm workspace disposal.");
+    if (reply.ok !== true || reply.runId !== workspace.runId) throw new Error("Quota helper did not confirm disposal for the requested run.");
     this.active.delete(workspacePath);
   }
 }
