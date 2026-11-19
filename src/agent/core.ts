@@ -128,7 +128,7 @@ export class SofiaAgent {
       ...(request.maxSteps !== undefined ? { maxSteps: request.maxSteps } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
       ...(request.modelRouteId && request.modelRouteId !== "auto" ? { modelRouteId: request.modelRouteId } : {}),
-      ...(request.desktopCapabilities?.length ? { desktopCapabilities: request.desktopCapabilities } : {}),
+      ...(request.desktopCapabilities !== undefined ? { desktopCapabilities: request.desktopCapabilities } : {}),
       ...(request.toolScopes !== undefined ? { toolScopes: request.toolScopes } : {}),
       onEvent: (event) => {
         if (event.type === "brain.tool.started") {
