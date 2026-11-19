@@ -36,8 +36,8 @@ export function createProjectMemoryLearningRecorder(
           `Safety incidents: ${input.evidence.safetyIncidents}`,
           `Artifact: ${input.evidence.artifactVersion ?? "not provided"}`,
           `Rollback available: ${input.evidence.rollbackAvailable}`,
-        ].join("\\n")
-      : `Evidence classification: UNVERIFIED RESEARCH (no sandbox experiment)\\nExperiment skipped: ${(input.experimentSkippedReason ?? "not run").slice(0, 500)}`;
+        ].join("\n")
+      : `Evidence classification: UNVERIFIED RESEARCH (no sandbox experiment)\nExperiment skipped: ${(input.experimentSkippedReason ?? "not run").slice(0, 500)}`;
     const content = [
       `Research question: ${input.question.slice(0, 1000)}`,
       `Finding: ${input.finding.summary.slice(0, 1600)}`,
