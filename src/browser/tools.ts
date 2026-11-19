@@ -88,6 +88,35 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       },
     },
     {
+      name: "browser.transaction.inspect",
+      description: "Compare user-specified transaction details with visible text in the current checkout page. Read-only evidence check; never submits or authorizes payment.",
+      effects: ["read"],
+      inputSchema: {
+        type: "object",
+        properties: {
+          pageId: { type: "string" }, recipient: { type: "string" }, amount: { type: "string" },
+          currency: { type: "string" }, items: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 30 },
+          shippingAddress: { type: "string" }
+        },
+        required: ["pageId"],
+        additionalProperties: false
+      },
+      async execute(input) {
+        const p = page(String(input.pageId));
+        const { verifyTransactionEvidence } = await import("./transaction.js");
+        return {
+          url: await p.url(), title: await p.title(),
+          ...verifyTransactionEvidence(await p.content(), {
+            recipient: typeof input.recipient === "string" ? input.recipient : undefined,
+            amount: typeof input.amount === "string" ? input.amount : undefined,
+            currency: typeof input.currency === "string" ? input.currency : undefined,
+            items: Array.isArray(input.items) ? input.items.map(String) : undefined,
+            shippingAddress: typeof input.shippingAddress === "string" ? input.shippingAddress : undefined
+          })
+        };
+      },
+    },
+    {
       name: "browser.screenshot",
       description: "Capture the current browser page.",
       inputSchema: { type:"object", properties:{pageId:{type:"string"}}, required:["pageId"], additionalProperties:false },
