@@ -538,7 +538,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
-        const selectionError = modelSelectionError(input);
+        const selectionError = modelSelectionError(input, requestDeps);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
 
@@ -766,7 +766,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
-        const selectionError = modelSelectionError(input);
+        const selectionError = modelSelectionError(input, requestDeps);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
