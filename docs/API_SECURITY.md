@@ -68,6 +68,23 @@ The API entrypoint can enable the built-in broker with SOFIA_APPROVAL_ENABLED=tr
 
 The feature remains disabled unless explicitly enabled. Redis mode is the preferred shared store for multi-replica Railway deployments. Do not grant approval:manage to browser/mobile clients that should not approve actions.
 
+## Per-user project workspaces
+
+The API entrypoint provisions project workspaces under `.sofia/user-workspaces` (or `SOFIA_USER_WORKSPACES_DIR`). The client supplies only an opaque project ID in the `workspace` field; it is validated as a short identifier and hashed before being used as a directory name. It is never interpreted as a filesystem path. Each workspace is rooted beneath the authenticated API principal's private directory, and its runtime, Brain services, and SQLite session store are created for that project. Requests without `workspace` use that principal's `default` project when the entrypoint resolver is enabled.
+
+For multiple end users, configure a distinct high-entropy API key per user with `SOFIA_API_KEYS_JSON`, a JSON object mapping each key to its scopes. If this variable is absent, the legacy `SOFIA_API_KEY` plus `SOFIA_API_SCOPES` configuration remains supported. The API derives the principal from the bearer key; different keys are different principals and therefore receive different workspace roots, sessions, memories, and ownership boundaries. Do not share one master key among untrusted end users.
+
+Example shape (use real random keys in the secret manager; do not copy these placeholders):
+
+```json
+{
+  "user-key-one-placeholder": ["agent:run", "agent:read"],
+  "user-key-two-placeholder": ["agent:run", "agent:read"]
+}
+```
+
+The host resolver is optional for embedded API consumers. If it is not configured, requests that explicitly select a workspace are rejected rather than silently running against the process-wide workspace. The built-in entrypoint configures the resolver. Workspace isolation is an application-level boundary; continue to apply OS/container sandboxing and per-tool policy for hostile code.
+
 ## Current limitations
 
 API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities. The built-in approval API is opt-in and the SQLite adapter is for a single host or a verified SQLite-compatible shared filesystem; a transactional network-database adapter for multi-host deployment remains future work. Approval behavior depends on the configured handler and tool gateway, so verify the exact host composition before enabling effectful tools.
