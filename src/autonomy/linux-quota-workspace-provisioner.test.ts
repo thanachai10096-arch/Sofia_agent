@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { LinuxQuotaWorkspaceProvisioner } from "./linux-quota-workspace-provisioner.js";
+import { LinuxQuotaWorkspaceProvisioner, parseLinuxQuotaHelperReply } from "./linux-quota-workspace-provisioner.js";
 
 test("Linux quota provisioner rejects relative host paths", { skip: process.platform !== "linux" }, () => {
   assert.throws(() => new LinuxQuotaWorkspaceProvisioner({
@@ -25,4 +25,41 @@ test("Linux quota provisioner validates helper execution limits", { skip: proces
     maxWorkspaceBytes: 512 * 1024 * 1024,
     helperTimeoutMs: 0,
   }), /helperTimeoutMs/);
+});
+
+test("Linux quota helper parser accepts only the bounded success schema", () => {
+  assert.deepEqual(
+    parseLinuxQuotaHelperReply(JSON.stringify({
+      ok: true,
+      runId: "123e4567-e89b-42d3-a456-426614174000",
+      workspacePath: "/var/lib/sofia-runner/run-1",
+      quotaBytes: 536870912,
+      quotaInodes: 20_000,
+    })),
+    {
+      ok: true,
+      runId: "123e4567-e89b-42d3-a456-426614174000",
+      workspacePath: "/var/lib/sofia-runner/run-1",
+      quotaBytes: 536870912,
+      quotaInodes: 20_000,
+    },
+  );
+});
+
+test("Linux quota helper parser rejects unknown fields and malformed attestations", () => {
+  assert.throws(() => parseLinuxQuotaHelperReply(JSON.stringify({
+    ok: true,
+    runId: "123e4567-e89b-42d3-a456-426614174000",
+    workspacePath: "/var/lib/sofia-runner/run-1",
+    quotaBytes: 536870912,
+    quotaInodes: 20_000,
+    diskQuotaEnforced: true,
+  })), /unexpected or malformed/);
+  assert.throws(() => parseLinuxQuotaHelperReply(JSON.stringify({
+    ok: true,
+    runId: "123e4567-e89b-42d3-a456-426614174000",
+    quotaBytes: "unlimited",
+  })), /unexpected or malformed/);
+  assert.throws(() => parseLinuxQuotaHelperReply(JSON.stringify({ ok: false, runId: "run" })));
+  assert.throws(() => parseLinuxQuotaHelperReply("not-json"));
 });
