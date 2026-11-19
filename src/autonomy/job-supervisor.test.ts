@@ -55,7 +55,7 @@ test("supervisor records bounded retryable failures", async () => {
     const supervisor = new AutonomyJobSupervisor({
       store,
       executor: { runResearch: async () => { throw new Error("research adapter unavailable"); } },
-      resolveAdapters: async () => { throw new Error("resolver should not be called"); },
+      resolveAdapters: async () => { throw new Error("postgres://admin:secret-password@db.internal resolver failure"); },
       sandboxAvailable: async () => false,
       budgetContext: () => ({}),
       isKilled: async () => false,
@@ -64,7 +64,8 @@ test("supervisor records bounded retryable failures", async () => {
     const failed = await supervisor.runNext("worker-1", new AbortController().signal);
     assert.equal(failed?.id, job.id);
     assert.equal(failed?.status, "failed");
-    assert.match(failed?.error ?? "", /resolver should not be called/);
+    assert.equal(failed?.error, "Autonomy job failed; inspect trusted host diagnostics.");
+    assert.equal(failed?.error?.includes("secret-password"), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
