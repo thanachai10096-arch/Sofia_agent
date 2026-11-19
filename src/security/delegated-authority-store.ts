@@ -135,3 +135,26 @@ export async function openTenantDelegatedAuthorityStore(
     path.join(context.workspaceRoot, ".sofia", "delegated-authority.sqlite"),
   );
 }
+
+/**
+ * Bind a long-lived authority lookup to one resolver-issued tenant context.
+ * The returned resolver refuses any principal other than the authenticated
+ * principal represented by that context. The host owns and must close the store.
+ */
+export async function createTenantAuthorityResolver(
+  resolver: TenantResourceResolver,
+  context: TenantResourceContext,
+): Promise<{
+  resolveAuthority(principalId: string): Promise<DelegatedAuthority | undefined>;
+  close(): void;
+}> {
+  resolver.assertContext(context);
+  const store = await openTenantDelegatedAuthorityStore(resolver, context);
+  return {
+    async resolveAuthority(principalId: string): Promise<DelegatedAuthority | undefined> {
+      if (principalId !== context.principalId) return undefined;
+      return store.get(context.tenantId, context.principalId);
+    },
+    close: () => store.close(),
+  };
+}
