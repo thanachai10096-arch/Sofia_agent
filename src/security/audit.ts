@@ -22,6 +22,8 @@ export interface SecurityAuditSink {
   readonly durable?: boolean;
   record(event: SecurityAuditEvent): void | Promise<void>;
   read?(id: string): SecurityAuditEvent | undefined | Promise<SecurityAuditEvent | undefined>;
+  /** Enumerates retained audit events for restart-time reconciliation. */
+  list?(): SecurityAuditEvent[] | Promise<SecurityAuditEvent[]>;
 }
 export class CompositeSecurityAudit implements SecurityAuditSink {
   constructor(private readonly sinks: SecurityAuditSink[]) {}
@@ -39,6 +41,34 @@ export class CompositeSecurityAudit implements SecurityAuditSink {
     }
     return undefined;
   }
+  async list(): Promise<SecurityAuditEvent[]> {
+    const batches = await Promise.all(this.sinks.filter((sink) => sink.list).map((sink) => sink.list!()));
+    return batches.flat();
+  }
+}
+
+/**
+ * Finds write-ahead execution receipts with no matching terminal outcome.
+ * A terminal event only closes a receipt when all action identity fields match.
+ * These records are indeterminate, not safe to replay automatically.
+ */
+export function findIndeterminateExecutions(events: readonly SecurityAuditEvent[]): SecurityAuditEvent[] {
+  const resolved = new Set<string>();
+  for (const event of events) {
+    if ((event.decision !== "completed" && event.decision !== "failed") || !event.relatedEventId) continue;
+    const start = events.find((candidate) =>
+      candidate.id === event.relatedEventId &&
+      candidate.decision === "execution_started" &&
+      candidate.runId === event.runId &&
+      candidate.principalId === event.principalId &&
+      candidate.toolName === event.toolName &&
+      candidate.actionHash === event.actionHash,
+    );
+    if (start) resolved.add(start.id);
+  }
+  return events.filter((event) =>
+    event.decision === "execution_started" && !resolved.has(event.id),
+  );
 }
 
 export class MemorySecurityAudit implements SecurityAuditSink {
