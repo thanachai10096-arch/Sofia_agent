@@ -27,6 +27,15 @@ export interface RailwayAutonomyWorkerConfig<TPayload = unknown> {
   ensureSchema?: boolean;
 }
 
+/** Create a unique lease identity for one worker process/session. */
+export function createRailwayWorkerInstanceId(label = "railway"): string {
+  const normalized = label.trim();
+  if (!normalized || normalized.length > 150) {
+    throw new Error("Worker label must be between 1 and 150 characters.");
+  }
+  return `${normalized}:${randomUUID()}`;
+}
+
 function boundedInteger(name: string, raw: string | undefined, fallback: number, min: number, max: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
   const value = Number(raw);
@@ -62,8 +71,7 @@ export async function runRailwayAutonomyWorker<TPayload = unknown>(
   // accidentally inherit the previous process's still-live lease ownership.
   const workerLabel = config.workerId?.trim() ||
     process.env.SOFIA_AUTONOMY_WORKER_ID?.trim() || "railway";
-  if (!workerLabel || workerLabel.length > 150) throw new Error("Worker label must be between 1 and 150 characters.");
-  const workerId = `${workerLabel}:${randomUUID()}`;
+  const workerId = createRailwayWorkerInstanceId(workerLabel);
   const maxJobs = config.maxJobs ?? boundedInteger("SOFIA_AUTONOMY_MAX_JOBS_PER_SESSION", process.env.SOFIA_AUTONOMY_MAX_JOBS_PER_SESSION, 100, 1, 10_000);
   const idleDelayMs = config.idleDelayMs ?? boundedInteger("SOFIA_AUTONOMY_IDLE_DELAY_MS", process.env.SOFIA_AUTONOMY_IDLE_DELAY_MS, 2_000, 100, 60_000);
   const leaseMs = config.leaseMs ?? 30_000;
