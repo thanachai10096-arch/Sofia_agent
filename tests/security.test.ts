@@ -99,6 +99,9 @@ describe("Sofia security controls",()=>{
     assert.equal(riskFor(["browser"], { selector: "#buy-now" }), "critical");
     assert.equal(riskFor(["browser"], { selector: "[data-testid=confirm-payment]" }), "critical");
     assert.equal(riskFor(["browser"], { action: "press", selector: "#place-order", value: "Enter" }), "critical");
+    assert.equal(riskFor(["browser"], { selector: "form button[type=submit]" }), "critical");
+    assert.equal(riskFor(["browser"], { action: "click", label: "Continue" }), "high");
+    assert.equal(riskFor(["browser"], { action: "click", label: "Confirm transfer" }), "critical");
     assert.equal(riskFor(["browser"], { selector: "button.continue" }), "high");
   });
 
