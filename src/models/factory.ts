@@ -118,8 +118,8 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
   };
 }
 
-export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
-  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
+export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"],sharedSecurity?:SecurityController):AgentDependencies{
+  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=sharedSecurity??new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
   const tools=createToolRegistry(createBuiltinTools());
@@ -140,8 +140,9 @@ export async function createSofiaAgentDependenciesWithSessions(
   workspace = process.cwd(),
   approval?: AgentDependencies["approval"],
   databasePath?: string,
+  sharedSecurity?: SecurityController,
 ): Promise<AgentDependencies & { closeSessionStore: () => void }> {
-  const dependencies = createSofiaAgentDependencies(workspace, approval);
+  const dependencies = createSofiaAgentDependencies(workspace, approval, sharedSecurity);
   const sessionStore = await SqliteSessionStore.open(databasePath);
   return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
 }
