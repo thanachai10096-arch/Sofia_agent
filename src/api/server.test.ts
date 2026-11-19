@@ -297,6 +297,74 @@ test("approval API lists and resolves only requests owned by the authenticated p
 
 
 
+test("async run cancellation is owner-scoped and reaches the active execution signal", async () => {
+  const ownerKey = "run-owner-key";
+  const otherKey = "run-other-key";
+  let executionStarted!: () => void;
+  const started = new Promise<void>((resolve) => { executionStarted = resolve; });
+  const server = createSofiaApi({
+    provider: {
+      generate: async (_request, _route, options) => {
+        executionStarted();
+        return await new Promise((resolve, reject) => {
+          if (options?.signal?.aborted) {
+            reject(options.signal.reason ?? new Error("aborted"));
+            return;
+          }
+          options?.signal?.addEventListener("abort", () => reject(options.signal?.reason ?? new Error("aborted")), { once: true });
+        });
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {
+      [ownerKey]: ["agent:run", "agent:read"],
+      [otherKey]: ["agent:run", "agent:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  const auth = (key: string) => ({ authorization: "Bearer " + key });
+  try {
+    const created = await fetch(base + "/v1/agent/runs", {
+      method: "POST",
+      headers: { ...auth(ownerKey), "content-type": "application/json" },
+      body: JSON.stringify({ task: "perform a task", async: true }),
+    });
+    assert.equal(created.status, 202);
+    const run = await created.json() as { id: string; status: string };
+    await started;
+
+    const hidden = await fetch(base + "/v1/agent/runs/" + run.id, {
+      method: "DELETE",
+      headers: auth(otherKey),
+    });
+    assert.equal(hidden.status, 404);
+
+    const cancelled = await fetch(base + "/v1/agent/runs/" + run.id, {
+      method: "DELETE",
+      headers: auth(ownerKey),
+    });
+    assert.equal(cancelled.status, 200);
+    assert.equal((await cancelled.json() as { status: string }).status, "cancelled");
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await fetch(base + "/v1/agent/runs/" + run.id, { headers: auth(ownerKey) });
+      assert.equal(status.status, 200);
+      const current = await status.json() as { status: string };
+      if (current.status === "cancelled") return;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error("Cancelled run did not reach a terminal state");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("API approval decision gates the actual effectful tool execution", async () => {
   const ownerKey = "approval-e2e-owner-key";
   const ownerId = createHash("sha256").update(ownerKey).digest("hex").slice(0, 32);
