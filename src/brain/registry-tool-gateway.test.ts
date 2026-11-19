@@ -286,7 +286,7 @@ test("read-only browser tools can run without interactive approval while page ac
 
   assert.deepEqual(gateway.describe("browser.observe")?.effects, ["read"]);
   assert.deepEqual(gateway.describe("browser.goto")?.effects, ["network", "read"]);
-  assert.deepEqual(gateway.describe("browser.click")?.effects, ["browser", "network"]);
+  assert.deepEqual(gateway.describe("browser.click")?.effects, ["browser"]);
 
   const read = await gateway.execute(
     { tool: "browser.observe", input: { pageId: "page-1" } },
@@ -301,7 +301,7 @@ test("read-only browser tools can run without interactive approval while page ac
   );
   assert.equal(interaction.ok, false);
   assert.equal(interaction.error?.category, "permission_error");
-  assert.match(interaction.error?.message ?? "", /url/i);
+  assert.match(interaction.error?.message ?? "", /approval is required/i);
   assert.equal(clicked, false);
 });
 
