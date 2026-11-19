@@ -12,6 +12,8 @@ export { createSofiaApi } from "./api/server.js";
 export { SofiaClient } from "./sdk/client.js";
 export { createNodeWorkspaceRuntime } from "./platform/local-runtime.js";
 export { createTenantResourceResolver } from "./platform/tenant-resolver.js";
+export { TenantDependencyRegistry } from "./platform/tenant-dependency-registry.js";
+export type { TenantDependenciesFactory } from "./platform/tenant-dependency-registry.js";
 export type { TenantResourceContext, TenantResourceResolver } from "./platform/tenant-resolver.js";
 export { createTenantWorkspace } from "./platform/tenant-workspace.js";
 export { detectPlatform } from "./platform/runtime.js";
