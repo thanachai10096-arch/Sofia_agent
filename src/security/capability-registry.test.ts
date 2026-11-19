@@ -59,6 +59,29 @@ test("read capability can run within granted scope without approval", () => {
   assert.deepEqual(decision, { allowed: true, requiresApproval: false, reason: "Within delegated scope and may execute autonomously." });
 });
 
+
+test("bounded external actions run autonomously when already delegated", () => {
+  const externalCapability: CapabilityDefinition = {
+    ...readCapability,
+    id: "commerce.prepare-order",
+    description: "Submit a routine order within the user's delegated limits.",
+    effect: "external_side_effect",
+    requiredScopes: ["commerce:order"],
+    risk: "medium",
+  };
+  const registry = new CapabilityRegistry([externalCapability]);
+  const delegated = { ...authority, allowedCapabilityIds: ["commerce.prepare-order"] };
+  const decision = authorizeCapability(registry, delegated, {
+    principalId: "user-1",
+    capabilityId: "commerce.prepare-order",
+  }, 1);
+  assert.deepEqual(decision, {
+    allowed: true,
+    requiresApproval: false,
+    reason: "Within delegated scope and may execute autonomously.",
+  });
+});
+
 test("financial capability requires bounded integer amount, currency, merchant and approval", () => {
   const registry = new CapabilityRegistry([orderCapability]);
   const invoke = { principalId: "user-1", capabilityId: "commerce.place-order" };
