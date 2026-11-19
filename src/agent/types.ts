@@ -50,6 +50,9 @@ export interface AgentDependencies {
  userMemoryStore?: import("../brain/user-memory.js").UserMemoryStore;
  sessionStore?: { getOrCreate(id: string): { id: string; messages: string[]; updatedAt: number }; save(session: { id: string; messages: string[]; updatedAt: number }): void };
  learningDiagnostics?: () => unknown;
+ /** Release all resources owned by this dependency bundle. Hosts should call this once during tenant shutdown. */
+ close?: () => void | Promise<void>;
+ /** @deprecated Use close for complete dependency lifecycle cleanup. */
  closeBrowserProfiles?: () => Promise<void>;
 }
 export type { ToolCall };
