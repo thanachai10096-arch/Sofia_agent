@@ -158,27 +158,22 @@ def validate_run_id(value):
     return str(parsed)
 
 
-def quota_report(root, project_id):
-    # Query only this numeric project; never parse human-readable names.
-    return run(["xfs_quota", "-x", "-c", "quota -p -n -v " + str(project_id), str(root)])
+def extract_hard_limit(output, project_id):
+    rows = [line.split() for line in output.splitlines() if line.split() and line.split()[0] == str(project_id)]
+    if len(rows) != 1 or len(rows[0]) < 4 or not rows[0][3].isdigit():
+        fail("cannot uniquely read back numeric project hard limit")
+    return int(rows[0][3])
 
 
 def verify_quota(root, project_id, bytes_limit, inode_limit):
-    output = quota_report(root, project_id)
-    # xfs_quota's verbose project quota row reports used, soft, hard for blocks
-    # and inodes. Require both hard limits to appear as exact numeric values.
-    rows = [line.split() for line in output.splitlines() if line.strip().split() and line.split()[0] == str(project_id)]
-    if len(rows) != 1:
-        fail("cannot uniquely read back project quota limits")
-    numbers = []
-    for token in rows[0][1:]:
-        if token.isdigit():
-            numbers.append(int(token))
-    if bytes_limit not in numbers and (bytes_limit + 1023) // 1024 not in numbers:
+    # Query block and inode reports independently: each has Used, Soft, Hard columns.
+    block_output = run(["xfs_quota", "-c", "quota -p -b -n -N -v " + str(project_id), str(root)])
+    inode_output = run(["xfs_quota", "-c", "quota -p -i -n -N -v " + str(project_id), str(root)])
+    expected_blocks = (bytes_limit + 1023) // 1024
+    if extract_hard_limit(block_output, project_id) != expected_blocks:
         fail("XFS block hard limit read-back did not match request")
-    if inode_limit not in numbers:
+    if extract_hard_limit(inode_output, project_id) != inode_limit:
         fail("XFS inode hard limit read-back did not match request")
-
 
 def create(root, state_root, request):
     run_id = validate_run_id(request["runId"])
