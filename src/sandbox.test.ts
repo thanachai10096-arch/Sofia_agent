@@ -281,3 +281,19 @@ test("RemoteSandbox rejects path traversal before modifying the project", async 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("RemoteSandbox permits plaintext HTTP only for loopback and never sends tokens over other schemes", () => {
+  const token = "test-token-with-at-least-thirty-two-characters";
+  for (const endpoint of ["ftp://localhost:8080", "ftp://127.0.0.1:8080", "http://runner.example.test"]) {
+    assert.throws(
+      () => new RemoteSandbox({ endpoint, token }),
+      /must use HTTPS/,
+      endpoint,
+    );
+  }
+  assert.doesNotThrow(() => new RemoteSandbox({ endpoint: "http://localhost:8080", token }));
+  assert.doesNotThrow(() => new RemoteSandbox({ endpoint: "http://127.0.0.1:8080", token }));
+  assert.doesNotThrow(() => new RemoteSandbox({ endpoint: "http://[::1]:8080", token }));
+  assert.doesNotThrow(() => new RemoteSandbox({ endpoint: "https://runner.example.test", token }));
+});
