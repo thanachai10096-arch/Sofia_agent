@@ -8,7 +8,7 @@ import { createBuiltinTools } from "../tools/builtin.js";
 import { defaultPolicy } from "../security/policy.js";
 import { SecurityController } from "../security/controller.js";
 import type { SecurityAuditEvent, SecurityAuditSink } from "../security/audit.js";
-import { findIndeterminateExecutions } from "../security/audit.js";
+import { findIndeterminateExecutions, reconcileIndeterminateExecutions } from "../security/audit.js";
 import { MapToolRegistry } from "../tools/types.js";
 
 test("receipt reconciliation flags orphaned and mismatched executions without replaying them", () => {
@@ -55,6 +55,34 @@ test("receipt reconciliation flags orphaned and mismatched executions without re
   assert.deepEqual(
     findIndeterminateExecutions(events).map((event) => event.id).sort(),
     ["start-mismatched", "start-orphan"],
+  );
+});
+
+test("durable receipt reconciliation reads journal state and never replays actions", async () => {
+  const events: SecurityAuditEvent[] = [{
+    id: "orphaned-start",
+    at: "2026-11-19T00:00:00.000Z",
+    runId: "restart-run",
+    principalId: "owner-1",
+    toolName: "external.purchase",
+    actionHash: "action-1",
+    risk: "high",
+    decision: "execution_started",
+  }];
+  let listCalls = 0;
+  const sink: SecurityAuditSink = {
+    durable: true,
+    record() {},
+    read(id) { return events.find((event) => event.id === id); },
+    list() { listCalls += 1; return events; },
+  };
+  const unresolved = await reconcileIndeterminateExecutions(sink);
+  assert.equal(listCalls, 1);
+  assert.deepEqual(unresolved.map((event) => event.id), ["orphaned-start"]);
+  assert.equal(events.length, 1, "reconciliation must not mutate or replay the action");
+  await assert.rejects(
+    reconcileIndeterminateExecutions({ record() {}, read() { return undefined; } }),
+    /durable, enumerable audit sink/i,
   );
 });
 
