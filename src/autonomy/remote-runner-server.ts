@@ -27,6 +27,7 @@ export interface RemoteSandboxRunnerOptions {
   workspaceProvisioner?: {
     createWorkspace(): Promise<string>;
     disposeWorkspace(workspacePath: string): Promise<void>;
+    healthCheck(): Promise<void>;
   };
 }
 
@@ -213,7 +214,8 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
   }
   if (!options.workspaceProvisioner ||
       typeof options.workspaceProvisioner.createWorkspace !== "function" ||
-      typeof options.workspaceProvisioner.disposeWorkspace !== "function") {
+      typeof options.workspaceProvisioner.disposeWorkspace !== "function" ||
+      typeof options.workspaceProvisioner.healthCheck !== "function") {
     throw new Error("Remote runner requires a host-owned workspace provisioner backed by a hard per-run disk quota.");
   }
   let activeRuns = 0;
@@ -231,6 +233,7 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
         if (quotaCleanupFailed) throw new Error("A prior quota workspace cleanup failed; operator intervention is required.");
         if (!options.sandbox.healthCheck) throw new Error("Runner readiness probe is unavailable.");
         await options.sandbox.healthCheck();
+        await options.workspaceProvisioner!.healthCheck();
         json(response, 200, { status: "ready", protocolVersion: 1 });
       } catch {
         json(response, 503, { status: "not_ready", protocolVersion: 1 });
