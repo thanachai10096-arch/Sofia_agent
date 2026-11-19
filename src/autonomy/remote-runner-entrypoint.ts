@@ -16,7 +16,7 @@ const server = createRemoteSandboxRunnerServer({
   maxTimeoutMs: Number(process.env.SOFIA_RUNNER_MAX_TIMEOUT_MS ?? 300000),
   allowNetwork: process.env.SOFIA_RUNNER_ALLOW_NETWORK === "true",
   publicInternetEgressEnforced: process.env.SOFIA_RUNNER_PUBLIC_EGRESS_ENFORCED === "true",
-  diskQuotaEnforced: process.env.SOFIA_RUNNER_DISK_QUOTA_ENFORCED === "true",
+  // No boolean attestation can enforce a disk quota. A host-owned quota-backed workspace provisioner must be injected before listening.
 });
 
 const port = Number(process.env.PORT ?? 8080);
