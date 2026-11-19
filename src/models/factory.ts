@@ -71,7 +71,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       } else {
         try {
           const benchmark = compareSkillRegressionBenchmark({
-            baseline: baselineChecks.filter((check) => check.name !== "skill-regression-benchmark").map((check) => ({ name: check.name, passed: check.passed })),
+            baseline: baselineChecks.filter((check) => check.name !== "skill-regression-benchmark" && check.name !== "skill-benchmark-history").map((check) => ({ name: check.name, passed: check.passed })),
             candidate: checks.map((check) => ({ name: check.name, passed: check.passed })),
           });
           checks.push({
