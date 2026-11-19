@@ -508,7 +508,11 @@ export class CronScheduler {
     const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Recovered scheduled execution cancelled"));
     controller.signal.addEventListener("abort", onAbort, { once: true });
     try {
-      const job = await this.waitForJob(jobId, timeout.signal);
+      const job = await this.waitForJob(jobId, timeout.signal, async () => {
+        const current = await this.resolveAuthorization(schedule.ownerKeyId);
+        return (schedule.toolScopes ?? []).every(scope => current.toolScopes.includes(scope)) &&
+          (schedule.desktopCapabilities ?? []).every(capability => current.desktopCapabilities.includes(capability));
+      });
       status = job.status === "completed" ? "completed" : job.status === "cancelled" ? "cancelled" : "failed";
       errorText = status === "failed" ? job.error ?? "Recovered runtime job failed" : undefined;
     } catch (error) {
@@ -590,7 +594,11 @@ export class CronScheduler {
           let result: JobRecord | undefined;
           let waitError: unknown;
           try {
-            result = await this.waitForJob(submitted.id, timeout.signal);
+            result = await this.waitForJob(submitted.id, timeout.signal, async () => {
+              const current = await this.resolveAuthorization(schedule.ownerKeyId);
+              return toolScopes.every(scope => current.toolScopes.includes(scope)) &&
+                desktopCapabilities.every(capability => current.desktopCapabilities.includes(capability));
+            });
           } catch (error) {
             waitError = error;
           } finally {
@@ -643,8 +651,9 @@ export class CronScheduler {
     }).catch(() => undefined);
     this.active.delete(schedule.id);
   }
-  private async waitForJob(id: string, signal: AbortSignal): Promise<JobRecord> {
+  private async waitForJob(id: string, signal: AbortSignal, authorizationValid?: () => Promise<boolean>): Promise<JobRecord> {
     while (!signal.aborted) {
+      if (authorizationValid && !await authorizationValid()) throw new Error("Scheduled job authorization was revoked.");
       const record = await this.runtime.get(id);
       if (!record) throw new Error("Scheduled runtime job disappeared");
       if (record.status === "completed" || record.status === "failed" || record.status === "cancelled") return record;
