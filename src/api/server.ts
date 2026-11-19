@@ -144,6 +144,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
+  const abortRun = (run: ActiveRun, reason?: Error) => {
+    if (!run.controller.signal.aborted) run.controller.abort(reason);
+    // Resolve any owner-bound approval wait immediately when its run is cancelled.
+    config.approvalBroker?.cancelRun(run.id, run.ownerKeyId);
+  };
   const runStore = config.runStore;
   const persist = (run: ActiveRun): Promise<void> => {
     if (!runStore) return Promise.resolve();
@@ -212,7 +217,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       run.status = "running";
       run.updatedAt = Date.now();
       void persist(run).catch(() => undefined);
-      const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
+      const timer = setTimeout(() => abortRun(run, new Error("Run timed out.")), requestTimeoutMs);
       try {
         const result = await agent.run({
           principalId: run.ownerKeyId,
@@ -482,7 +487,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const run = runs.get(id);
         if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
         if (run.status === "queued" || run.status === "running") {
-          run.controller.abort();
+          abortRun(run, new Error("Run cancelled by owner."));
           run.status = "cancelled";
           run.updatedAt = Date.now();
           void persist(run).catch(() => undefined);
