@@ -5,6 +5,9 @@ import { TokenAwareGateway } from "../brain/token-aware-gateway.js";
 import { TokenAwareBrainReasoner } from "../brain/token-aware-reasoner.js";
 import { createInternalRoute } from "../brain/model-route-adapter.js";
 import { RegistryToolGateway } from "../brain/registry-tool-gateway.js";
+import { CapabilityGuardToolGateway } from "../security/capability-tool-gateway.js";
+import { CapabilityRegistry } from "../security/capability-registry.js";
+import { createTenantAuthorityResolver } from "../security/delegated-authority-store.js";
 import { createSofiaBrain } from "../brain/executor.js";
 import type { BrainLimits } from "../brain/types.js";
 import { ModelRouter } from "./router.js";
@@ -48,7 +51,9 @@ function intEnv(name:string,fallback:number,minimum=0){const value=Number(proces
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
+type CapabilityGuardConfig = { registry: CapabilityRegistry; resolveAuthority: (principalId: string) => Promise<import("../security/capability-registry.js").DelegatedAuthority | undefined>; capabilityIdForTool: (toolName: string) => string | undefined };
+
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager;capabilityGuard?:CapabilityGuardConfig}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
@@ -108,7 +113,15 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       ...runBrowserTools,
       ...runDesktopTools,
     ]);
-    const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const registryGateway = new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
+    const toolGateway = dependencies.capabilityGuard
+      ? new CapabilityGuardToolGateway(
+          registryGateway,
+          dependencies.capabilityGuard.registry,
+          dependencies.capabilityGuard.resolveAuthority,
+          dependencies.capabilityGuard.capabilityIdForTool,
+        )
+      : registryGateway;
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
     const subagents=new CoordinatedSubagentRuntime(rawSubagents,{
       maxConcurrency:intEnv("SOFIA_SUBAGENT_MAX_CONCURRENCY",3,1),
@@ -124,7 +137,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
 export function createSofiaAgentDependencies(
   workspace=process.cwd(),
   approval?:AgentDependencies["approval"],
-  options?: { userMemoryDirectory?: string; browserProfileDirectory?: string },
+  options?: { userMemoryDirectory?: string; browserProfileDirectory?: string; capabilityGuard?: CapabilityGuardConfig },
 ):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
@@ -136,7 +149,7 @@ export function createSofiaAgentDependencies(
     process.env.SOFIA_BROWSER_HEADLESS === "false" && (options?.browserProfileDirectory ?? process.env.SOFIA_BROWSER_PROFILE_DIR)?.trim()
       ? new BrowserProfileSessionManager(new BrowserProfileStore((options?.browserProfileDirectory ?? process.env.SOFIA_BROWSER_PROFILE_DIR)!), () => new PlaywrightBrowserRuntime())
       : undefined;
-  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions});
+  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions,capabilityGuard:options?.capabilityGuard});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore(options?.userMemoryDirectory);
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),close:()=>profileSessions?.closeAll() ?? Promise.resolve()};
@@ -160,6 +173,48 @@ export function createSofiaAgentDependenciesForTenant(
     userMemoryDirectory: path.join(workspace, ".sofia", "user-memory"),
     browserProfileDirectory: path.join(workspace, ".sofia", "browser-profiles"),
   });
+}
+
+
+/**
+ * Tenant-scoped dependencies with opt-in delegated capabilities.
+ * The host supplies an explicit tool-to-capability map; unmapped tools fail closed.
+ * The returned close() must be called when the tenant dependency bundle is retired.
+ */
+export async function createSofiaAgentDependenciesForTenantWithDelegatedAuthority(
+  resolver: TenantResourceResolver,
+  context: TenantResourceContext,
+  registry: CapabilityRegistry,
+  toolCapabilityMap: Readonly<Record<string, string>>,
+  approval?: AgentDependencies["approval"],
+): Promise<AgentDependencies> {
+  resolver.assertContext(context);
+  const authority = await createTenantAuthorityResolver(resolver, context);
+  try {
+    const workspace = path.resolve(context.workspaceRoot);
+    const dependencies = createSofiaAgentDependencies(workspace, approval, {
+      userMemoryDirectory: path.join(workspace, ".sofia", "user-memory"),
+      browserProfileDirectory: path.join(workspace, ".sofia", "browser-profiles"),
+      capabilityGuard: {
+        registry,
+        resolveAuthority: authority.resolveAuthority,
+        capabilityIdForTool: (toolName) => Object.hasOwn(toolCapabilityMap, toolName)
+          ? toolCapabilityMap[toolName]
+          : undefined,
+      },
+    });
+    return {
+      ...dependencies,
+      close: async () => {
+        await dependencies.close?.();
+        await dependencies.closeBrowserProfiles?.();
+        authority.close();
+      },
+    };
+  } catch (error) {
+    authority.close();
+    throw error;
+  }
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
