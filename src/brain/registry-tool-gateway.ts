@@ -81,6 +81,21 @@ export class RegistryToolGateway implements ToolGateway {
         }
       }finally{context.notifyApproval(false);}
     }
+    // Approval is a point-in-time decision, not a permanent capability. Re-check
+    // the live policy and action assessment after the approval wait so an operator
+    // policy change cannot leave a stale approval executable.
+    const currentPermission=toolPermission(this.policy,call.tool,descriptor.effects);
+    const currentAssessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input,effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
+    const authorizationChanged=currentPermission.allow===false || !currentAssessment.allowed ||
+      riskRank[currentAssessment.risk]>riskRank[this.policy.maxRisk] ||
+      currentAssessment.actionHash!==assessment.actionHash;
+    if(authorizationChanged){
+      const reason=currentPermission.allow===false?"Tool permission was revoked while awaiting approval.":
+        !currentAssessment.allowed?(currentAssessment.reason??"Security policy denied the action after approval."):
+        riskRank[currentAssessment.risk]>riskRank[this.policy.maxRisk]?"Action risk now exceeds policy maximum.":"Approved action no longer matches its security assessment.";
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:currentAssessment.actionHash,risk:currentAssessment.risk,decision:"deny",reason,input:redactSecrets(input)});
+      return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:reason}};
+    }
     try{
       this.security.assertRunning();
       context.signal.throwIfAborted();
