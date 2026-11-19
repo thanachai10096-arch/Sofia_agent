@@ -121,7 +121,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         detail: error instanceof Error ? error.message : "Capability measurement failed.",
       });
       capability = {
-        score: 0, passRate: 0, baselineCoverage: 0,
+        score: 0, passRate: 0, baselineCoverage: 1,
         passedChecks: 0, totalChecks: 1, baselineChecks: 0,
         missingBaselineChecks: [], failedChecks: ["capability-measurement"],
       };
