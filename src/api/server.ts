@@ -11,6 +11,7 @@ import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import { API_SCOPE_CATALOG, summarizeApiKeyPermissions } from "./scopes.js";
 
 interface ActiveRun {
   id: string;
@@ -383,6 +384,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const adminScope = config.securityAdminScope ?? "security:admin";
       const isSecurityAdmin = auth.scopes.includes(adminScope);
+      if (req.method === "GET" && requestUrl.pathname === "/v1/security/permissions") {
+        if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
+        return json(res, 200, {
+          scopes: API_SCOPE_CATALOG,
+          apiKeys: summarizeApiKeyPermissions(config.apiKeys),
+          note: "Permission changes are managed by the trusted server operator through deployment configuration. Bearer tokens are never returned.",
+        }, origin, config);
+      }
       if (req.method === "GET" && req.url === "/v1/models") {
         const routes = deps.router.listRoutes?.();
         if (!routes) return json(res, 503, { error: "model_selection_unavailable" }, origin, config);
