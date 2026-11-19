@@ -182,12 +182,16 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   // Persist failed Run records and cancel their approvals before exposing approval operations.
   // Both recovery steps are required; a failure in either keeps the approval API unavailable.
-  const approvalRecovery = Promise.all([
+  const approvalRecovery = Promise.allSettled([
     Promise.all(interruptedRunPersistence),
     deps.approvalBroker
       ? Promise.all(interruptedRuns.map(({ runId, principalId }) => deps.approvalBroker!.cancelRun(runId, principalId)))
       : Promise.resolve([]),
-  ]);
+  ]).then((results) => {
+    if (results.some((result) => result.status === "rejected")) {
+      throw new Error("Startup recovery could not be fully persisted.");
+    }
+  });
   const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   // Rehydrate replay protection from durable run records after a server restart.
   for (const run of runs.values()) {
