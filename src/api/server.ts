@@ -187,11 +187,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     deps.approvalBroker
       ? Promise.all(interruptedRuns.map(({ runId, principalId }) => deps.approvalBroker!.cancelRun(runId, principalId)))
       : Promise.resolve([]),
-  ]).then((results) => {
-    if (results.some((result) => result.status === "rejected")) {
-      throw new Error("Startup recovery could not be fully persisted.");
-    }
-  });
+  ]).then((results) => results.every((result) => result.status === "fulfilled"));
   const idempotency = new Map<string, { runId: string; fingerprint: string }>();
   // Rehydrate replay protection from durable run records after a server restart.
   for (const run of runs.values()) {
@@ -365,7 +361,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const isApprovalRequest = requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/");
       if (isApprovalRequest) {
-        try { await approvalRecovery; } catch {
+        if (!(await approvalRecovery)) {
           return json(res, 503, { error: "approval_recovery_unavailable" }, origin, config);
         }
         if (!auth.scopes.includes("approval:manage")) {
