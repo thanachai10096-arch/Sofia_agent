@@ -111,3 +111,13 @@ test("feedback does not request revisions for insufficient or mismatched evidenc
   assert.equal(result, null);
   assert.equal(called, false);
 });
+
+
+test("feedback rejects idempotency-key reuse with altered outcome", async () => {
+  const ledger = new SkillFeedbackLedger(new InMemorySkillFeedbackStore());
+  await ledger.record(base);
+  await assert.rejects(
+    () => ledger.record({ ...base, outcome: "failed" }),
+    /reused with different feedback/,
+  );
+});
