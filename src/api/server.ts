@@ -354,6 +354,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
+      // The legacy scheduler is process-wide. Until cron schedulers are resolved
+      // per authenticated principal, refuse these routes rather than expose a
+      // shared schedule namespace across tenant workspaces.
+      if (isCronRequest && config.resolvePrincipalDependencies) {
+        return json(res, 503, { error: "principal_cron_runtime_unavailable" }, origin, config);
+      }
       if (isCronRequest && !requestDeps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
         return json(res, 403, { error: "forbidden", requiredScope: "cron:read" }, origin, config);
