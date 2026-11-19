@@ -74,6 +74,63 @@ test("inspection tools are available without write approval", async () => {
 });
 
 
+
+test("verified delegated capability skips generic approval for a routine write", async () => {
+  let approvalCalls = 0;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write a project file",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+    async execute() { return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async () => { approvalCalls += 1; return false; },
+  );
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/delegated.txt", content: "approved by delegated scope" } },
+    {
+      runId: "delegated-write-test",
+      principalId: "principal-1",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      delegatedCapabilityId: "workspace.write_file",
+      notifyApproval() {},
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(approvalCalls, 0);
+});
+
+test("delegated capability does not bypass explicit per-tool approval", async () => {
+  let approvalCalls = 0;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write a project file",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+    async execute() { return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, permissions: { "workspace.write_file": { requireApproval: true } } },
+    async () => { approvalCalls += 1; return true; },
+  );
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/explicit.txt", content: "approval remains" } },
+    {
+      runId: "delegated-explicit-approval-test",
+      principalId: "principal-1",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      delegatedCapabilityId: "workspace.write_file",
+      notifyApproval() {},
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(approvalCalls, 1);
+});
+
 test("security kill switch aborts an active tool execution", async () => {
   const rt = runtime();
   const security = new SecurityController();
