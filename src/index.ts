@@ -65,6 +65,9 @@ export type * from "./api/types.js";
 export type * from "./platform/runtime.js";
 export type * from "./tools/types.js";
 
+export { CapabilityRegistry, authorizeCapability, reserveDelegatedSpend } from "./security/capability-registry.js";
+export type { CapabilityDefinition, CapabilityEffect, CapabilityTransport, DelegatedAuthority, CapabilityInvocation, CapabilityDecision, DelegatedSpendLedger, SpendingSnapshot } from "./security/capability-registry.js";
+export { CapabilityGuardToolGateway } from "./security/capability-tool-gateway.js";
 export { SecurityController } from "./security/controller.js";
 export { MemorySecurityAudit } from "./security/audit.js";
 export { assessAction, containsPromptInjection, redactSecrets, riskFor } from "./security/guard.js";
