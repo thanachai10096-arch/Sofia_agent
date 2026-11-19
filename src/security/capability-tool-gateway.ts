@@ -66,11 +66,14 @@ export class CapabilityGuardToolGateway implements ToolGateway {
     if (!compatible) {
       return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Capability effect does not match the registered tool effects." } };
     }
-    if (capability.transport === "browser" && !has("browser")) {
-      return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Browser capability is mapped to a non-browser tool." } };
+    if (capability.transport === "browser" && (!has("browser") || call.tool.startsWith("desktop."))) {
+      return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Browser capability must map to a browser-control tool." } };
     }
     if (capability.transport === "desktop" && !call.tool.startsWith("desktop.")) {
       return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "Desktop capability is mapped to a non-desktop tool." } };
+    }
+    if (capability.transport === "api" && (has("browser") || call.tool.startsWith("desktop."))) {
+      return { ok: false, data: null, evidenceId: "", error: { category: "permission_error", message: "API capability cannot be mapped to browser or desktop control." } };
     }
     // Payment execution stays disabled until the persistent atomic spend
     // ledger, idempotent provider adapter, and reconciliation path are wired.
