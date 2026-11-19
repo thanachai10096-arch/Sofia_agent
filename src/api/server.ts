@@ -119,7 +119,8 @@ function integerSetting(
 }
 
 function pathId(url: string): string | null {
-  const match = url.match(/^\/v1\/agent\/runs\/([^/?]+)$/);
+  const pathname = url.split("?", 1)[0] ?? url;
+  const match = pathname.match(/^\/v1\/agent\/runs\/([^/?]+)$/);
   return match?.[1] ?? null;
 }
 
@@ -430,11 +431,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       // Authorization scopes are enforced at the API boundary, not merely used to
       // derive desktop capabilities. Admin scopes do not implicitly grant run access.
-      const isRunRequest = req.method === "POST" && (req.url === "/v1/agent/runs" || req.url === "/v1/agent/runs/stream" || req.url === "/v1/jobs");
+      const isRunRequest = req.method === "POST" && (requestUrl.pathname === "/v1/agent/runs" || requestUrl.pathname === "/v1/agent/runs/stream" || requestUrl.pathname === "/v1/jobs");
       if (isRunRequest && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobReadRequest = req.method === "GET" && (req.url === "/v1/jobs" || (req.url?.startsWith("/v1/jobs/") === true && !req.url.endsWith("/resume") && !req.url.endsWith("/cancel")));
+      const isJobReadRequest = req.method === "GET" && (requestUrl.pathname === "/v1/jobs" || (requestUrl.pathname.startsWith("/v1/jobs/") && !requestUrl.pathname.endsWith("/resume") && !requestUrl.pathname.endsWith("/cancel")));
       if (isJobReadRequest && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
       }
@@ -446,7 +447,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (isRunCancellation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
+      const isJobMutation = req.method === "POST" && requestUrl.pathname.startsWith("/v1/jobs/") && (requestUrl.pathname.endsWith("/resume") || requestUrl.pathname.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
