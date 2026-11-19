@@ -26,7 +26,7 @@ export class RegistryToolGateway implements ToolGateway {
   private readonly snapshots=new Map<string,SnapshotRecord>();
   private readonly checkpoints:CheckpointManager;
   constructor(
-    private readonly dependencies:{runtime:WorkspaceRuntime;tools:ToolRegistry},
+    private readonly dependencies:{runtime:WorkspaceRuntime;tools:ToolRegistry;assertOwnership?:()=>Promise<void>},
     private readonly policy:ExecutionPolicy,
     private readonly approval?:ApprovalHandler,
     checkpoints?:CheckpointManager,
@@ -56,6 +56,7 @@ export class RegistryToolGateway implements ToolGateway {
     // The caller and approval UI must not be able to swap the action while approval is pending.
     const input = deepFreeze(structuredClone(call.input));
     context.signal.throwIfAborted();
+    await this.dependencies.assertOwnership?.();
     this.security.assertRunning();
     const descriptor=this.describe(call.tool);
     const evidenceId=randomUUID();
@@ -115,6 +116,8 @@ export class RegistryToolGateway implements ToolGateway {
     try{
       this.security.assertRunning();
       context.signal.throwIfAborted();
+      // Re-check after approval and directly before the side effect; a stale worker must fail closed.
+      await this.dependencies.assertOwnership?.();
       if(capabilitySecret && (!capability || !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk,actionHash:assessment.actionHash},capabilitySecret))) {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability validation failed immediately before execution."}};
       }
