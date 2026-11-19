@@ -260,6 +260,110 @@ test("approved actions are audited with the exact action hash before execution",
   assert.equal(approved.principalId, completed.principalId);
 });
 
+test("production effectful execution persists and verifies a start receipt before invoking the tool", async () => {
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    let executions = 0;
+    const events = new Map<string, SecurityAuditEvent>();
+    const order: string[] = [];
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record(event) { events.set(event.id, event); order.push(event.decision); },
+      read(id) { return events.get(id); },
+    };
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Production write with an execution receipt",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; order.push("tool_invoked"); return { committed: true }; },
+    }]);
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "execution-start-receipt-production-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { value: "commit" } },
+      {
+        runId: "execution-start-receipt-test",
+        principalId: "authenticated-owner",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(executions, 1);
+    assert.ok(order.indexOf("execution_started") >= 0);
+    assert.ok(order.indexOf("execution_started") < order.indexOf("tool_invoked"));
+    assert.ok(order.indexOf("tool_invoked") < order.indexOf("completed"));
+    const started = [...events.values()].find((event) => event.decision === "execution_started");
+    const completed = [...events.values()].find((event) => event.decision === "completed");
+    assert.ok(started);
+    assert.ok(completed);
+    assert.equal(started.runId, completed.runId);
+    assert.equal(started.principalId, completed.principalId);
+    assert.equal(started.actionHash, completed.actionHash);
+    assert.equal(started.toolName, completed.toolName);
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
+test("production blocks effectful execution when its execution-start receipt cannot be read back", async () => {
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    let executions = 0;
+    const events = new Map<string, SecurityAuditEvent>();
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record(event) { events.set(event.id, event); },
+      read(id) {
+        const event = events.get(id);
+        return event?.decision === "approval_approved" ? event : undefined;
+      },
+    };
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Write blocked when execution intent cannot be verified",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; return { committed: true }; },
+    }]);
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "execution-start-receipt-missing-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { value: "must-not-run" } },
+      {
+        runId: "execution-start-receipt-missing-test",
+        principalId: "authenticated-owner",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.error?.message ?? "", /execution-start receipt/i);
+    assert.equal(executions, 0);
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
 test("production approval fails closed when the approval audit event cannot be read back", async () => {
   let executions = 0;
   const previousSofia = process.env.SOFIA_ENV;
