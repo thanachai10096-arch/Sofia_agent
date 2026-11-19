@@ -212,7 +212,7 @@ export class SofiaAgent {
   }
 
   private async runLegacy(request: AgentRequest): Promise<AgentResult> {
-    const runId = randomUUID();
+    const runId = request.runId ?? randomUUID();
     const events: AgentEvent[] = [];
     const emit = (event: AgentEvent) => {
       events.push(event);
