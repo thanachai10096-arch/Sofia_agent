@@ -117,6 +117,7 @@ const resolveWorkspaceDependencies = async (principalId: string, workspaceId: st
       projectRoot,
       approvalHandler,
       path.join(projectRoot, ".sofia", "sessions.sqlite"),
+      deps.securityController,
     );
     workspaceDependencies.set(cacheKey, pending);
     void pending.catch(() => {
