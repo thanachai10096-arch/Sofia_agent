@@ -217,6 +217,8 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
     throw new Error("Remote runner requires a host-owned workspace provisioner backed by a hard per-run disk quota.");
   }
   let activeRuns = 0;
+  // A failed quota cleanup is a sticky safety fault: stop accepting work until the host is repaired and restarted.
+  let quotaCleanupFailed = false;
   const tempRoot = path.resolve(options.tempRoot ?? path.join(os.tmpdir(), "sofia-remote-runner"));
 
   const server = createServer(async (request, response) => {
@@ -226,6 +228,7 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
     }
     if (request.method === "GET" && request.url === "/readyz") {
       try {
+        if (quotaCleanupFailed) throw new Error("A prior quota workspace cleanup failed; operator intervention is required.");
         if (!options.sandbox.healthCheck) throw new Error("Runner readiness probe is unavailable.");
         await options.sandbox.healthCheck();
         json(response, 200, { status: "ready", protocolVersion: 1 });
@@ -242,6 +245,10 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
     const authorization = typeof authorizationHeader === "string" ? authorizationHeader : "";
     if (!authorization.startsWith("Bearer ") || !safeEqual(authorization.slice(7), options.token)) {
       json(response, 401, { error: "unauthorized" });
+      return;
+    }
+    if (quotaCleanupFailed) {
+      json(response, 503, { error: "runner_quota_cleanup_fault" });
       return;
     }
     if (activeRuns >= maxConcurrentRuns) {
@@ -316,7 +323,13 @@ export function createRemoteSandboxRunnerServer(options: RemoteSandboxRunnerOpti
         json(response, status, { error: status === 413 ? "payload_too_large" : "invalid_or_failed_request" });
       }
     } finally {
-      if (workspace) await options.workspaceProvisioner!.disposeWorkspace(workspace).catch(() => undefined);
+      if (workspace) {
+        try {
+          await options.workspaceProvisioner!.disposeWorkspace(workspace);
+        } catch {
+          quotaCleanupFailed = true;
+        }
+      }
       activeRuns -= 1;
     }
   });
