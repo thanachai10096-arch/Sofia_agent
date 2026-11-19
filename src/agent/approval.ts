@@ -219,6 +219,25 @@ export class ApprovalBroker {
     return true;
   }
 
+  /** Mark every outstanding approval interrupted during graceful host shutdown. */
+  interruptAll():number {
+    let interrupted=0;
+    for(const [id,item] of this.pendingRequests) {
+      const record:ApprovalAuditRecord={
+        id,runId:item.request.runId,principalId:item.request.principalId,
+        toolName:item.request.toolName,actionHash:item.request.actionHash,
+        risk:item.request.risk,status:"interrupted",createdAt:item.request.createdAt,
+        expiresAt:item.request.expiresAt,settledAt:Date.now(),
+      };
+      if(!this.persistTransition(record)) continue;
+      this.pendingRequests.delete(id);
+      clearTimeout(item.timer);
+      item.settle(false);
+      interrupted++;
+    }
+    return interrupted;
+  }
+
   cancelRun(runId:string,principalId:string):number {
     let cancelled=0;
     for(const [id,item] of this.pendingRequests) {
