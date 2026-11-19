@@ -118,3 +118,35 @@ test("tenant dependency registry waits for in-flight construction before closing
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("concurrent tenant dependency registry close calls share the same shutdown", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-tenant-registry-concurrent-close-"));
+  const resolver = createTenantResourceResolver(root);
+  let release!: () => void;
+  let closeCalls = 0;
+  let cleanupFinished = false;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const registry = new TenantDependencyRegistry(resolver, () => dependencies(async () => {
+    closeCalls += 1;
+    await gate;
+    cleanupFinished = true;
+  }));
+
+  try {
+    await registry.getForPrincipal("principal-a");
+    const firstClose = registry.close();
+    const secondClose = registry.close();
+    assert.equal(firstClose, secondClose);
+    await Promise.resolve();
+    assert.equal(closeCalls, 1);
+    assert.equal(cleanupFinished, false);
+    release();
+    await Promise.all([firstClose, secondClose]);
+    assert.equal(cleanupFinished, true);
+    assert.equal(closeCalls, 1);
+  } finally {
+    release();
+    await registry.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
