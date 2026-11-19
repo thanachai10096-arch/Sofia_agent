@@ -54,7 +54,14 @@ export interface SofiaApiConfig {
   requestTimeoutMs?: number;
   maxConcurrentRunsPerKey?: number;
   securityAdminScope?: string;
-  /** Optional durable run store; queued/running runs become failed after restart. */
+  /**
+   * Optional durable run store for a single API instance.
+   * Startup recovery treats every persisted queued/running record as interrupted
+   * and cancels its pending approvals. Do not share this store or its backing
+   * directory between live API instances: another instance may still own and be
+   * executing one of those runs. Multi-instance run ownership needs a distributed
+   * lease/heartbeat protocol before shared run storage is safe.
+   */
   runStore?: RunRecordStore;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
