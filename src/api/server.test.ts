@@ -271,7 +271,7 @@ test("ordinary API keys cannot access security-admin endpoints", async () => {
   const baseUrl = "http://127.0.0.1:" + address.port;
 
   try {
-    for (const endpoint of ["/v1/security/status", "/v1/security/audit"]) {
+    for (const endpoint of ["/v1/security/status", "/v1/security/audit", "/v1/security/permissions"]) {
       const denied = await fetch(baseUrl + endpoint, {
         headers: { authorization: "Bearer ordinary-key" },
       });
@@ -282,6 +282,23 @@ test("ordinary API keys cannot access security-admin endpoints", async () => {
       headers: { authorization: "Bearer security-admin-key" },
     });
     assert.equal(allowed.status, 200);
+
+    const permissions = await fetch(baseUrl + "/v1/security/permissions", {
+      headers: { authorization: "Bearer security-admin-key" },
+    });
+    assert.equal(permissions.status, 200);
+    const inventory = await permissions.json() as {
+      scopes: Array<{ scope: string; elevated: boolean }>;
+      apiKeys: Array<{ keyId: string; scopes: string[] }>;
+      note: string;
+    };
+    assert.ok(inventory.scopes.some((scope) => scope.scope === "tool:shell" && scope.elevated));
+    assert.ok(inventory.scopes.some((scope) => scope.scope === "agent:run" && !scope.elevated));
+    assert.equal(inventory.apiKeys.length, 2);
+    assert.ok(inventory.apiKeys.every((key) => /^[a-f0-9]{32}$/.test(key.keyId)));
+    assert.ok(inventory.apiKeys.some((key) => key.scopes.includes("security:admin")));
+    assert.ok(!JSON.stringify(inventory).includes("security-admin-key"));
+    assert.match(inventory.note, /trusted server operator/);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
