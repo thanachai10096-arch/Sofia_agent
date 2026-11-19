@@ -4,8 +4,9 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { AgentRunStatus } from "./types.js";
 import type { AgentResult } from "../agent/types.js";
+import type { BrainRunSnapshot } from "../brain/run-state.js";
 
-export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; /** SHA-256 of owner-scoped idempotency key; never store the raw key. */ idempotencyId?:string; requestFingerprint?:string; }
+export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; /** SHA-256 of owner-scoped idempotency key; never store the raw key. */ idempotencyId?:string; requestFingerprint?:string; snapshot?:BrainRunSnapshot; }
 export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; load?(id:string):RunRecord|undefined; }
 const SAFE_ID=/^[A-Za-z0-9-]{8,64}$/;
 const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
@@ -17,6 +18,18 @@ function validResult(value:unknown):value is AgentResult {
  const r=value as Partial<AgentResult>;
  if(typeof r.runId!=="string"||!SAFE_ID.test(r.runId)||typeof r.output!=="string"||r.output.length>1_000_000||typeof r.kind!=="string"||!KINDS.has(r.kind)||!Number.isSafeInteger(r.steps)||((r.steps??-1)<0)||!Array.isArray(r.events)||r.events.length>20_000)return false;
  return r.events.every((event)=>!!event&&typeof event==="object"&&!Array.isArray(event)&&typeof event.type==="string"&&EVENT_TYPES.has(event.type)&&typeof event.message==="string"&&event.message.length<=20_000&&(event.step===undefined||Number.isSafeInteger(event.step))&&(event.metadata===undefined||(!!event.metadata&&typeof event.metadata==="object"&&!Array.isArray(event.metadata))));
+}
+function validSnapshot(value:unknown):value is BrainRunSnapshot {
+ if(!value||typeof value!=="object"||Array.isArray(value))return false;
+ const s=value as Partial<BrainRunSnapshot>;
+ if(s.version!==1||typeof s.runId!=="string"||!SAFE_ID.test(s.runId)||typeof s.task!=="string"||s.task.length>200_000)return false;
+ if(!s.understanding||typeof s.understanding!=="object"||!s.plan||typeof s.plan!=="object"||Array.isArray(s.plan))return false;
+ if(!Array.isArray(s.acceptanceCriteria)||!Array.isArray(s.completedStepIds)||!s.completedStepIds.every((x)=>typeof x==="string"&&x.length<=256))return false;
+ if(typeof s.checkpointId!=="string"||s.checkpointId.length<1||s.checkpointId.length>256)return false;
+ if(!s.usage||typeof s.usage!=="object"||!["steps","toolCalls","modelCalls","reservedOrUsedTokens","replans"].every((key)=>Number.isFinite(s.usage?.[key as keyof typeof s.usage])&&(s.usage?.[key as keyof typeof s.usage] as number)>=0))return false;
+ if(!Array.isArray(s.observations)||!Array.isArray(s.diagnoses)||!Array.isArray(s.decisions)||!Array.isArray(s.trace))return false;
+ try { if(JSON.stringify(value).length>5_000_000)return false; } catch { return false; }
+ return true;
 }
 function validRecord(value:unknown,filename:string):value is RunRecord {
  if(!value||typeof value!=="object"||Array.isArray(value))return false;
@@ -31,6 +44,7 @@ function validRecord(value:unknown,filename:string):value is RunRecord {
  if(r.requestFingerprint!==undefined&&(typeof r.requestFingerprint!=="string"||!/^[a-f0-9]{64}$/.test(r.requestFingerprint)))return false;
  if((r.idempotencyId===undefined)!==(r.requestFingerprint===undefined))return false;
  if(r.result!==undefined&&!validResult(r.result))return false;
+ if(r.snapshot!==undefined&&!validSnapshot(r.snapshot))return false;
  if(r.status==="completed"&&r.result===undefined)return false;
  if(r.status==="failed"&&r.error===undefined)return false;
  return true;
