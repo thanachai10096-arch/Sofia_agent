@@ -5,6 +5,8 @@ export type { SkillLifecycleWorkflowOptions, SkillLifecycleWorkflowResult } from
 export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
 
 export { ApprovalBroker, FileApprovalJournal } from "./agent/approval.js";
+export { SqliteApprovalStore } from "./agent/sqlite-approval-store.js";
+export type { TransactionalApprovalStore } from "./agent/sqlite-approval-store.js";
 export type { ApprovalRequest, ApprovalHandler, PendingApproval, ApprovalDecision, ApprovalAuditRecord, ApprovalAuditStatus, ApprovalJournal } from "./agent/approval.js";
 export { SofiaAgent } from "./agent/core.js";
 export { classifyTask } from "./agent/classifier.js";
