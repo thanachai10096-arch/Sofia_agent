@@ -59,7 +59,11 @@ test("scheduled jobs preserve explicit API scopes and default to no capabilities
     async get() { return { id: "scoped-job", status: "completed", task: "scoped task" } as JobRecord; },
   } as unknown as JobRuntime;
   let now = new Date("2026-10-17T00:00:00.000Z");
-  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  const scheduler = new CronScheduler(runtime, {
+    store,
+    now: () => now,
+    resolveAuthorization: () => ({ toolScopes: ["agent:run", "tool:write"], desktopCapabilities: ["workspace:read"] }),
+  });
   const created = await scheduler.create({
     name: "scoped", task: "scoped task", runAt: "2026-10-17T00:01:00.000Z",
     timeZone: "UTC", ownerKeyId: "alice",
@@ -79,6 +83,37 @@ test("scheduled jobs preserve explicit API scopes and default to no capabilities
   }, "alice");
   assert.deepEqual(noGrant.toolScopes, []);
   assert.deepEqual(noGrant.desktopCapabilities, []);
+});
+
+test("scheduled jobs intersect saved grants with current API-key grants", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(operation) { return operation(state); } };
+  let submitted: Record<string, unknown> | undefined;
+  let currentScopes = ["agent:run", "tool:write", "tool:shell"];
+  const runtime = {
+    async submit(input: Record<string, unknown>) {
+      submitted = input;
+      return { id: "revoked-scope-job", status: "completed", task: String(input.task) } as JobRecord;
+    },
+    async get() { return { id: "revoked-scope-job", status: "completed", task: "scheduled task" } as JobRecord; },
+  } as unknown as JobRuntime;
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  const scheduler = new CronScheduler(runtime, {
+    store,
+    now: () => now,
+    resolveAuthorization: () => ({ toolScopes: currentScopes, desktopCapabilities: [] }),
+  });
+  await scheduler.create({
+    name: "revocation", task: "scheduled task", runAt: "2026-10-17T00:01:00.000Z",
+    timeZone: "UTC", ownerKeyId: "alice",
+    toolScopes: ["agent:run", "tool:write", "tool:shell"],
+  }, "alice");
+  currentScopes = ["agent:run", "tool:shell"];
+  now = new Date("2026-10-17T00:01:00.000Z");
+  await scheduler.tick();
+  for (let i = 0; i < 30 && !submitted; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.deepEqual(submitted?.toolScopes, ["agent:run", "tool:shell"]);
+  assert.deepEqual(submitted?.desktopCapabilities, []);
 });
 
 test("cron next occurrence respects timezone offset and weekday", () => {
