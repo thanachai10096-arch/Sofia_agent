@@ -124,3 +124,12 @@ Secrets are fetched just-in-time through a scoped secret broker after authorizat
 ## 11. Explicit non-goals
 
 "Universal" means a broad, extensible capability architecture, not guaranteed access to every website or permission to violate service rules. Sofia must not bypass paywalls, authentication, MFA, CAPTCHAs, rate limits, merchant controls, or legal restrictions. Unsupported or blocked workflows must be reported clearly and handed back to the user.
+
+
+## 12. Current implementation status
+
+The repository now contains a capability registry, principal-bound authorization checks, an atomic-spend-ledger interface, and a guarded ToolGateway adapter with tests. The guarded adapter intentionally blocks financial execution until a real transaction executor and provider reconciliation adapter are integrated.
+
+The adapter is not yet wired into the production model factory. This is deliberate: the current API factory does not yet provide a durable, authenticated delegated-authority store for each principal. Enabling the adapter without that store would either deny all tool calls or tempt an unsafe implicit grant. The next implementation task is to add tenant-scoped grant persistence and wire the guard into the Brain factory with default-deny behavior.
+
+CI status must be checked on the current PR head before treating these additions as validated. A GitHub workflow run marked failed without retrievable job logs is not evidence of a source-code failure or a passing build.
