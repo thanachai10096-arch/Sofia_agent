@@ -17,6 +17,9 @@ export interface RunOwnershipStore {
 
 /** Atomic claim. Redis executes the script serially; fencing generations never come from worker clocks. */
 export const RUN_OWNERSHIP_CLAIM_SCRIPT = `
+-- An active lease always wins over a new tenant-binding attempt.
+-- Never let a contender rewrite the binding while another owner is live.
+if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
 local bound = redis.call('GET', KEYS[3])
 if bound and bound ~= ARGV[1] then return -1 end
 if not bound then
@@ -24,7 +27,6 @@ if not bound then
   bound = redis.call('GET', KEYS[3])
   if bound ~= ARGV[1] then return -1 end
 end
-if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
 local generation = redis.call('INCR', KEYS[2])
 redis.call('HSET', KEYS[1],
   'principalId', ARGV[1],
@@ -158,7 +160,7 @@ export class UpstashRunOwnershipStore implements RunOwnershipStore {
     if (!/^[A-Za-z0-9_-]{16,256}$/u.test(input.token)) throw new Error("Run ownership token is invalid.");
     if (!Number.isSafeInteger(input.leaseMs) || input.leaseMs < 1000 || input.leaseMs > 300_000) throw new Error("Run ownership lease must be between 1000 and 300000 milliseconds.");
     const result = await this.eval(RUN_OWNERSHIP_CLAIM_SCRIPT, this.keys(input.runId), [
-      input.principalId, input.instanceId, input.token, String(input.leaseMs), String(this.bindingTtlMs),
+      input.principalId, input.instanceId, input.token, String(input.leaseMs), String(Math.max(this.bindingTtlMs, input.leaseMs)),
     ]);
     if (result === null || result === undefined || Number(result) === 0 || Number(result) === -1) return undefined;
     const generation = Number(result);
