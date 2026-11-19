@@ -104,3 +104,9 @@ sanitizing a caller-provided path is insufficient.
 - Every tool action remains subject to Sofia's policy and approval enforcement.
 - Provider adapters pass signature/replay tests and a real provider smoke test before being described as operational.
 - Typecheck, unit tests, build, CI, and end-to-end evidence are reported separately; no one check substitutes for the others.
+
+### Principal workspace resolver foundation
+
+`src/platform/principal-workspace.ts` now provides a stable opaque SHA-256 mapping from an authenticated principal ID to a dedicated directory. It rejects invalid principal IDs, symlink roots, and symlink tenant directories, and verifies the canonical tenant path remains beneath the configured root. Regression tests cover stable mapping, cross-principal directory separation, invalid IDs, and symlink rejection.
+
+This is **not yet wired into the API/Agent composition root**. The current `createSofiaAgentDependenciesWithSessions()` still creates one process-wide dependency graph from the configured workspace; the resolver must not be treated as enabling multi-tenant execution until every runtime and mutable store is constructed per principal and cross-tenant integration tests pass. The resolver also cannot eliminate OS-level TOCTOU races against a hostile local process with write access to the workspace root.
