@@ -93,6 +93,65 @@ test("benchmark history rejects inconsistent capability metrics", () => {
   } finally { f.cleanup(); }
 });
 
+test("benchmark history rejects missing or malformed capability arrays without throwing a type error", () => {
+  const f = fixture();
+  try {
+    const history = new FileSkillBenchmarkHistory(f.file);
+    assert.throws(() => history.append(record({ capability: null })), /Invalid skill benchmark history record/);
+    assert.throws(() => history.append(record({ capability: {
+      score: 100, passRate: 1, baselineCoverage: 1,
+      passedChecks: 2, totalChecks: 2, baselineChecks: 0,
+    } })), /Invalid skill benchmark history record/);
+    assert.equal(history.list().length, 0);
+  } finally { f.cleanup(); }
+});
+
+test("benchmark history verifies capability failed-check identities and baseline coverage", () => {
+  const f = fixture();
+  try {
+    const history = new FileSkillBenchmarkHistory(f.file);
+    assert.throws(() => history.append(record({
+      passed: false,
+      checks: [{ name: "typecheck", passed: true }, { name: "test", passed: false }],
+      capability: {
+        score: 50, passRate: 0.5, baselineCoverage: 1,
+        passedChecks: 1, totalChecks: 2, baselineChecks: 0,
+        missingBaselineChecks: [], failedChecks: ["not-a-check"],
+      },
+    })), /Invalid skill benchmark history record/);
+    assert.throws(() => history.append(record({
+      capability: {
+        score: 50, passRate: 1, baselineCoverage: 0.5,
+        passedChecks: 2, totalChecks: 2, baselineChecks: 2,
+        missingBaselineChecks: [], failedChecks: [],
+      },
+    })), /Invalid skill benchmark history record/);
+    assert.equal(history.list().length, 0);
+  } finally { f.cleanup(); }
+});
+
+test("benchmark history preserves capability metrics across fresh store instances", () => {
+  const f = fixture();
+  try {
+    const first = new FileSkillBenchmarkHistory(f.file);
+    first.append(record({
+      capability: {
+        score: 50, passRate: 0.5, baselineCoverage: 1,
+        passedChecks: 1, totalChecks: 2, baselineChecks: 0,
+        missingBaselineChecks: [], failedChecks: ["test"],
+      },
+      passed: false,
+      checks: [{ name: "typecheck", passed: true }, { name: "test", passed: false }],
+    }));
+    const second = new FileSkillBenchmarkHistory(f.file);
+    assert.deepEqual(second.latest("learned:repair")?.capability, {
+      score: 50, passRate: 0.5, baselineCoverage: 1,
+      passedChecks: 1, totalChecks: 2, baselineChecks: 0,
+      missingBaselineChecks: [], failedChecks: ["test"],
+    });
+  } finally { f.cleanup(); }
+});
+
 test("benchmark history refuses to overwrite corrupt persisted data", () => {
   const f = fixture();
   try {
