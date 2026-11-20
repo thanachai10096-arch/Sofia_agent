@@ -149,10 +149,10 @@ test("browser egress proxy rejects mixed public/private DNS answers for HTTP and
       const socket = connectTcp(Number(address.port), address.hostname);
       let output = "";
       const timer = setTimeout(() => socket.destroy(new Error("Timed out waiting for mixed-DNS CONNECT rejection.")), 3000);
-      socket.once("connect", () => socket.write("CONNECT rebinding.example:443 HTTP/1.1\\r\\nHost: rebinding.example:443\\r\\n\\r\\n"));
+      socket.once("connect", () => socket.write("CONNECT rebinding.example:443 HTTP/1.1\r\nHost: rebinding.example:443\r\n\r\n"));
       socket.on("data", (chunk) => {
         output += chunk.toString("utf8");
-        if (output.includes("\\r\\n\\r\\n")) {
+        if (output.includes("\r\n\r\n")) {
           clearTimeout(timer);
           socket.destroy();
           resolve(output);
@@ -163,7 +163,7 @@ test("browser egress proxy rejects mixed public/private DNS answers for HTTP and
         reject(error);
       });
     });
-    assert.match(connectResponse, /^HTTP\\/1\\.1 403 Forbidden/);
+    assert.match(connectResponse, /^HTTP\/1\.1 403 Forbidden/);
   } finally {
     await proxy.close();
   }
