@@ -958,6 +958,19 @@ export class SofiaBrain {
           );
         }
         this.observations = [...resumed.observations];
+        for (const reconciliation of reconciliations) {
+          const observation = reconciliation.observation;
+          if (reconciliation.outcome !== "completed" || !observation) continue;
+          if (this.observations.some((item) => item.stepId === reconciliation.stepId)) continue;
+          // A reconciliation note is user-provided evidence. Fence it before it
+          // enters the model context just like ordinary tool output.
+          const fenced = fenceUntrustedOutput(observation.tool, observation.preview);
+          this.observations.push({
+            ...observation,
+            preview: fenced.text,
+            ...(fenced.suspicious ? { suspicious: true } : {}),
+          });
+        }
         this.diagnoses.push(...resumed.diagnoses);
         this.decisions.push(...resumed.decisions);
         recoveryRounds = resumed.recoveryRounds;
