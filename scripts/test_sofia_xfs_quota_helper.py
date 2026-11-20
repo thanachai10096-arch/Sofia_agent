@@ -67,6 +67,24 @@ class QuotaHelperTests(unittest.TestCase):
                 self.assertFalse(workspace.exists())
                 self.assertNotIn(run_id, HELPER.load_allocations(state))
 
+    def test_create_refuses_preexisting_workspace_without_claiming_it(self):
+        run_id = "123e4567-e89b-42d3-a456-426614174002"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            state = Path(temp) / "state"
+            root.mkdir()
+            state.mkdir()
+            existing = root / ("run-" + run_id)
+            existing.mkdir()
+            with patch.object(HELPER, "run", return_value=""):
+                with self.assertRaises(HELPER.HelperError):
+                    HELPER.create(root, state, {
+                        "runId": run_id,
+                        "hardQuotaBytes": 8 * 1024 * 1024,
+                        "hardQuotaInodes": HELPER.INODE_LIMIT,
+                    })
+            self.assertTrue(existing.is_dir())
+            self.assertEqual(HELPER.load_allocations(state), {})
     def test_failed_create_keeps_project_id_reserved_for_recovery(self):
         run_id = "123e4567-e89b-42d3-a456-426614174001"
         with tempfile.TemporaryDirectory() as temp:
