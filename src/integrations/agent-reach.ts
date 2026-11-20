@@ -74,7 +74,7 @@ function validatePublicUrl(value: unknown): string {
     host === "localhost" ||
     host.endsWith(".localhost") ||
     host.endsWith(".local") ||
-    host === "::1" ||
+    host.includes(":") ||
     host.startsWith("fc") ||
     host.startsWith("fd") ||
     host.startsWith("fe80:")
