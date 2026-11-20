@@ -4,7 +4,7 @@ import { createAgentReachTools } from "./agent-reach.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 
 function harness(payload: unknown = { ok: true, items: [] }, code = 0) {
-  const calls: Array<{ command: string; args: string[]; options?: { timeoutMs?: number } }> = [];
+  const calls: Array<{ command: string; args: string[]; options?: { timeoutMs?: number; allowNetwork?: boolean } }> = [];
   const runtime = {
     platform: "linux",
     run: async (command: string, args: string[], options?: { timeoutMs?: number }) => {
@@ -21,11 +21,11 @@ function harness(payload: unknown = { ok: true, items: [] }, code = 0) {
   return { calls, runtime, get };
 }
 
-test("Sofia Internet Reach tools use the normal read/network Tool Gateway effects", () => {
+test("channel discovery is local while web reads and platform actions require network permission", () => {
   const { get } = harness();
-  for (const name of ["internet.reach.channels", "internet.reach.read", "internet.reach.action"]) {
-    assert.deepEqual(get(name).effects, ["read", "network"]);
-  }
+  assert.deepEqual(get("internet.reach.channels").effects, ["read"]);
+  assert.deepEqual(get("internet.reach.read").effects, ["read", "network"]);
+  assert.deepEqual(get("internet.reach.action").effects, ["read", "network"]);
 });
 
 test("channel discovery runs the vendored Python bridge, not an external CLI", async () => {
