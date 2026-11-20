@@ -184,3 +184,12 @@ API run requests with a `sessionId` require the selected tenant dependency bundl
 Hosts can construct the registry factory with `createSofiaAgentDependenciesForTenantWithSessions(resolver, context, approval)`. It validates the resolver-issued context and opens the durable SQLite transcript database partitioned by the server-derived 32-character API owner ID. Existing legacy transcripts for that owner are copied before use by the existing retry-safe migration. The helper is exported from the package entrypoint.
 
 The API integration test sends the same conversation ID for two authenticated API owners and verifies distinct tenant session stores and owner-prefixed session records. This covers the API routing contract; hosts must still configure the tenant registry factory to use the tenant session helper rather than an in-memory or shared store.
+
+
+## Tenant-aware durable job execution
+
+Use `createRegistryBackedTenantJobRuntimeRouter(ownerKeyIds, tenantDependencyRegistry)` as the API host's `jobRuntime` when enabling owner-scoped jobs. The router accepts only the server-derived 32-character owner IDs configured by the host, deduplicates per-owner runtime construction, and obtains each runtime from the same `TenantDependencyRegistry` used by interactive Agent requests. This makes queued jobs use the tenant's own `brainFactory`, workspace-rooted checkpoint/run store, and durable job namespace created by `createSofiaAgentDependenciesForTenant`, rather than the process-wide default Brain.
+
+The router requires an owner on submission, rejects unscoped resume/cancel, delegates owner-bound get/resume/cancel only to the matching runtime, and materializes all configured owner runtimes during list/recovery. The dependency registry remains the lifecycle owner; the router adapter does not close each tenant dependency bundle a second time. CronScheduler can use the same router because it submits jobs with the persisted server-derived `schedule.ownerKeyId`.
+
+This is an opt-in host integration: the API host must pass the registry-backed router as `deps.jobRuntime` and configure the registry factory to construct tenant dependencies (including tenant sessions where conversations are used). Do not combine a shared JobRuntime with tenant-aware public API keys. Owner IDs currently represent API-key owners; mapping multiple API keys to one customer tenant still requires a trusted credential-to-tenant mapping.
