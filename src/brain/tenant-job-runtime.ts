@@ -174,6 +174,7 @@ export function createRegistryBackedTenantJobRuntimeRouter(
       cancel: runtime.cancel.bind(runtime),
       ...(runtime.cancelForOwner ? { cancelForOwner: runtime.cancelForOwner.bind(runtime) } : {}),
       list: runtime.list.bind(runtime),
+      ...(runtime.listForOwner ? { listForOwner: runtime.listForOwner.bind(runtime) } : {}),
       ...(runtime.markNotificationDelivered ? { markNotificationDelivered: runtime.markNotificationDelivered.bind(runtime) } : {}),
       // TenantDependencyRegistry closes the full dependency bundle at API shutdown.
       close: async () => undefined,
