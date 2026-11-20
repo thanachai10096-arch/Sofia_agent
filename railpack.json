@@ -18,7 +18,7 @@
         {
           "path": "/opt/venv/bin"
         },
-        "python vendor/agent-reach/sofia_bridge.py --request-json '{\"operation\":\"channels\"}'"
+        "python vendor/agent-reach/sofia_bridge.py --request-base64 eyJvcGVyYXRpb24iOiJjaGFubmVscyJ9"
       ],
       "inputs": [
         "..."
