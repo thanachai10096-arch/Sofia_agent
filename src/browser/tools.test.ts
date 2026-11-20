@@ -126,6 +126,53 @@ test("browser.navigate remains compatible with plans using the navigate tool nam
   assert.deepEqual(harness.navigatedUrls, ["https://example.com/"]);
 });
 
+test("browser.close session drains active page actions before closing context", async () => {
+  let finishClick!: () => void;
+  let sessionClosed = false;
+  const runtime: BrowserRuntime = {
+    launch: async () => ({
+      id: "explicit-close-session",
+      newPage: async () => ({
+        id: "explicit-close-page",
+        url: async () => "https://example.com/",
+        title: async () => "Example",
+        content: async () => "",
+        goto: async () => {},
+        click: async () => new Promise<void>((resolve) => { finishClick = resolve; }),
+        type: async () => {},
+        select: async () => {},
+        scroll: async () => {},
+        wait: async () => {},
+        press: async () => {},
+        back: async () => {},
+        forward: async () => {},
+        reload: async () => {},
+        screenshot: async () => "",
+        close: async () => {},
+      }),
+      close: async () => { sessionClosed = true; },
+    }),
+  };
+  const tools = createBrowserTools(runtime);
+  const open = tools.find((item) => item.name === "browser.open")!;
+  const click = tools.find((item) => item.name === "browser.click")!;
+  const close = tools.find((item) => item.name === "browser.close")!;
+  const opened = await open.execute({}, {} as never) as { pageId: string };
+  const clicking = click.execute({ pageId: opened.pageId, selector: "button" }, {} as never);
+  await Promise.resolve();
+  const closing = close.execute({}, {} as never);
+  await Promise.resolve();
+  assert.equal(sessionClosed, false);
+  await assert.rejects(
+    click.execute({ pageId: opened.pageId, selector: "a" }, {} as never),
+    /closing/,
+  );
+  finishClick();
+  await clicking;
+  await closing;
+  assert.equal(sessionClosed, true);
+});
+
 test("browser.close closes only the requested page when pageId is provided", async () => {
   const harness = setup();
   const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
