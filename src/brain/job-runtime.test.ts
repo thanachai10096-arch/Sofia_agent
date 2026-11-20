@@ -1244,12 +1244,16 @@ test("DurableJobRuntime dispatches queued jobs left behind by a stopped process"
     createdAt: now,
     updatedAt: now,
     task: "recover queued work after restart",
+    context: "Use the existing customer workspace and preserve its settings.",
+    rollbackOnFailure: true,
   }]), { encoding: "utf8", mode: 0o600 });
 
   let executions = 0;
+  let recoveredInput: { task: string; context?: string; rollbackOnFailure?: boolean } | undefined;
   const brain = {
-    run: async () => {
+    run: async (input: { task: string; context?: string; rollbackOnFailure?: boolean }) => {
       executions += 1;
+      recoveredInput = input;
       return { completed: true, state: "completed" };
     },
   } as unknown as SofiaBrain;
@@ -1263,6 +1267,8 @@ test("DurableJobRuntime dispatches queued jobs left behind by a stopped process"
     }
     assert.equal((await runtime.get(jobId))?.status, "completed");
     assert.equal(executions, 1);
+    assert.equal(recoveredInput?.context, "Use the existing customer workspace and preserve its settings.");
+    assert.equal(recoveredInput?.rollbackOnFailure, true);
     assert.equal(await runtime.recoverQueued(), 0, "terminal jobs must not be dispatched again");
   } finally {
     await runtime.close();
