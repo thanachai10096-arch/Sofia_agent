@@ -208,3 +208,42 @@ test("API job endpoints hide another principal's jobs and block cross-principal 
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("synchronous API runs use the authenticated principal dependency graph", async () => {
+  const tenantRoute: ModelRoute = { ...route, id: "tenant-route" };
+  const globalCalls: string[] = [];
+  const tenantCalls: string[] = [];
+  const baseDeps = {
+    provider: { generate: async () => { globalCalls.push("global"); return { text: "global result" }; } },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  };
+  const tenantDeps = {
+    provider: { generate: async () => { tenantCalls.push("tenant"); return { text: "tenant result" }; } },
+    router: new ModelRouter([tenantRoute]),
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  };
+  const server = createSofiaApi(baseDeps, {
+    apiKeys: { "tenant-key": ["agent:run"] },
+    resolvePrincipalDependencies: async () => tenantDeps,
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer tenant-key", "content-type": "application/json" },
+      body: JSON.stringify({ task: "run in my tenant workspace" }),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json() as { result?: { summary?: string } };
+    assert.equal(payload.result?.summary, "tenant result");
+    assert.deepEqual(tenantCalls, ["tenant"]);
+    assert.deepEqual(globalCalls, []);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
