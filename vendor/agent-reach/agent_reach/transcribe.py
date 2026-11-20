@@ -175,10 +175,10 @@ def _assert_safe_public_url(url: str) -> str:
     reads. Hostname DNS resolution and subprocess egress are still enforced by
     the worker's network boundary; this helper alone cannot prevent rebinding.
     """
-    from agent_reach.utils.url import normalize_public_http_url
+    from agent_reach.utils.url import assert_public_http_url
 
     try:
-        return normalize_public_http_url(url)
+        return assert_public_http_url(url)
     except (TypeError, ValueError):
         raise TranscribeError(
             "SSRF blocked: only public http(s) URLs are allowed"
