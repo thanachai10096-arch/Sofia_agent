@@ -116,7 +116,8 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
           cwd: path.relative(base, cwd),
           timeoutMs: timeout,
           maxOutputBytes: 8 * 1024 * 1024,
-          allowNetwork: options.allowNetwork === true,\n          allowedEnvironmentVariables: options.allowedEnvironmentVariables ? [...options.allowedEnvironmentVariables] : [],
+          allowNetwork: options.allowNetwork === true,
+          allowedEnvironmentVariables: options.allowedEnvironmentVariables ? [...options.allowedEnvironmentVariables] : [],
         });
       }
 
