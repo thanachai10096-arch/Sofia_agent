@@ -329,14 +329,18 @@ test("API routes runs through resolver-issued tenant dependency contexts", async
   const root = await mkdtemp(path.join(tmpdir(), "sofia-api-tenants-"));
   const createdTenants: string[] = [];
   const generatedOwners: string[] = [];
+  const tenantSessions = new Map<string, MemorySessionStore>();
   const closedOwners: string[] = [];
   const resolver = createTenantResourceResolver(path.join(root, "workspaces"));
   const registry = new TenantDependencyRegistry(resolver, async context => {
     createdTenants.push(context.tenantId);
+    const sessionStore = new MemorySessionStore();
+    tenantSessions.set(context.principalId, sessionStore);
     return {
       provider: { generate: async () => { generatedOwners.push(context.principalId); return { text: "tenant scoped result" }; } },
       router: { select: () => route, markUnhealthy: () => undefined },
       reviewer: { review: async () => ({ approved: true, reason: "tenant scoped" }) },
+      sessionStore,
       close: async () => { closedOwners.push(context.principalId); },
     };
   });
@@ -361,7 +365,7 @@ test("API routes runs through resolver-issued tenant dependency contexts", async
       const response = await fetch(baseUrl + "/v1/agent/runs", {
         method: "POST",
         headers: { authorization: "Bearer " + key, "content-type": "application/json" },
-        body: JSON.stringify({ task: "owner scoped task" }),
+        body: JSON.stringify({ task: "owner scoped task", sessionId: "same-conversation-id" }),
       });
       assert.equal(response.status, 200);
       return response.json() as Promise<{ result?: { summary?: string } }>;
@@ -374,6 +378,9 @@ test("API routes runs through resolver-issued tenant dependency contexts", async
     assert.ok(second.result);
     assert.deepEqual(generatedOwners.sort(), [ownerOneId, ownerTwoId].sort());
     assert.equal(new Set(createdTenants).size, 2);
+    assert.ok(tenantSessions.get(ownerOneId)?.get(ownerOneId + ":same-conversation-id"));
+    assert.ok(tenantSessions.get(ownerTwoId)?.get(ownerTwoId + ":same-conversation-id"));
+    assert.notEqual(tenantSessions.get(ownerOneId), tenantSessions.get(ownerTwoId));
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     await registry.close();
