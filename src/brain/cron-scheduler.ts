@@ -260,10 +260,10 @@ export class CronScheduler {
   private tickPromise?: Promise<void>;
   private closePromise?: Promise<void>;
   private readonly active = new Map<string, AbortController>();
-  private readonly activeTasks = new Set<Promise<void>>();
+  private readonly activeTasks = new Set<Promise<unknown>>();
   private readonly recoveryTasks = new Set<Promise<unknown>>();
 
-  private trackTask<T>(task: Promise<T>, collection: Set<Promise<T>>): Promise<T> {
+  private trackTask<T>(task: Promise<T>, collection: Set<Promise<unknown>>): Promise<T> {
     collection.add(task);
     void task.finally(() => collection.delete(task)).catch(() => undefined);
     return task;
