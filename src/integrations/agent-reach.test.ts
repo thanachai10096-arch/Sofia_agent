@@ -34,6 +34,7 @@ test("channel discovery runs the vendored Python bridge, not an external CLI", a
   assert.equal(calls[0]?.command, "python3");
   assert.equal(calls[0]?.args[0], "vendor/agent-reach/sofia_bridge.py");
   assert.equal(calls[0]?.args[1], "--request-json");
+  assert.equal(calls[0]?.options?.allowNetwork, true);
   assert.deepEqual(JSON.parse(calls[0]!.args[2]!), { operation: "channels" });
   assert.equal(result.untrustedOutput, true);
 });
