@@ -148,7 +148,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       });
       tenantAgents.set(ownerKeyId, pending);
     }
-    return (await pending).agent;
+    const resolved = await pending;
+    if (requiresSessionStore && !resolved.dependencies.sessionStore) {
+      throw new Error("tenant_session_store_required");
+    }
+    return resolved.agent;
   };
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
