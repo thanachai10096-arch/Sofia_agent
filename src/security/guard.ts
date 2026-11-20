@@ -142,7 +142,7 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
       }
       if (allowedHosts.length === 0 || !allowedHosts.some((allowed) => {
         const normalizedAllowed = allowed.toLowerCase().replace(/\.$/, "");
-        return host === normalizedAllowed || host.endsWith("." + normalizedAllowed);
+        return (normalizedAllowed === "*" && action.toolName.startsWith("internet.reach.")) || host === normalizedAllowed || host.endsWith("." + normalizedAllowed);
       })) {
         return { allowed: false, risk: "critical", requireApproval: true, reason: "Network host is not allowlisted.", actionHash: hash };
       }
