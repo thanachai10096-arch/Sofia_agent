@@ -355,6 +355,34 @@ class QuotaHelperTests(unittest.TestCase):
             with self.assertRaises(HELPER.HelperError):
                 HELPER.locked_state(state)
 
+    def test_allocation_lock_serializes_independent_helper_processes(self):
+        import fcntl
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            first_fd = HELPER.locked_state(state)
+            second_fd = None
+            try:
+                second_fd = __import__("os").open(
+                    state / "allocations.lock",
+                    __import__("os").O_RDWR | __import__("os").O_NOFOLLOW,
+                )
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(second_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            finally:
+                if second_fd is not None:
+                    __import__("os").close(second_fd)
+                __import__("os").close(first_fd)
+
+    def test_allocation_lock_is_close_on_exec(self):
+        import fcntl
+        import os
+        with tempfile.TemporaryDirectory() as temp:
+            fd = HELPER.locked_state(Path(temp))
+            try:
+                self.assertTrue(fcntl.fcntl(fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC)
+            finally:
+                os.close(fd)
+
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
         self.assertEqual(HELPER.PROJECT_ID_MAX, 299999)
