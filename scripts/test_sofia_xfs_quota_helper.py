@@ -146,6 +146,85 @@ class QuotaHelperTests(unittest.TestCase):
                     })
             self.assertEqual(HELPER.load_allocations(state), {})
 
+
+    def test_abort_recovers_interrupted_create_and_releases_project_id(self):
+        run_id = "123e4567-e89b-42d3-a456-426614174004"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            state = Path(temp) / "state"
+            root.mkdir()
+            state.mkdir()
+
+            def fail_after_workspace_creation(argv, timeout=HELPER.COMMAND_TIMEOUT):
+                if "project -s" in " ".join(argv):
+                    raise HELPER.HelperError("simulated interruption after mkdir")
+                return ""
+
+            with patch.object(HELPER, "run", side_effect=fail_after_workspace_creation):
+                with self.assertRaises(HELPER.HelperError):
+                    HELPER.create(root, state, {
+                        "runId": run_id,
+                        "hardQuotaBytes": 8 * 1024 * 1024,
+                        "hardQuotaInodes": HELPER.INODE_LIMIT,
+                    })
+
+            workspace = root / ("run-" + run_id)
+            self.assertTrue(workspace.is_dir())
+            self.assertEqual(HELPER.load_allocations(state)[run_id]["status"], "needs_recovery")
+
+            with patch.object(HELPER, "run", return_value="") as run_mock:
+                reply = HELPER.dispose(root, state, {
+                    "runId": run_id,
+                }, abort=True)
+
+            self.assertEqual(reply["runId"], run_id)
+            self.assertFalse(workspace.exists())
+            self.assertNotIn(run_id, HELPER.load_allocations(state))
+            self.assertTrue(any("limit -p bhard=0 ihard=0" in " ".join(call.args[0]) for call in run_mock.call_args_list))
+
+    def test_failed_quota_reset_keeps_allocation_reserved_until_retry(self):
+        run_id = "123e4567-e89b-42d3-a456-426614174005"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            state = Path(temp) / "state"
+            root.mkdir()
+            state.mkdir()
+            workspace = root / ("run-" + run_id)
+            workspace.mkdir()
+            HELPER.save_allocations(state, {
+                run_id: {
+                    "project_id": HELPER.PROJECT_ID_MIN,
+                    "workspace": str(workspace),
+                    "bytes": 8 * 1024 * 1024,
+                    "inodes": HELPER.INODE_LIMIT,
+                    "status": "active",
+                }
+            })
+
+            def fail_reset(argv, timeout=HELPER.COMMAND_TIMEOUT):
+                if "limit -p bhard=0 ihard=0" in " ".join(argv):
+                    raise HELPER.HelperError("simulated quota reset failure")
+                return ""
+
+            with patch.object(HELPER, "run", side_effect=fail_reset):
+                with self.assertRaises(HELPER.HelperError):
+                    HELPER.dispose(root, state, {
+                        "runId": run_id,
+                        "workspacePath": str(workspace),
+                    })
+
+            self.assertFalse(workspace.exists())
+            self.assertIn(run_id, HELPER.load_allocations(state))
+
+            with patch.object(HELPER, "run", return_value=""):
+                reply = HELPER.dispose(root, state, {
+                    "runId": run_id,
+                        "workspacePath": str(workspace),
+                })
+
+            self.assertEqual(reply["runId"], run_id)
+            self.assertNotIn(run_id, HELPER.load_allocations(state))
+
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
         self.assertEqual(HELPER.PROJECT_ID_MAX, 299999)
