@@ -192,11 +192,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     };
     runs.set(run.id, run); if (interrupted) void persist(run).catch(() => undefined);
   }
-  const idempotency = new Map<string, { runId: string; fingerprint: string }>();
+  const idempotency = new Map<string, { runId: string; fingerprint: string; ready: Promise<void> }>();
   // Rehydrate replay protection from durable run records after a server restart.
   for (const run of runs.values()) {
     if (run.idempotencyId && run.requestFingerprint) {
-      idempotency.set(run.idempotencyId, { runId: run.id, fingerprint: run.requestFingerprint });
+      idempotency.set(run.idempotencyId, { runId: run.id, fingerprint: run.requestFingerprint, ready: Promise.resolve() });
     }
   }
   const activeByKey = new Map<string, number>();
@@ -640,7 +640,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             if (existing && existingRun && existing.fingerprint !== requestFingerprint) {
               return json(res, 409, { error: "idempotency_key_reused", message: "This idempotency key was already used with a different request." }, origin, config);
             }
-            if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
+            if (existingRun && existing) {
+              // A concurrent request may arrive while the first request is still
+              // durably persisting its queued record. Wait for that acceptance
+              // before returning the existing run to the retrying client.
+              try { await existing.ready; }
+              catch { return json(res, 503, { error: "run_persistence_unavailable" }, origin, config); }
+              const acceptedRun = runs.get(existing.runId);
+              if (acceptedRun) return json(res, 200, publicResponse(acceptedRun), origin, config);
+            }
             if (existing) idempotency.delete(idempotencyId);
           }
           const active = activeByKey.get(auth.keyId) ?? 0;
@@ -663,15 +671,26 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(idempotencyId ? { idempotencyId, requestFingerprint } : {}),
           };
           runs.set(runId, run);
+          // Reserve the idempotency key synchronously before yielding to storage.
+          // Otherwise two concurrent retries can both pass the map lookup and
+          // launch separate runs while the first queued record is being persisted.
+          const acceptance = persist(run);
+          if (idempotencyId) idempotency.set(idempotencyId, {
+            runId,
+            fingerprint: requestFingerprint,
+            ready: acceptance,
+          });
           try {
             // A 202 response is an acceptance promise: persist the queued record
             // before acknowledging so a following status poll cannot race the disk write.
-            await persist(run);
+            await acceptance;
           } catch {
             runs.delete(runId);
+            if (idempotencyId && idempotency.get(idempotencyId)?.runId === runId) {
+              idempotency.delete(idempotencyId);
+            }
             return json(res, 503, { error: "run_persistence_unavailable" }, origin, config);
           }
-          if (idempotencyId) idempotency.set(idempotencyId, { runId, fingerprint: requestFingerprint });
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
             ...input,
