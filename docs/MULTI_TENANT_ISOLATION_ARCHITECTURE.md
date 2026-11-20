@@ -179,7 +179,7 @@ A green typecheck or unit suite alone is not sufficient evidence of tenant isola
 
 ## Tenant-owned conversation sessions
 
-API run requests with a `sessionId` require the selected tenant dependency bundle to expose its own `sessionStore`; the API fails closed with `tenant_session_store_required` when a tenant registry or owner resolver returns a bundle without one. This prevents a tenant-aware API run from silently falling back to the process-wide dependency bundle's transcript store.
+API run requests with a `sessionId` require the selected tenant dependency bundle to expose its own `sessionStore`; the API fails closed with `tenant_session_store_required` when a tenant registry or owner resolver returns a bundle without one. The check is repeated when a cached owner dependency bundle is reused, so a first request without a conversation cannot bypass the requirement on a later request. This prevents a tenant-aware API run from silently falling back to the process-wide dependency bundle's transcript store.
 
 Hosts can construct the registry factory with `createSofiaAgentDependenciesForTenantWithSessions(resolver, context, approval)`. It validates the resolver-issued context and opens the durable SQLite transcript database partitioned by the server-derived 32-character API owner ID. Existing legacy transcripts for that owner are copied before use by the existing retry-safe migration. The helper is exported from the package entrypoint.
 
