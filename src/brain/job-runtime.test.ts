@@ -1195,4 +1195,8 @@ test("DurableJobRuntime requires the exact unresolved step before reconciliation
     () => runtime.reconcile(submitted.id, "different-step", "retry", "owner-a", undefined, { noSideEffect: true }),
     /does not match the unresolved in-flight step/i,
   );
+  const retried = await runtime.reconcile(submitted.id, "send-step", "retry", "owner-a", "Checked delivery history; no message was sent", { noSideEffect: true });
+  assert.equal(retried.snapshot?.inFlightStepId, undefined);
+  assert.equal(retried.snapshot?.reconciliations?.at(-1)?.confirmedNoSideEffect, true);
+  assert.deepEqual(retried.snapshot?.completedStepIds, []);
 });
