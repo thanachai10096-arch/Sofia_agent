@@ -34,12 +34,17 @@ class QuotaHelperTests(unittest.TestCase):
 
 
     def test_project_quota_state_requires_both_accounting_and_enforcement(self):
-        healthy = "Project quota state on /mnt (device)\\nAccounting: ON\\nEnforcement: ON\\n"
-        accounting_only = "Project quota state on /mnt (device)\\nAccounting: ON\\nEnforcement: OFF\\n"
-        other_quotas_only = "User quota state on /mnt\\nAccounting: ON\\nEnforcement: ON\\nGroup quota state on /mnt\\nAccounting: ON\\nEnforcement: ON\\n"
+        healthy = "Project quota state on /mnt (device)\nAccounting: ON\nEnforcement: ON\n"
+        accounting_only = "Project quota state on /mnt (device)\nAccounting: ON\nEnforcement: OFF\n"
+        other_quotas_only = "User quota state on /mnt\nAccounting: ON\nEnforcement: ON\nGroup quota state on /mnt\nAccounting: ON\nEnforcement: ON\n"
         self.assertTrue(HELPER.project_quota_is_enforced(healthy))
         self.assertFalse(HELPER.project_quota_is_enforced(accounting_only))
         self.assertFalse(HELPER.project_quota_is_enforced(other_quotas_only))
+
+    def test_project_quota_state_stops_before_following_quota_sections(self):
+        state = ("Project quota state on /mnt\\nAccounting: ON\\nEnforcement: ON\\n"
+                 "User quota state on /mnt\\nAccounting: OFF\\nEnforcement: OFF\\n")
+        self.assertTrue(HELPER.project_quota_is_enforced(state))
     def test_strict_json_rejects_duplicate_keys_and_non_finite_numbers(self):
         with self.assertRaises(HELPER.HelperError):
             HELPER.strict_json_loads('{"operation":"probe","operation":"dispose"}')
