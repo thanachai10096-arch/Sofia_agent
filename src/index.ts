@@ -8,6 +8,7 @@ export { ApprovalBroker, FileApprovalJournal } from "./agent/approval.js";
 export { Aes256GcmApprovalPayloadCipher } from "./agent/approval-payload-cipher.js";
 export type { ApprovalPayloadContext, ApprovalPayloadCipher, EncryptedApprovalPayload } from "./agent/approval-payload-cipher.js";
 export { SqliteApprovalStore } from "./agent/sqlite-approval-store.js";
+export { SqliteApprovalPayloadStore } from "./agent/sqlite-approval-payload-store.js";
 export type { TransactionalApprovalStore } from "./agent/sqlite-approval-store.js";
 export type { ApprovalRequest, ApprovalHandler, PendingApproval, ApprovalDecision, ApprovalAuditRecord, ApprovalAuditStatus, ApprovalJournal } from "./agent/approval.js";
 export { SofiaAgent } from "./agent/core.js";
