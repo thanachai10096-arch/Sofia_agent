@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TenantJobRuntimeRouter } from "./tenant-job-runtime.js";
+import { createRegistryBackedTenantJobRuntimeRouter, TenantJobRuntimeRouter } from "./tenant-job-runtime.js";
+import type { TenantDependencyRegistry } from "../platform/tenant-dependency-registry.js";
 import type { JobRecord, JobRuntime } from "./job-runtime.js";
 
 const ownerOne = "11111111111111111111111111111111";
@@ -79,4 +80,29 @@ test("TenantJobRuntimeRouter rejects missing, malformed, and unconfigured owners
   await assert.rejects(() => router.resume("any-job"), /Unscoped job resume is disabled/u);
   await assert.rejects(() => router.cancel("any-job"), /Unscoped job cancellation is disabled/u);
   await router.close();
+});
+
+
+test("registry-backed job routing reuses the exact tenant Agent dependency bundle", async () => {
+  const closed: string[] = [];
+  const runtimes = new Map<string, JobRuntime>();
+  const registry = {
+    async getForPrincipal(ownerKeyId: string) {
+      let runtime = runtimes.get(ownerKeyId);
+      if (!runtime) {
+        runtime = fakeRuntime(ownerKeyId, closed);
+        runtimes.set(ownerKeyId, runtime);
+      }
+      return { jobRuntime: runtime };
+    },
+  } as unknown as TenantDependencyRegistry;
+  const router = createRegistryBackedTenantJobRuntimeRouter([ownerOne, ownerTwo], registry);
+  const one = await router.submit({ task: "reuse owner one Agent", ownerKeyId: ownerOne });
+  const two = await router.submit({ task: "reuse owner two Agent", ownerKeyId: ownerTwo });
+  assert.equal(one.ownerKeyId, ownerOne);
+  assert.equal(two.ownerKeyId, ownerTwo);
+  assert.equal(runtimes.size, 2);
+  await router.close();
+  // The registry, not the router adapter, owns full dependency lifecycle shutdown.
+  assert.deepEqual(closed, []);
 });
