@@ -44,8 +44,9 @@ function classifyRunWaitFailure(error: unknown): string {
 export async function reportTelegramRunCompletion(input: {
   runId: string;
   conversationId: string;
-  waitForRun: (id: string, options: { timeoutMs: number; intervalMs: number }) => Promise<TelegramRunResult>;
+  waitForRun: (id: string, options: { timeoutMs: number; intervalMs: number; signal?: AbortSignal }) => Promise<TelegramRunResult>;
   send: (message: OutboundMessage) => Promise<boolean>;
+  signal?: AbortSignal;
   onWarning?: (event: string) => void;
   onEvent?: (event: string) => void;
 }): Promise<void> {
@@ -53,6 +54,7 @@ export async function reportTelegramRunCompletion(input: {
   try {
     run = await input.waitForRun(input.runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000 });
   } catch (error) {
+    if (input.signal?.aborted) return;
     const failureKind = classifyRunWaitFailure(error);
     input.onWarning?.("telegram_run_wait_failed run_id=" + input.runId + " kind=" + failureKind);
     try {
@@ -68,6 +70,7 @@ export async function reportTelegramRunCompletion(input: {
     return;
   }
 
+  if (input.signal?.aborted) return;
   input.onEvent?.("telegram_run_terminal run_id=" + input.runId + " status=" + run.status);
   const output = typeof run.result?.output === "string"
     ? String(redactSecrets(run.result.output)).trim()
@@ -87,6 +90,7 @@ export async function reportTelegramRunCompletion(input: {
         : "");
   }
 
+  if (input.signal?.aborted) return;
   try {
     const delivered = await input.send({ conversationId: input.conversationId, text });
     if (delivered) input.onEvent?.("telegram_run_result_delivered run_id=" + input.runId);
@@ -169,21 +173,30 @@ export function createTelegramMessagingRuntime(
     const dedupeDirectory = path.resolve(env.SOFIA_CHAT_DEDUPE_DIR ?? path.join(workspace, ".sofia", "chat-dedupe"));
     const deduplicator = new FileChatMessageDeduplicator(dedupeDirectory);
     let gateway: MessagingGateway | undefined;
+    const completionAbort = new AbortController();
+    const completionTasks = new Set<Promise<void>>();
+    let stopping = false;
+    const trackCompletion = (task: Promise<void>): void => {
+      completionTasks.add(task);
+      void task.finally(() => completionTasks.delete(task)).catch(() => undefined);
+    };
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
       onAccepted: ({ runId, runStatus, message }) => {
+        if (stopping || completionAbort.signal.aborted) return;
         onWarning("Telegram messaging event: telegram_run_accepted run_id=" + runId + " status=" + runStatus + ".");
         // Poll in the background so one long task does not block incoming Telegram updates.
-        void reportTelegramRunCompletion({
+        trackCompletion(reportTelegramRunCompletion({
           runId,
           conversationId: message.identity.conversationId,
+          signal: completionAbort.signal,
           waitForRun: (id, options) => client.waitForRun(id, options),
           send: (outbound) => gateway
             ? gateway.send("telegram", outbound)
             : Promise.resolve(false),
           onWarning: (event) => onWarning("Telegram messaging warning: " + event + "."),
           onEvent: (event) => onWarning("Telegram messaging event: " + event + "."),
-        });
+        }));
       },
     });
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
@@ -209,7 +222,16 @@ export function createTelegramMessagingRuntime(
     });
     return {
       start: () => gateway.start(),
-      stop: () => gateway.stop(),
+      stop: async () => {
+        if (stopping) {
+          await Promise.allSettled([...completionTasks]);
+          return;
+        }
+        stopping = true;
+        completionAbort.abort(new Error("Telegram messaging runtime is stopping"));
+        await gateway.stop();
+        await Promise.allSettled([...completionTasks]);
+      },
     };
   } catch (error) {
     // Report only the static validation message from our own constructors. Never log
