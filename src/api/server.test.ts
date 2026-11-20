@@ -5,6 +5,7 @@ import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
+import type { RunRecord, RunRecordStore } from "./run-record-store.js";
 
 const route: ModelRoute = {
   id: "api-session-test",
@@ -245,5 +246,112 @@ test("synchronous API runs use the authenticated principal dependency graph", as
     assert.deepEqual(globalCalls, []);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("principal run stores isolate history and restore idempotency after API restart", async () => {
+  class MemoryRunRecordStore implements RunRecordStore {
+    private records = new Map<string, RunRecord>();
+    async save(record: RunRecord) { this.records.set(record.id, structuredClone(record)); }
+    async remove(id: string) { this.records.delete(id); }
+    loadAllSync() { return [...this.records.values()].map((record) => structuredClone(record)); }
+    load(id: string) { const record = this.records.get(id); return record ? structuredClone(record) : undefined; }
+  }
+
+  const stores = new Map<string, MemoryRunRecordStore>();
+  const resolvePrincipalRunStore = async (principalId: string) => {
+    let store = stores.get(principalId);
+    if (!store) { store = new MemoryRunRecordStore(); stores.set(principalId, store); }
+    return store;
+  };
+  const makeServer = () => createSofiaApi({
+    provider: { generate: async () => ({ text: "Tenant run completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: {
+      "tenant-one-key": ["agent:run", "agent:read"],
+      "tenant-two-key": ["agent:run", "agent:read"],
+    },
+    resolvePrincipalRunStore,
+  });
+
+  const listen = async (server: ReturnType<typeof createSofiaApi>) => {
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    return `http://127.0.0.1:${address.port}`;
+  };
+  const close = (server: ReturnType<typeof createSofiaApi>) =>
+    new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+
+  const firstServer = makeServer();
+  const firstUrl = await listen(firstServer);
+  let runId = "";
+  try {
+    const accepted = await fetch(firstUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer tenant-one-key",
+        "content-type": "application/json",
+        "idempotency-key": "stable-task-1",
+      },
+      body: JSON.stringify({ task: "tenant one's private task", async: true }),
+    });
+    assert.equal(accepted.status, 202);
+    runId = (await accepted.json() as { id: string }).id;
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const status = await fetch(firstUrl + "/v1/agent/runs/" + runId, {
+        headers: { authorization: "Bearer tenant-one-key" },
+      });
+      assert.equal(status.status, 200);
+      if ((await status.json() as { status: string }).status === "completed") break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(stores.size, 1);
+  } finally {
+    await close(firstServer);
+  }
+
+  const secondServer = makeServer();
+  const secondUrl = await listen(secondServer);
+  try {
+    const ownerRead = await fetch(secondUrl + "/v1/agent/runs/" + runId, {
+      headers: { authorization: "Bearer tenant-one-key" },
+    });
+    assert.equal(ownerRead.status, 200);
+    assert.equal((await ownerRead.json() as { status: string }).status, "completed");
+
+    const otherRead = await fetch(secondUrl + "/v1/agent/runs/" + runId, {
+      headers: { authorization: "Bearer tenant-two-key" },
+    });
+    assert.equal(otherRead.status, 404);
+
+    const replay = await fetch(secondUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer tenant-one-key",
+        "content-type": "application/json",
+        "idempotency-key": "stable-task-1",
+      },
+      body: JSON.stringify({ task: "tenant one's private task", async: true }),
+    });
+    assert.equal(replay.status, 200);
+    assert.equal((await replay.json() as { id: string }).id, runId);
+
+    const otherTenantStart = await fetch(secondUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer tenant-two-key",
+        "content-type": "application/json",
+        "idempotency-key": "stable-task-1",
+      },
+      body: JSON.stringify({ task: "tenant two's separate task", async: true }),
+    });
+    assert.equal(otherTenantStart.status, 202);
+    assert.notEqual((await otherTenantStart.json() as { id: string }).id, runId);
+  } finally {
+    await close(secondServer);
   }
 });
