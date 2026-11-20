@@ -116,9 +116,12 @@ def check_xfs(root):
     if fs_type != "xfs" or not ({"prjquota", "pquota"} & set(options)):
         fail("workspace root must be on XFS mounted with project quota enabled")
     state = run(["xfs_quota", "-x", "-c", "state", str(root)])
-    project_state = re.search(r"Project quota state:\\s*ON", state, re.IGNORECASE)
-    project_enforcement = re.search(r"Project quota enforcement:\\s*ON", state, re.IGNORECASE)
-    if not project_state or not project_enforcement:
+    project_section = re.search(
+        r"Project quota state:[\\s\\S]*?(?=\\n(?:User|Group) quota state:|\\Z)",
+        state,
+        re.IGNORECASE,
+    )
+    if not project_section or not re.search(r"Accounting:\\s*ON", project_section.group(0), re.IGNORECASE) or not re.search(r"Enforcement:\\s*ON", project_section.group(0), re.IGNORECASE):
         fail("XFS project quota accounting and enforcement are not both ON")
 
 
@@ -200,16 +203,23 @@ def validate_run_id(value):
 
 
 def extract_hard_limit(output, project_id):
-    rows = [line.split() for line in output.splitlines() if line.split() and line.split()[0] == str(project_id)]
+    rows = []
+    for line in output.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        reported_id = fields[0].lstrip("#")
+        if reported_id == str(project_id):
+            rows.append(fields)
     if len(rows) != 1 or len(rows[0]) < 4 or not rows[0][3].isdigit():
         fail("cannot uniquely read back numeric project hard limit")
     return int(rows[0][3])
 
 
 def verify_quota(root, project_id, bytes_limit, inode_limit):
-    # Query block and inode reports independently: each has Used, Soft, Hard columns.
-    block_output = run(["xfs_quota", "-c", "quota -p -b -n -N -v " + str(project_id), str(root)])
-    inode_output = run(["xfs_quota", "-c", "quota -p -i -n -N -v " + str(project_id), str(root)])
+    # `report` emits project ID, used, soft, hard; block reports use 1K units.
+    block_output = run(["xfs_quota", "-x", "-c", "report -p -b -n -N", str(root)])
+    inode_output = run(["xfs_quota", "-x", "-c", "report -p -i -n -N", str(root)])
     expected_blocks = (bytes_limit + 1023) // 1024
     if extract_hard_limit(block_output, project_id) != expected_blocks:
         fail("XFS block hard limit read-back did not match request")
