@@ -105,8 +105,13 @@ test("legacy execution fails closed when a write tool has no approval handler", 
     policy: { ...defaultPolicy, maxSteps: 1, allowFileWrite: true, maxRisk: "high", permissions: {} },
   });
 
-  await assert.rejects(agent.run({ task: "write a file" }), /Approval handler required for medium-risk tool/);
+  const events: Array<{ type: string; message: string }> = [];
+  await assert.rejects(agent.run({
+    task: "write a file",
+    onEvent(event) { events.push({ type: event.type, message: event.message }); },
+  }), /failed after 1 steps/);
   assert.equal(executions, 0, "the tool must not execute without explicit approval");
+  assert.ok(events.some((event) => event.type === "tool.approval_required" && /Approval is required/.test(event.message)));
 });
 
 test("approval handler cannot mutate the action that Sofia executes", async () => {
@@ -252,6 +257,11 @@ test("legacy execution cannot downgrade a reserved terminal tool to read-only", 
     policy: { ...defaultPolicy, maxSteps: 1, allowShell: false, allowNetwork: false, permissions: {} },
   });
 
-  await assert.rejects(agent.run({ task: "run a terminal command" }), /Tool execution is disabled by policy: terminal\.run/);
+  const events: Array<{ type: string; message: string }> = [];
+  await assert.rejects(agent.run({
+    task: "run a terminal command",
+    onEvent(event) { events.push({ type: event.type, message: event.message }); },
+  }), /failed after 1 steps/);
   assert.equal(executions, 0, "the terminal tool must not execute when shell access is disabled");
+  assert.ok(events.some((event) => event.type === "tool.failed" && /disabled by policy: terminal\.run/.test(event.message)));
 });

@@ -3,9 +3,8 @@ import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
-import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission } from "../security/policy.js";
-import { actionHash, riskFor } from "../security/guard.js";
-import { validateToolInput } from "../tools/types.js";
+import { assertSafeStep, loadExecutionPolicyFromEnv } from "../security/policy.js";
+import { RegistryToolGateway } from "../brain/registry-tool-gateway.js";
 
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
@@ -235,6 +234,19 @@ export class SofiaAgent {
       },
     }));
 
+    // Legacy mode must use the same security boundary as Brain mode. Never invoke
+    // a registered tool directly from the model-response loop.
+    const toolGateway = this.deps.runtime && this.deps.tools
+      ? new RegistryToolGateway(
+          { runtime: this.deps.runtime, tools: this.deps.tools },
+          policy,
+          this.deps.approval,
+          undefined,
+          this.deps.securityController,
+          this.deps.securityAudit,
+        )
+      : undefined;
+
     let lastError: unknown = null;
 
     for (let step = 1; step <= maxSteps; step += 1) {
@@ -279,25 +291,9 @@ export class SofiaAgent {
           }
 
           for (const call of response.toolCalls) {
-            if (!this.deps.tools || !this.deps.runtime) throw new Error("Agent runtime and tool registry are required for tool execution.");
-            const tool = this.deps.tools.get(call.name);
-            if (!tool) throw new Error(`Unknown tool: ${call.name}`);
-            // Freeze the model-produced action as a private snapshot before asking for approval.
-            // The approval UI/handler receives a separate copy and cannot mutate what will execute.
-            const actionInput = structuredClone(call.input);
-            const effects = effectiveToolEffects(call.name, tool.effects);
-            assertToolAllowed(policy, call.name, effects);
-            const permission = toolPermission(policy, call.name, effects);
-            const risk = riskFor(effects, actionInput);
-            const maximumRisk = permission.maxRisk ?? policy.maxRisk;
-            if (riskRank[risk] > riskRank[maximumRisk]) {
-              throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
-            }
-            const requiresApproval = permission.requireApproval ?? risk !== "low";
-            if (requiresApproval && !this.deps.approval) {
-              throw new Error(`Approval handler required for ${risk}-risk tool: ${call.name}`);
-            }
-            validateToolInput(tool.inputSchema, actionInput);
+            if (!toolGateway) throw new Error("Agent runtime and tool registry are required for tool execution.");
+            const registered = this.deps.tools?.get(call.name);
+            if (!registered) throw new Error(`Unknown tool: ${call.name}`);
 
             emit({
               type: "tool.started",
@@ -306,74 +302,51 @@ export class SofiaAgent {
               metadata: { tool: call.name },
             });
 
-            if (requiresApproval && this.deps.approval) {
-              const approved = await this.deps.approval({
+            const result = await toolGateway.execute(
+              { tool: call.name, input: structuredClone(call.input) },
+              {
                 runId,
-                principalId: request.principalId,
-                toolName: call.name,
-                input: structuredClone(actionInput),
-                actionHash: actionHash(runId, call.name, actionInput, request.principalId),
-                risk,
-              });
-
-              if (!approved) {
-                emit({
-                  type: "tool.approval_required",
-                  message: `Tool ${call.name} was not approved.`,
-                  step,
-                  metadata: { tool: call.name },
-                });
-
-                messages.push({
-                  role: "tool",
-                  content: JSON.stringify({ error: "Tool execution not approved" }),
-                  toolCallId: call.id,
-                });
-                continue;
-              }
-            }
-
-            // Approval may take time. Never start an action after the caller or host
-            // kill switch has cancelled this run while approval was pending.
+                ...(request.principalId ? { principalId: request.principalId } : {}),
+                signal: request.signal ?? new AbortController().signal,
+                requireApproval: true,
+                notifyApproval() {},
+              },
+            );
             request.signal?.throwIfAborted();
 
-            try {
-              const result = await tool.execute(actionInput, {
-                runtime: this.deps.runtime,
-                ...(request.signal ? { signal: request.signal } : {}),
-              });
-              const fenced = fenceUntrustedOutput(call.name, JSON.stringify(result));
-              messages.push({ role: "tool", content: fenced.text, toolCallId: call.id });
-              if (fenced.suspicious) emit({
-                type: "tool.output_suspicious",
-                message: `${call.name} output contains instruction-like text.`,
-                step,
-                metadata: { tool: call.name, signals: fenced.signals.join(",") },
-              });
-
-              emit({
-                type: "tool.completed",
-                message: `${call.name} completed.`,
-                step,
-                metadata: { tool: call.name },
-              });
-            } catch (error) {
-              const message =
-                error instanceof Error ? error.message : String(error);
-
+            if (!result.ok) {
+              const message = result.error?.message ?? `Tool ${call.name} failed.`;
               messages.push({
                 role: "tool",
-                content: JSON.stringify({ error: message }),
+                content: JSON.stringify({ error: message, category: result.error?.category }),
                 toolCallId: call.id,
               });
-
               emit({
-                type: "tool.failed",
+                type: result.error?.category === "permission_error" && /approv/i.test(message)
+                  ? "tool.approval_required"
+                  : "tool.failed",
                 message,
                 step,
-                metadata: { tool: call.name },
+                metadata: { tool: call.name, evidenceId: result.evidenceId },
               });
+              continue;
             }
+
+            const fenced = fenceUntrustedOutput(call.name, JSON.stringify(result.data));
+            messages.push({ role: "tool", content: fenced.text, toolCallId: call.id });
+            if (fenced.suspicious) emit({
+              type: "tool.output_suspicious",
+              message: `${call.name} output contains instruction-like text.`,
+              step,
+              metadata: { tool: call.name, signals: fenced.signals.join(",") },
+            });
+
+            emit({
+              type: "tool.completed",
+              message: `${call.name} completed.`,
+              step,
+              metadata: { tool: call.name, evidenceId: result.evidenceId },
+            });
           }
 
           continue;
