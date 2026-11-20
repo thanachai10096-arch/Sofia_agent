@@ -11,6 +11,8 @@ import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import { API_SCOPE_CATALOG, summarizeApiKeyPermissions } from "./scopes.js";
+import { loadExecutionPolicyFromEnv } from "../security/policy.js";
 
 interface ActiveRun {
   id: string;
@@ -22,6 +24,7 @@ interface ActiveRun {
   updatedAt: number;
   ownerKeyId: string;
   desktopCapabilities: DesktopCapability[];
+  toolScopes: string[];
   /** Hashed owner-scoped idempotency key; raw client key is never persisted. */
   idempotencyId?: string;
   requestFingerprint?: string;
@@ -71,6 +74,16 @@ function authenticate(req: IncomingMessage, config: SofiaApiConfig) {
   const scopes = config.apiKeys[token];
   if (!Array.isArray(scopes) || !scopes.every((scope) => typeof scope === "string")) return null;
   return { keyId: createHash("sha256").update(token).digest("hex").slice(0, 32), scopes };
+}
+
+function currentApiKeyAuthorization(config: SofiaApiConfig, ownerKeyId: string): { toolScopes: string[]; desktopCapabilities: DesktopCapability[] } {
+  for (const [token, scopes] of Object.entries(config.apiKeys)) {
+    if (createHash("sha256").update(token).digest("hex").slice(0, 32) === ownerKeyId && Array.isArray(scopes)) {
+      const validScopes = scopes.filter((scope): scope is string => typeof scope === "string");
+      return { toolScopes: validScopes, desktopCapabilities: desktopCapabilitiesFromScopes(validScopes) };
+    }
+  }
+  return { toolScopes: [], desktopCapabilities: [] };
 }
 
 function desktopCapabilitiesFromScopes(scopes: readonly string[]): DesktopCapability[] {
@@ -140,7 +153,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try { usage.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
-  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime, {
+    resolveAuthorization: (ownerKeyId) => currentApiKeyAuthorization(config, ownerKeyId),
+  }) : undefined;
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
@@ -151,7 +166,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       id: run.id, status: run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
       ...(run.error ? { error: run.error } : {}), createdAt: run.createdAt, updatedAt: run.updatedAt,
-      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
+      ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities], toolScopes: [...run.toolScopes],
       ...(run.idempotencyId ? { idempotencyId: run.idempotencyId } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
@@ -161,7 +176,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
-        !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string")) {
+        !Array.isArray(record.desktopCapabilities) || !record.desktopCapabilities.every((x) => typeof x === "string") || (record.toolScopes !== undefined && (!Array.isArray(record.toolScopes) || !record.toolScopes.every((x) => typeof x === "string")))) {
       void runStore.remove(record.id); continue;
     }
     const run: ActiveRun = {
@@ -170,7 +185,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(interrupted ? { error: "Run interrupted by server restart." } : record.error ? { error: record.error } : {}),
       controller: new AbortController(), createdAt: record.createdAt,
       updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
-      desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+      desktopCapabilities: record.desktopCapabilities as DesktopCapability[], toolScopes: Array.isArray(record.toolScopes) ? record.toolScopes : [],
       ...(record.idempotencyId ? { idempotencyId: record.idempotencyId } : {}),
       ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
     };
@@ -217,6 +232,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const result = await agent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
+          toolScopes: run.toolScopes,
           task: input.task,
           ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
           ...(input.sessionId !== undefined ? { sessionId: `${run.ownerKeyId}:${input.sessionId}` } : {}),
@@ -381,6 +397,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const adminScope = config.securityAdminScope ?? "security:admin";
       const isSecurityAdmin = auth.scopes.includes(adminScope);
+      if (req.method === "GET" && requestUrl.pathname === "/v1/security/permissions") {
+        if (!isSecurityAdmin) return json(res, 403, { error: "forbidden" }, origin, config);
+        return json(res, 200, {
+          scopes: API_SCOPE_CATALOG,
+          apiKeys: summarizeApiKeyPermissions(config.apiKeys, deps.policy ?? loadExecutionPolicyFromEnv()),
+          note: "Permission changes are managed by the trusted server operator through deployment configuration. Bearer tokens are never returned.",
+        }, origin, config);
+      }
       if (req.method === "GET" && req.url === "/v1/models") {
         const routes = deps.router.listRoutes?.();
         if (!routes) return json(res, 503, { error: "model_selection_unavailable" }, origin, config);
@@ -441,7 +465,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             createdAt: stored.createdAt,
             updatedAt: stored.updatedAt,
             ownerKeyId: stored.ownerKeyId,
-            desktopCapabilities: stored.desktopCapabilities as DesktopCapability[],
+            desktopCapabilities: stored.desktopCapabilities as DesktopCapability[], toolScopes: Array.isArray(stored.toolScopes) ? stored.toolScopes : [],
             ...(stored.idempotencyId ? { idempotencyId: stored.idempotencyId } : {}),
             ...(stored.requestFingerprint ? { requestFingerprint: stored.requestFingerprint } : {}),
           };
@@ -476,7 +500,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) };
+        const run: ActiveRun = { id: runId, status: "queued", controller, createdAt: Date.now(), updatedAt: Date.now(), ownerKeyId: auth.keyId, desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes), toolScopes: [...auth.scopes] };
         runs.set(runId, run);
         void persist(run).catch(() => undefined);
         res.writeHead(200, {
@@ -496,6 +520,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const result = await agent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            toolScopes: auth.scopes,
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
@@ -585,6 +610,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             updatedAt: Date.now(),
             ownerKeyId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            toolScopes: [...auth.scopes],
             ...(idempotencyId ? { idempotencyId, requestFingerprint } : {}),
           };
           runs.set(runId, run);
@@ -619,6 +645,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const result = await agent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
+            toolScopes: auth.scopes,
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ...(input.sessionId !== undefined ? { sessionId: `${auth.keyId}:${input.sessionId}` } : {}),
@@ -676,6 +703,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }
           const scheduleInput: CronScheduleInput = {
             name: input.name, task: input.task, timeZone: input.timeZone, ownerKeyId: auth.keyId,
+            toolScopes: [...auth.scopes],
+            desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             ...(typeof input.cron === "string" ? { cron: input.cron } : {}),
             ...(typeof input.runAt === "string" ? { runAt: input.runAt } : {}),
             ...(typeof input.enabled === "boolean" ? { enabled: input.enabled } : {}),
@@ -740,7 +769,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 200, job, origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
+          try { return json(res, 202, await deps.jobRuntime.resume(jobId, undefined, { toolScopes: [...auth.scopes], desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes) }), origin, config); }
           catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
@@ -769,6 +798,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
+            toolScopes: auth.scopes,
+            desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           });
           return json(res, 202, job, origin, config);

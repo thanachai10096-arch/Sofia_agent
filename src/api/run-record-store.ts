@@ -5,7 +5,7 @@ import path from "node:path";
 import type { AgentRunStatus } from "./types.js";
 import type { AgentResult } from "../agent/types.js";
 
-export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; /** SHA-256 of owner-scoped idempotency key; never store the raw key. */ idempotencyId?:string; requestFingerprint?:string; }
+export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; toolScopes?:string[]; /** SHA-256 of owner-scoped idempotency key; never store the raw key. */ idempotencyId?:string; requestFingerprint?:string; }
 export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; load?(id:string):RunRecord|undefined; }
 const SAFE_ID=/^[A-Za-z0-9-]{8,64}$/;
 const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
@@ -26,6 +26,7 @@ function validRecord(value:unknown,filename:string):value is RunRecord {
  if(!Number.isSafeInteger(r.createdAt)||!Number.isSafeInteger(r.updatedAt)||(r.createdAt as number)<0||(r.updatedAt as number)<(r.createdAt as number))return false;
  if(typeof r.ownerKeyId!=="string"||!/^[a-f0-9]{32}$/.test(r.ownerKeyId))return false;
  if(!Array.isArray(r.desktopCapabilities)||!r.desktopCapabilities.every((x)=>typeof x==="string"&&CAPABILITIES.has(x)))return false;
+ if(r.toolScopes!==undefined&&(!Array.isArray(r.toolScopes)||!r.toolScopes.every((x)=>typeof x==="string"&&x.length>0&&x.length<=128)))return false;
  if(r.error!==undefined&&(typeof r.error!=="string"||r.error.length>20_000))return false;
  if(r.idempotencyId!==undefined&&(typeof r.idempotencyId!=="string"||!/^[a-f0-9]{64}$/.test(r.idempotencyId)))return false;
  if(r.requestFingerprint!==undefined&&(typeof r.requestFingerprint!=="string"||!/^[a-f0-9]{64}$/.test(r.requestFingerprint)))return false;

@@ -18,6 +18,8 @@ export interface AgentRequest {
   principalId?: string;
   /** Desktop capabilities are derived by the trusted host from authenticated scopes. */
   desktopCapabilities?: DesktopCapability[];
+  /** Elevated tool capabilities granted by the trusted API-key scope configuration. */
+  toolScopes?: string[];
   maxSteps?: number;
   acceptanceCriteria?: AcceptanceCriterion[];
   useBrain?: boolean;
@@ -41,7 +43,7 @@ export interface AgentDependencies {
  tools?:ToolRegistry;
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
- brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
+ brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;desktopCapabilities?:DesktopCapability[];toolScopes?:string[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;

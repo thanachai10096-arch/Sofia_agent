@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { FileUserMemoryStore } from "../brain/user-memory.js";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
+import { MapToolRegistry } from "../tools/types.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ModelRouter } from "../models/router.js";
 import type { ModelRoute } from "../models/types.js";
@@ -143,6 +148,210 @@ test("API rejects unknown model routes before starting a run", async () => {
     });
     assert.equal(response.status, 400);
     assert.deepEqual(await response.json(), { error: "invalid_model_route" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("API user memory is isolated by authenticated API-key identity", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-api-memory-isolation-"));
+  const memory = new FileUserMemoryStore(root);
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    userMemoryStore: memory,
+  }, {
+    apiKeys: {
+      "memory-user-one": ["memory:read", "memory:write"],
+      "memory-user-two": ["memory:read", "memory:write"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  const request = (key: string, init: RequestInit = {}) => fetch(baseUrl + "/v1/memory", {
+    ...init,
+    headers: {
+      authorization: "Bearer " + key,
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  });
+
+  try {
+    const saved = await request("memory-user-one", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "preference", content: "User one prefers isolated workspaces." }),
+    });
+    assert.equal(saved.status, 201);
+
+    const ownList = await request("memory-user-one");
+    assert.equal(ownList.status, 200);
+    const ownPayload = await ownList.json() as { memories: Array<{ content: string }> };
+    assert.deepEqual(ownPayload.memories.map((entry) => entry.content), [
+      "User one prefers isolated workspaces.",
+    ]);
+
+    const otherList = await request("memory-user-two");
+    assert.equal(otherList.status, 200);
+    const otherPayload = await otherList.json() as { memories: unknown[] };
+    assert.deepEqual(otherPayload.memories, []);
+
+    const otherClear = await request("memory-user-two", { method: "DELETE" });
+    assert.equal(otherClear.status, 200);
+    const stillOwn = await request("memory-user-one");
+    const stillOwnPayload = await stillOwn.json() as { memories: Array<{ content: string }> };
+    assert.equal(stillOwnPayload.memories.length, 1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("API run records are private to their owning API key", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Private result." }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: {
+      "run-owner": ["agent:run", "agent:read"],
+      "other-user": ["agent:run", "agent:read"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+
+  try {
+    const started = await fetch(baseUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer run-owner", "content-type": "application/json" },
+      body: JSON.stringify({ task: "owner-only task", async: true }),
+    });
+    assert.ok(started.status === 200 || started.status === 202);
+    const payload = await started.json() as { id: string };
+
+    const ownerRead = await fetch(baseUrl + "/v1/agent/runs/" + payload.id, {
+      headers: { authorization: "Bearer run-owner" },
+    });
+    assert.equal(ownerRead.status, 200);
+
+    const foreignRead = await fetch(baseUrl + "/v1/agent/runs/" + payload.id, {
+      headers: { authorization: "Bearer other-user" },
+    });
+    assert.equal(foreignRead.status, 404);
+    assert.deepEqual(await foreignRead.json(), { error: "run_not_found" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("ordinary API keys cannot access security-admin endpoints", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {
+      "ordinary-key": ["agent:run", "agent:read", "memory:read"],
+      "security-admin-key": ["security:admin"],
+      "writer-key": ["agent:run", "tool:write"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+
+  try {
+    for (const endpoint of ["/v1/security/status", "/v1/security/audit", "/v1/security/permissions"]) {
+      const denied = await fetch(baseUrl + endpoint, {
+        headers: { authorization: "Bearer ordinary-key" },
+      });
+      assert.equal(denied.status, 403, endpoint + " must require security:admin");
+    }
+
+    const allowed = await fetch(baseUrl + "/v1/security/status", {
+      headers: { authorization: "Bearer security-admin-key" },
+    });
+    assert.equal(allowed.status, 200);
+
+    const permissions = await fetch(baseUrl + "/v1/security/permissions", {
+      headers: { authorization: "Bearer security-admin-key" },
+    });
+    assert.equal(permissions.status, 200);
+    const inventory = await permissions.json() as {
+      scopes: Array<{ scope: string; elevated: boolean }>;
+      apiKeys: Array<{ keyId: string; scopes: string[]; effectiveTools: { fileWrite: boolean; shell: boolean; network: boolean; browser: boolean; destructive: boolean } }>;
+      note: string;
+    };
+    assert.ok(inventory.scopes.some((scope) => scope.scope === "tool:shell" && scope.elevated));
+    assert.ok(inventory.scopes.some((scope) => scope.scope === "agent:run" && !scope.elevated));
+    assert.equal(inventory.apiKeys.length, 3);
+    assert.ok(inventory.apiKeys.every((key) => /^[a-f0-9]{32}$/.test(key.keyId)));
+    assert.ok(inventory.apiKeys.some((key) => key.scopes.includes("security:admin")));
+    const writer = inventory.apiKeys.find((key) => key.scopes.includes("tool:write"));
+    assert.equal(writer?.effectiveTools.fileWrite, true);
+    assert.equal(writer?.effectiveTools.shell, false);
+    assert.ok(!JSON.stringify(inventory).includes("security-admin-key"));
+    assert.match(inventory.note, /trusted server operator/);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("synchronous API runs expose only tools granted by the API key", async () => {
+  const exposed: Record<string, string[]> = {};
+  const writeTool = {
+    name: "workspace.write_file",
+    description: "Write a file in the user's workspace.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    effects: ["write"] as const,
+    execute: async () => ({ written: true }),
+  };
+  const server = createSofiaApi({
+    provider: {
+      generate: async (request) => {
+        const task = request.task;
+        exposed[task] = (request.tools ?? []).map((tool) => tool.function.name);
+        return { text: "Task completed." };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    tools: new MapToolRegistry([writeTool]),
+  }, {
+    apiKeys: {
+      "read-only-key": ["agent:run"],
+      "writer-key": ["agent:run", "tool:write"],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+
+  try {
+    for (const [apiKey, task] of [["read-only-key", "read-only"], ["writer-key", "writer"]] as const) {
+      const response = await fetch(baseUrl + "/v1/agent/runs", {
+        method: "POST",
+        headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" },
+        body: JSON.stringify({ task }),
+      });
+      assert.equal(response.status, 200);
+    }
+    assert.deepEqual(exposed["read-only"], []);
+    assert.deepEqual(exposed.writer, ["workspace.write_file"]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

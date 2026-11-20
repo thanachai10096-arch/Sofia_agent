@@ -7,6 +7,21 @@ export interface ExecutionPolicy {
   allowDestructive:boolean; maxRisk:RiskLevel; maxSteps:number; maxToolCallsPerStep:number;
   blockedPaths:string[]; allowedHosts:string[]; capabilitySecret?:string; permissions:Record<string,ToolPermission>;
 }
+/** Intersect host policy with capabilities granted to one authenticated API key. */
+export function policyForToolScopes(base: ExecutionPolicy, scopes: readonly string[] = []): ExecutionPolicy {
+  const granted = new Set(scopes);
+  return {
+    ...base,
+    // Read-only tools remain available when tools are enabled. Every elevated
+    // effect requires both host enablement and an explicit per-key scope.
+    allowFileWrite: base.allowFileWrite && (granted.has("tool:write") || granted.has("desktop:workspace:write")),
+    allowShell: base.allowShell && (granted.has("tool:shell") || granted.has("desktop:process:execute")),
+    allowNetwork: base.allowNetwork && granted.has("tool:network"),
+    allowBrowser: base.allowBrowser && granted.has("tool:browser"),
+    allowDestructive: base.allowDestructive && granted.has("tool:destructive"),
+  };
+}
+
 export const defaultPolicy:ExecutionPolicy={
   allowTools:true,allowNetwork:false,allowShell:false,allowFileWrite:true,allowBrowser:false,
   allowDestructive:false,maxRisk:"high",maxSteps:12,maxToolCallsPerStep:4,
@@ -52,13 +67,19 @@ export function classifyToolEffects(name: string): ToolEffect[] {
   // Browser reads are network access, not browser-control actions. They remain
   // gated by allowNetwork + allowedHosts, while page interaction stays privileged.
   if (name === "browser.goto") return ["network", "read"];
-  if (["browser.open", "browser.observe", "browser.screenshot", "browser.close"].includes(name)) return ["read"];
-  if (name.startsWith("browser.")) return ["browser", "network"];
+  if (["browser.open", "browser.observe", "browser.transaction.inspect", "browser.transaction.confirmation.inspect", "browser.screenshot", "browser.close", "browser.profile.list"].includes(name)) return ["read"];
+  // Browser interaction is gated by the browser capability and explicit approval.
+  // Network egress remains enforced by the browser runtime's URL/DNS-pinned proxy;
+  // requiring a URL in click/type input would incorrectly reject legitimate page actions.
+  if (name === "browser.profile.revoke" || name === "browser.transaction.finalize") return ["browser", "destructive"];
+  if (name === "browser.login") return ["browser", "network"];
+  if (["browser.click", "browser.type", "browser.action"].includes(name)) return ["browser"];
   if (name === "desktop.system.discover" || name === "desktop.workspace.list_files" ||
       name === "desktop.workspace.read_file" || name === "desktop.screen.capture") return ["read"];
   if (name === "desktop.workspace.write_file" || name === "workspace.write_file" ||
       name === "workspace.apply_patch") return ["write"];
-  if (name === "desktop.process.run" || name === "terminal.run") return ["shell", "network"];
+  if (name === "desktop.process.run") return ["shell"];
+  if (name === "terminal.run") return ["shell", "network"];
   if (name === "desktop.app.launch") return ["shell", "destructive"];
   if (name === "desktop.input.click" || name === "desktop.input.type_text" ||
       name === "desktop.input.press_key") return ["destructive"];

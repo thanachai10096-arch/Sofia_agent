@@ -35,6 +35,7 @@ Sofia Agent is distributed under the [MIT License](LICENSE). Review third-party 
 - **Model providers and user route selection:** [docs/MODEL_SELECTION.md](docs/MODEL_SELECTION.md)
 - **Open-source and commercial roadmap boundaries:** [docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md](docs/OPEN_SOURCE_AND_COMMERCIAL_MODEL.md)
 - **Shared access architecture:** [docs/UNIFIED_ACCESS_ARCHITECTURE.md](docs/UNIFIED_ACCESS_ARCHITECTURE.md)
+- **Self-hosted deployment:** [Docker Compose quickstart](docs/SELF_HOSTED_QUICKSTART.md), [deployment architecture / release gates](docs/SELF_HOSTED_DEPLOYMENT.md), and [backup / restore](docs/SELF_HOSTED_BACKUP_RESTORE.md)
 
 Hosted and enterprise services described in the roadmap are potential offerings, not a claim that they are currently available.
 

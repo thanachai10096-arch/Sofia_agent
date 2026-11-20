@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { JobRuntime, JobRecord } from "./job-runtime.js";
+import type { DesktopCapability } from "../desktop/types.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 export type MisfirePolicy = "skip" | "run-once";
@@ -15,6 +16,9 @@ export interface CronScheduleInput {
   runAt?: string;
   timeZone: string;
   ownerKeyId: string;
+  /** Explicit API-key grants captured when the schedule is created. */
+  toolScopes?: string[];
+  desktopCapabilities?: DesktopCapability[];
   enabled?: boolean;
   misfirePolicy?: MisfirePolicy;
   maxRetries?: number;
@@ -63,6 +67,8 @@ export interface CronSchedulerOptions {
   maxConcurrent?: number;
   maxSchedulesPerOwner?: number;
   audit?: (event: CronAuditEvent) => void | Promise<void>;
+  /** Resolve current host/API-key grants at dispatch time; missing owners receive no grants. */
+  resolveAuthorization?: (ownerKeyId: string) => Promise<{ toolScopes: string[]; desktopCapabilities: DesktopCapability[] }> | { toolScopes: string[]; desktopCapabilities: DesktopCapability[] };
 }
 
 /** File-backed store. Exclusive lock + atomic rename serializes claims across local processes. */
@@ -218,6 +224,7 @@ export class CronScheduler {
   private readonly maxConcurrent: number;
   private readonly maxSchedulesPerOwner: number;
   private readonly auditCallback?: CronSchedulerOptions["audit"];
+  private readonly resolveAuthorization: NonNullable<CronSchedulerOptions["resolveAuthorization"]>;
   private ticking = false;
   private readonly active = new Map<string, AbortController>();
 
@@ -228,6 +235,7 @@ export class CronScheduler {
     this.maxConcurrent = Math.max(1, options.maxConcurrent ?? 2);
     this.maxSchedulesPerOwner = Math.max(1, Math.min(10_000, Math.floor(options.maxSchedulesPerOwner ?? 100)));
     this.auditCallback = options.audit;
+    this.resolveAuthorization = options.resolveAuthorization ?? (() => ({ toolScopes: [], desktopCapabilities: [] }));
   }
   private async recordAudit(state: SchedulerState, event: CronAuditEvent): Promise<void> {
     state.audit.push(event);
@@ -267,7 +275,11 @@ export class CronScheduler {
     if (hasRunAt) new Intl.DateTimeFormat("en-US", { timeZone: input.timeZone }).format(initialRun);
     const now = this.now().toISOString();
     const schedule: CronSchedule = {
-      ...input, enabled: undefined, misfirePolicy: input.misfirePolicy ?? "skip",
+      ...input,
+      // Never let an owner-only schedule inherit installation-wide host permissions.
+      toolScopes: [...(input.toolScopes ?? [])],
+      desktopCapabilities: [...(input.desktopCapabilities ?? [])],
+      enabled: undefined, misfirePolicy: input.misfirePolicy ?? "skip",
       maxRetries: Math.max(0, Math.min(10, Math.floor(input.maxRetries ?? 0))),
       timeoutMs: Math.max(1_000, Math.min(3_600_000, Math.floor(input.timeoutMs ?? 120_000))),
       id: randomUUID(), status: input.enabled === false ? "disabled" : "enabled",
@@ -496,7 +508,11 @@ export class CronScheduler {
     const onAbort = () => timeout.abort(controller.signal.reason ?? new Error("Recovered scheduled execution cancelled"));
     controller.signal.addEventListener("abort", onAbort, { once: true });
     try {
-      const job = await this.waitForJob(jobId, timeout.signal);
+      const job = await this.waitForJob(jobId, timeout.signal, async () => {
+        const current = await this.resolveAuthorization(schedule.ownerKeyId);
+        return (schedule.toolScopes ?? []).every(scope => current.toolScopes.includes(scope)) &&
+          (schedule.desktopCapabilities ?? []).every(capability => current.desktopCapabilities.includes(capability));
+      });
       status = job.status === "completed" ? "completed" : job.status === "cancelled" ? "cancelled" : "failed";
       errorText = status === "failed" ? job.error ?? "Recovered runtime job failed" : undefined;
     } catch (error) {
@@ -542,7 +558,17 @@ export class CronScheduler {
           break;
         }
         try {
-          const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
+          const currentAuthorization = await this.resolveAuthorization(schedule.ownerKeyId);
+          // Revoke capabilities immediately when the API key loses them. Newly added
+          // grants do not expand an existing schedule beyond its original consent.
+          const toolScopes = (schedule.toolScopes ?? []).filter((scope) => currentAuthorization.toolScopes.includes(scope));
+          const desktopCapabilities = (schedule.desktopCapabilities ?? []).filter((capability) => currentAuthorization.desktopCapabilities.includes(capability));
+          const submitted = await this.runtime.submit({
+            task: schedule.task,
+            ownerKeyId: schedule.ownerKeyId,
+            toolScopes,
+            desktopCapabilities,
+          });
           job = submitted;
           if (controller.signal.aborted) {
             await this.runtime.cancel(submitted.id).catch(() => false);
@@ -568,7 +594,11 @@ export class CronScheduler {
           let result: JobRecord | undefined;
           let waitError: unknown;
           try {
-            result = await this.waitForJob(submitted.id, timeout.signal);
+            result = await this.waitForJob(submitted.id, timeout.signal, async () => {
+              const current = await this.resolveAuthorization(schedule.ownerKeyId);
+              return toolScopes.every(scope => current.toolScopes.includes(scope)) &&
+                desktopCapabilities.every(capability => current.desktopCapabilities.includes(capability));
+            });
           } catch (error) {
             waitError = error;
           } finally {
@@ -621,8 +651,9 @@ export class CronScheduler {
     }).catch(() => undefined);
     this.active.delete(schedule.id);
   }
-  private async waitForJob(id: string, signal: AbortSignal): Promise<JobRecord> {
+  private async waitForJob(id: string, signal: AbortSignal, authorizationValid?: () => Promise<boolean>): Promise<JobRecord> {
     while (!signal.aborted) {
+      if (authorizationValid && !await authorizationValid()) throw new Error("Scheduled job authorization was revoked.");
       const record = await this.runtime.get(id);
       if (!record) throw new Error("Scheduled runtime job disappeared");
       if (record.status === "completed" || record.status === "failed" || record.status === "cancelled") return record;

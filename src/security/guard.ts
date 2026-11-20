@@ -39,6 +39,21 @@ export function actionHash(runId: string, toolName: string, input: Record<string
 
 export function riskFor(effects: readonly ToolEffect[], input: Record<string, unknown>): RiskLevel {
   if (effects.includes("destructive")) return "critical";
+  // Treat browser controls that can finalize a financial or irreversible workflow
+  // as critical, rather than ordinary high-risk page interaction.
+  if (effects.includes("browser")) {
+    const intent = [input.selector, input.action, input.value, input.text, input.label, input.name, input.target]
+      .filter((value) => typeof value === "string")
+      .join(" ")
+      .toLowerCase();
+    // Generic form submission is treated as a transaction boundary: the gateway
+    // cannot reliably infer whether a page's submit button places an order,
+    // transfers funds, or commits another irreversible operation.
+    if (/\b(?:submit|confirm|buy|purchase|pay|payment|checkout|place[-_ ]order|confirm[-_ ](?:order|payment|purchase)|transfer|send[-_ ]money|withdraw|subscribe|delete[-_ ]account|cancel[-_ ]subscription)\b/.test(intent) ||
+      /\[(?:type|role)=["']?submit\b/.test(intent)) {
+      return "critical";
+    }
+  }
   const commandText = Array.isArray(input.args) ? input.args.join(" ") : String(input.command ?? "");
   if (/(?:^|\s)(?:reset|clean|push|force|rm|rmdir|del|format|shutdown|reboot)(?:\s|$)/i.test(commandText)) return "critical";
   if (effects.includes("shell")) return "high";

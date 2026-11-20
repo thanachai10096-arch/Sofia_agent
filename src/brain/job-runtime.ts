@@ -7,6 +7,7 @@ import type { BrainRunSnapshot } from "./run-state.js";
 import type { RunStore } from "./run-store.js";
 import { sofiaStateDirectory } from "../platform/state-directory.js";
 import { redactSecrets } from "../security/guard.js";
+import type { DesktopCapability } from "../desktop/types.js";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export interface JobRecord {
@@ -17,6 +18,10 @@ export interface JobRecord {
   task: string;
   modelRouteId?: string;
   ownerKeyId?: string;
+  /** Persisted API-key tool capabilities so retries and resumes retain the same policy. */
+  toolScopes?: string[];
+  /** Desktop grants are persisted separately and intersected again on API resume. */
+  desktopCapabilities?: DesktopCapability[];
   /** Destination used only for post-restart Discord job recovery notices. */
   notificationChannelId?: string;
   /** Opaque per-user/per-channel key; never shared across Discord principals. */
@@ -75,9 +80,9 @@ function publicJobRecord(record: JobRecord): JobRecord {
 
 
 export interface JobRuntime {
-  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
+  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; toolScopes?: string[]; desktopCapabilities?: DesktopCapability[]; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
-  resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
+  resume(id: string, signal?: AbortSignal, authorization?: { toolScopes: string[]; desktopCapabilities: DesktopCapability[] }): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
   markNotificationDelivered?(id: string): Promise<void>;
@@ -424,6 +429,9 @@ export class DurableJobRuntime implements JobRuntime {
     private readonly brainFactory: (options: {
       signal?: AbortSignal;
       maxSteps?: number;
+      principalId?: string;
+      toolScopes?: string[];
+      desktopCapabilities?: DesktopCapability[];
       onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
       modelRouteId?: string;
     }) => SofiaBrain,
@@ -433,13 +441,15 @@ export class DurableJobRuntime implements JobRuntime {
     this.state = new FileJobStateStore(namespace);
   }
 
-  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
+  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; toolScopes?: string[]; desktopCapabilities?: DesktopCapability[]; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const record: JobRecord = {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
       ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
+      ...(input.toolScopes ? { toolScopes: [...input.toolScopes] } : {}),
+      ...(input.desktopCapabilities ? { desktopCapabilities: [...input.desktopCapabilities] } : {}),
       ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
       ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
       ...(input.sessionTask ? { sessionTask: input.sessionTask } : {}),
@@ -507,7 +517,7 @@ export class DurableJobRuntime implements JobRuntime {
     return [...this.jobs.values()].map(publicJobRecord);
   }
 
-  async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
+  async resume(id: string, signal?: AbortSignal, authorization?: { toolScopes: string[]; desktopCapabilities: DesktopCapability[] }): Promise<JobRecord> {
     // Reserve the resume slot before the first await. Otherwise two callers can both
     // pass the guard while get() is pending and race to resume the same checkpoint.
     if (this.resuming.has(id)) throw new Error("Job is already being resumed");
@@ -519,6 +529,11 @@ export class DurableJobRuntime implements JobRuntime {
       const record = this.jobs.get(id) ?? fetched;
       if (record.status === "completed") return publicJobRecord(record);
       if (record.status === "cancelled") throw new Error("Cancelled jobs cannot be resumed");
+      // API-owned jobs must be resumed through an authenticated API request so
+      // revoked key scopes can be intersected with the original persisted grants.
+      if (record.ownerKeyId && !authorization) {
+        throw new Error("Authenticated authorization is required to resume an API-owned job.");
+      }
       if (!record.snapshot) throw new Error("Job has no resumable snapshot");
       // A terminal status may be persisted just before the previous worker's finally block
       // removes its controller. Only the canonical status determines whether resume is blocked.
@@ -526,9 +541,17 @@ export class DurableJobRuntime implements JobRuntime {
       // A resumed job needs a fresh completion notice; do not inherit the prior
       // attempt's delivery marker if this attempt later finishes after a restart.
       record.notificationDelivered = false;
+      // An API resume may only retain capabilities still granted to this key.
+      // Intersect with the original grants so newly-added scopes never expand an old job.
+      if (authorization) {
+        const currentTools = new Set(authorization.toolScopes);
+        const currentDesktop = new Set(authorization.desktopCapabilities);
+        record.toolScopes = (record.toolScopes ?? []).filter((scope) => currentTools.has(scope));
+        record.desktopCapabilities = (record.desktopCapabilities ?? []).filter((capability) => currentDesktop.has(capability));
+      }
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
-      await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
+      await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria, ...(record.toolScopes ? { toolScopes: record.toolScopes } : {}), ...(record.desktopCapabilities ? { desktopCapabilities: record.desktopCapabilities } : {}) }, signal, record.snapshot);
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
@@ -547,7 +570,7 @@ export class DurableJobRuntime implements JobRuntime {
 
   private async execute(
     record: JobRecord,
-    input: Omit<BrainRunInput, "signal" | "resume">,
+    input: Omit<BrainRunInput, "signal" | "resume"> & { toolScopes?: string[]; desktopCapabilities?: DesktopCapability[] },
     externalSignal?: AbortSignal,
     resume?: BrainRunSnapshot,
   ): Promise<void> {
@@ -620,7 +643,14 @@ export class DurableJobRuntime implements JobRuntime {
         return;
       }
 
-      const brain = this.brainFactory({ signal: controller.signal, onRunSnapshot: onSnapshot, ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}) });
+      const brain = this.brainFactory({
+        signal: controller.signal,
+        ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),
+        ...(record.toolScopes ? { toolScopes: record.toolScopes } : {}),
+        ...(record.desktopCapabilities ? { desktopCapabilities: record.desktopCapabilities } : {}),
+        onRunSnapshot: onSnapshot,
+        ...(record.modelRouteId ?? input.modelRouteId ? { modelRouteId: record.modelRouteId ?? input.modelRouteId } : {}),
+      });
       const result = await brain.run({
         ...input,
         ...(record.ownerKeyId ? { principalId: record.ownerKeyId } : {}),

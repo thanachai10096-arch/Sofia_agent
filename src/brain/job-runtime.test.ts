@@ -997,3 +997,190 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime passes the authenticated owner to Brain factory for background runs", async () => {
+  const namespace = "job-runtime-principal-" + randomUUID();
+  const observedOwners: Array<string | undefined> = [];
+  let runs = 0;
+  const brain = {
+    run: async () => {
+      runs += 1;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime((options) => {
+    observedOwners.push(options.principalId);
+    return brain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({ task: "owner-scoped background task", ownerKeyId: "tenant-key-hash" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "completed");
+  assert.deepEqual(observedOwners, ["tenant-key-hash"]);
+  assert.equal(runs, 1);
+});
+
+
+test("DurableJobRuntime preserves API-key tool scopes for background execution", async () => {
+  const namespace = "job-runtime-tool-scopes-" + randomUUID();
+  const observedScopes: string[][] = [];
+  const brain = {
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime((options) => {
+    observedScopes.push(options.toolScopes ?? []);
+    return brain;
+  }, undefined, namespace);
+
+  const scopes = ["agent:run", "agent:read", "tool:write"];
+  const submitted = await runtime.submit({
+    task: "scope-preservation",
+    ownerKeyId: "principal-scope-test",
+    toolScopes: scopes,
+  });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+
+  assert.equal(current?.status, "completed");
+  assert.deepEqual(observedScopes, [scopes]);
+  assert.deepEqual(current?.toolScopes, scopes);
+});
+
+
+test("DurableJobRuntime persists desktop grants and intersects them with current grants on resume", async () => {
+  const namespace = "job-runtime-desktop-grants-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "desktop-grants-" + randomUUID(),
+    task: "resume with reduced desktop grants",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    checkpointId: "desktop-grants-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const factoryOptions: Array<{ toolScopes?: string[]; desktopCapabilities?: string[] }> = [];
+  let runCount = 0;
+  const runtime = new DurableJobRuntime((options) => {
+    factoryOptions.push(options);
+    return {
+      run: async ({ resume, onRunSnapshot }: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+        runCount += 1;
+        if (!resume) {
+          await onRunSnapshot?.(snapshot);
+          return { completed: false, state: "failed" };
+        }
+        return { completed: true, state: "completed" };
+      },
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({
+    task: "resume with reduced desktop grants",
+    ownerKeyId: "owner-a",
+    toolScopes: ["agent:run", "desktop:workspace:read", "desktop:workspace:write"],
+    desktopCapabilities: ["workspace:read", "workspace:write"],
+  });
+
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+  assert.deepEqual(current?.desktopCapabilities, ["workspace:read", "workspace:write"]);
+
+  const resumed = await runtime.resume(submitted.id, undefined, {
+    toolScopes: ["agent:run", "desktop:workspace:read", "desktop:process:execute"],
+    desktopCapabilities: ["workspace:read", "process:execute"],
+  });
+  assert.equal(resumed.status, "completed");
+  assert.deepEqual(factoryOptions[0]?.desktopCapabilities, ["workspace:read", "workspace:write"]);
+  assert.deepEqual(factoryOptions[1]?.desktopCapabilities, ["workspace:read"], "newly granted scopes must not expand an existing job");
+  assert.deepEqual(factoryOptions[1]?.toolScopes, ["agent:run", "desktop:workspace:read"]);
+  assert.equal(runCount, 2);
+});
+
+
+test("API-owned jobs require fresh authorization and cannot regain revoked scopes on resume", async () => {
+  const namespace = "job-runtime-auth-resume-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "auth-resume-" + randomUUID(),
+    task: "resume with reduced grants",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: ["step-1"],
+    checkpointId: "auth-resume-checkpoint",
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const factoryOptions: Array<{ toolScopes?: string[]; desktopCapabilities?: import("../desktop/types.js").DesktopCapability[] }> = [];
+  const runtime = new DurableJobRuntime((options) => {
+    factoryOptions.push({
+      toolScopes: options.toolScopes,
+      desktopCapabilities: options.desktopCapabilities,
+    });
+    const resumed = factoryOptions.length > 1;
+    return {
+      run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+        if (!input.resume) {
+          await options.onRunSnapshot?.(snapshot);
+          return { completed: false, state: "failed" };
+        }
+        return { completed: true, state: "completed" };
+      },
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+
+  const submitted = await runtime.submit({
+    task: "resume with reduced grants",
+    ownerKeyId: "api-owner",
+    toolScopes: ["tool:write", "tool:shell"],
+    desktopCapabilities: ["workspace:write", "process:execute"],
+  });
+
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "failed"; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "failed");
+  assert.deepEqual(factoryOptions[0]?.toolScopes, ["tool:write", "tool:shell"]);
+  assert.deepEqual(factoryOptions[0]?.desktopCapabilities, ["workspace:write", "process:execute"]);
+
+  await assert.rejects(
+    () => runtime.resume(submitted.id),
+    /authenticated authorization is required/i,
+  );
+
+  const resumed = await runtime.resume(submitted.id, undefined, {
+    toolScopes: [],
+    desktopCapabilities: [],
+  });
+  assert.equal(resumed.status, "completed");
+  assert.deepEqual(factoryOptions[1]?.toolScopes, []);
+  assert.deepEqual(factoryOptions[1]?.desktopCapabilities, []);
+});

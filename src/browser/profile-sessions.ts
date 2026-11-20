@@ -36,11 +36,17 @@ export class BrowserProfileSessionManager {
   }
 
   async acquire(ownerId: string, profileId: string): Promise<BrowserSession> {
-    const profile = await this.store.get(ownerId, profileId);
     const key = this.key(ownerId, profileId);
     const current = this.sessions.get(key);
     if (current) return current;
-    const pending = this.launch(profile);
+
+    // Publish the in-flight promise before awaiting disk or browser startup.
+    // Concurrent runs for one owner/profile must share a single Chromium
+    // context; otherwise a second launch can lock the same profile directory.
+    const pending = (async () => {
+      const profile = await this.store.get(ownerId, profileId);
+      return this.launch(profile);
+    })();
     this.sessions.set(key, pending);
     try {
       return await pending;

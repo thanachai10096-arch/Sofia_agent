@@ -4,7 +4,7 @@ import { RegistryToolGateway } from "./registry-tool-gateway.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { createBuiltinTools } from "../tools/builtin.js";
-import { defaultPolicy } from "../security/policy.js";
+import { defaultPolicy, type ExecutionPolicy } from "../security/policy.js";
 import { SecurityController } from "../security/controller.js";
 import type { SecurityAuditEvent, SecurityAuditSink } from "../security/audit.js";
 import { MapToolRegistry } from "../tools/types.js";
@@ -286,7 +286,7 @@ test("read-only browser tools can run without interactive approval while page ac
 
   assert.deepEqual(gateway.describe("browser.observe")?.effects, ["read"]);
   assert.deepEqual(gateway.describe("browser.goto")?.effects, ["network", "read"]);
-  assert.deepEqual(gateway.describe("browser.click")?.effects, ["browser", "network"]);
+  assert.deepEqual(gateway.describe("browser.click")?.effects, ["browser"]);
 
   const read = await gateway.execute(
     { tool: "browser.observe", input: { pageId: "page-1" } },
@@ -301,7 +301,7 @@ test("read-only browser tools can run without interactive approval while page ac
   );
   assert.equal(interaction.ok, false);
   assert.equal(interaction.error?.category, "permission_error");
-  assert.match(interaction.error?.message ?? "", /url/i);
+  assert.match(interaction.error?.message ?? "", /approval is required/i);
   assert.equal(clicked, false);
 });
 
@@ -448,4 +448,182 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
   for (const secret of ["sk-live-secret-value", "sk-input-secret-value", "sk-error-secret-value", "hunter2", "private material"]) {
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
+});
+
+
+test("tool permission revocation while awaiting approval prevents execution", async () => {
+  const rt = runtime();
+  const policy = { ...defaultPolicy, allowFileWrite: true };
+  let releaseApproval!: (approved: boolean) => void;
+  let announceApproval!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { announceApproval = resolve; });
+  const approvalDecision = new Promise<boolean>((resolve) => { releaseApproval = resolve; });
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write after approval",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() { executions += 1; return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: registry },
+    policy,
+    async () => { announceApproval(); return approvalDecision; },
+  );
+  const execution = gateway.execute(
+    { tool: "workspace.write_file", input: { path: "safe.txt", content: "approved" } },
+    { runId: "policy-revocation-test", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  await approvalReached;
+  policy.allowFileWrite = false;
+  releaseApproval(true);
+  const result = await execution;
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.match(result.error?.message ?? "", /revoked/i);
+  assert.equal(executions, 0);
+});
+
+
+test("global tool kill policy revocation while awaiting approval prevents execution", async () => {
+  const policy = { ...defaultPolicy, allowTools: true };
+  let releaseApproval!: (approved: boolean) => void;
+  let announceApproval!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { announceApproval = resolve; });
+  const approvalDecision = new Promise<boolean>((resolve) => { releaseApproval = resolve; });
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write after approval",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() { executions += 1; return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry }, policy,
+    async () => { announceApproval(); return approvalDecision; },
+  );
+  const execution = gateway.execute(
+    { tool: "workspace.write_file", input: { path: "safe.txt", content: "approved" } },
+    { runId: "global-policy-revocation-test", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  await approvalReached;
+  policy.allowTools = false;
+  releaseApproval(true);
+  const result = await execution;
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.match(result.error?.message ?? "", /disabled/i);
+  assert.equal(executions, 0);
+});
+
+
+test("browser interactions are approval-gated without misclassifying page actions as network requests", async () => {
+  let clicked = false;
+  const registry = new MapToolRegistry([{
+    name: "browser.click", description: "Click a page control",
+    inputSchema: { type: "object", properties: { pageId: { type: "string" }, selector: { type: "string" } }, required: ["pageId", "selector"] },
+    async execute() { clicked = true; return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowBrowser: true, allowNetwork: false };
+  let approvals = 0;
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy, async () => { approvals++; return true; });
+  assert.deepEqual(gateway.describe("browser.click")?.effects, ["browser"]);
+  const result = await gateway.execute(
+    { tool: "browser.click", input: { pageId: "page-1", selector: "button" } },
+    { runId: "browser-click-approval", principalId: "test-user", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(approvals, 1);
+  assert.equal(clicked, true);
+});
+
+test("browser typing content is redacted from security audit events", async () => {
+  const events: SecurityAuditEvent[] = [];
+  const audit: SecurityAuditSink = { record(event) { events.push(event); } };
+  const registry = new MapToolRegistry([{
+    name: "browser.type", description: "Type into a page field",
+    inputSchema: { type: "object", properties: { pageId: { type: "string" }, selector: { type: "string" }, text: { type: "string" } }, required: ["pageId", "selector", "text"] },
+    async execute() { return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowBrowser: true };
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy, async () => true, undefined, undefined, audit);
+  const result = await gateway.execute(
+    { tool: "browser.type", input: { pageId: "page-1", selector: "input[type=password]", text: "user-password-should-not-leak" } },
+    { runId: "browser-type-redaction", principalId: "test-user", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  assert.equal(result.ok, true);
+  const serialized = JSON.stringify(events);
+  assert.equal(serialized.includes("user-password-should-not-leak"), false);
+  assert.equal(serialized.includes("[REDACTED USER-ENTERED CONTENT]"), true);
+});
+
+
+test("per-tool maxRisk ceiling is enforced before execution", async () => {
+  let executed = false;
+  const policy = { ...defaultPolicy, permissions: { "workspace.write_file": { maxRisk: "low" as const } } };
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file", description: "Write a file",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() { executed = true; return { ok: true }; },
+  }]);
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy, async () => true);
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "safe.txt", content: "safe" } },
+    { runId: "tool-risk-ceiling", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /risk exceeds/i);
+  assert.equal(executed, false);
+});
+
+test("stricter per-tool risk ceiling applied during approval wait blocks execution", async () => {
+  const policy: ExecutionPolicy = { ...defaultPolicy, permissions: { "workspace.write_file": { maxRisk: "high" } } };
+  let releaseApproval!: (approved: boolean) => void;
+  let announceApproval!: () => void;
+  const approvalReached = new Promise<void>((resolve) => { announceApproval = resolve; });
+  const approvalDecision = new Promise<boolean>((resolve) => { releaseApproval = resolve; });
+  let executed = false;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file", description: "Write after approval",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } } },
+    async execute() { executed = true; return { ok: true }; },
+  }]);
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy, async () => {
+    announceApproval(); return approvalDecision;
+  });
+  const execution = gateway.execute(
+    { tool: "workspace.write_file", input: { path: "safe.txt", content: "safe" } },
+    { runId: "tool-risk-revocation", signal: new AbortController().signal, requireApproval: true, notifyApproval() {} },
+  );
+  await approvalReached;
+  policy.permissions["workspace.write_file"] = { maxRisk: "low" };
+  releaseApproval(true);
+  const result = await execution;
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /risk now exceeds/i);
+  assert.equal(executed, false);
+});
+
+test("browser navigation enforces the configured host allowlist", async () => {
+  let navigated = false;
+  const registry = new MapToolRegistry([{
+    name: "browser.goto", description: "Navigate to a page",
+    inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" } }, required: ["pageId", "url"] },
+    async execute() { navigated = true; return { ok: true }; },
+  }]);
+  const policy = { ...defaultPolicy, allowNetwork: true, allowedHosts: ["example.com"] };
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, policy);
+  const blocked = await gateway.execute(
+    { tool: "browser.goto", input: { pageId: "p1", url: "https://evil.example/" } },
+    { runId: "browser-host-block", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(blocked.ok, false);
+  assert.match(blocked.error?.message ?? "", /not allowlisted/i);
+  assert.equal(navigated, false);
+  const allowed = await gateway.execute(
+    { tool: "browser.goto", input: { pageId: "p1", url: "https://docs.example.com/" } },
+    { runId: "browser-host-allow", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(allowed.ok, true);
+  assert.equal(navigated, true);
 });

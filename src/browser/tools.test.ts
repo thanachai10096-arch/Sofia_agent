@@ -53,6 +53,61 @@ function setup() {
   };
 }
 
+test("transaction finalization is single-use and bound to unchanged checkout evidence", async () => {
+  let html = "<p>Acme Store</p><p>USD $42.50</p><p>Canvas backpack</p>";
+  let clicks = 0;
+  const runtime: BrowserRuntime = { launch: async () => ({ id: "tx-session", newPage: async () => ({
+    id: "tx-page", url: async () => "https://shop.example/checkout", title: async () => "Checkout", content: async () => html,
+    goto: async () => {}, click: async () => { clicks++; }, type: async () => {}, select: async () => {}, scroll: async () => {},
+    wait: async () => {}, press: async () => {}, back: async () => {}, forward: async () => {}, reload: async () => {}, screenshot: async () => "", close: async () => {}
+  }), close: async () => {} }) };
+  const tools = createBrowserTools(runtime), get = (name: string) => tools.find((item) => item.name === name)!;
+  await get("browser.open").execute({}, {} as never);
+  const inspected = await get("browser.transaction.inspect").execute({ pageId: "tx-page", recipient: "Acme Store", amount: "$42.50", currency: "USD", items: ["Canvas backpack"] }, {} as never) as { verified: boolean; challengeId: string };
+  assert.equal(inspected.verified, true);
+  await get("browser.transaction.finalize").execute({ pageId: "tx-page", url: "https://shop.example/checkout", challengeId: inspected.challengeId, selector: "button.place-order" }, {} as never);
+  assert.equal(clicks, 1);
+  await assert.rejects(get("browser.transaction.finalize").execute({ pageId: "tx-page", url: "https://shop.example/checkout", challengeId: inspected.challengeId, selector: "button.place-order" }, {} as never), /missing, expired, or already used/i);
+  assert.equal(clicks, 1);
+});
+
+test("transaction finalization rejects changed checkout content", async () => {
+  let html = "<p>Acme Store</p><p>USD $42.50</p>";
+  let clicks = 0;
+  const runtime: BrowserRuntime = { launch: async () => ({ id: "tx-change-session", newPage: async () => ({
+    id: "tx-change-page", url: async () => "https://shop.example/checkout", title: async () => "Checkout", content: async () => html,
+    goto: async () => {}, click: async () => { clicks++; }, type: async () => {}, select: async () => {}, scroll: async () => {},
+    wait: async () => {}, press: async () => {}, back: async () => {}, forward: async () => {}, reload: async () => {}, screenshot: async () => "", close: async () => {}
+  }), close: async () => {} }) };
+  const tools = createBrowserTools(runtime), get = (name: string) => tools.find((item) => item.name === name)!;
+  await get("browser.open").execute({}, {} as never);
+  const inspected = await get("browser.transaction.inspect").execute({ pageId: "tx-change-page", recipient: "Acme Store", amount: "$42.50", currency: "USD" }, {} as never) as { challengeId: string };
+  html += "<p>USD $99.00</p>";
+  await assert.rejects(get("browser.transaction.finalize").execute({ pageId: "tx-change-page", url: "https://shop.example/checkout", challengeId: inspected.challengeId, selector: "button.pay" }, {} as never), /page changed after inspection/i);
+  assert.equal(clicks, 0);
+});
+
+test("post-checkout confirmation inspection requires the expected phrase and order reference", async () => {
+  let html = "<main><h1>Thank you for your order</h1><p>Order #A-1042</p></main>";
+  const runtime: BrowserRuntime = { launch: async () => ({ id: "confirm-session", newPage: async () => ({
+    id: "confirm-page", url: async () => "https://shop.example/orders/A-1042", title: async () => "Order confirmation", content: async () => html,
+    goto: async () => {}, click: async () => {}, type: async () => {}, select: async () => {}, scroll: async () => {}, wait: async () => {},
+    press: async () => {}, back: async () => {}, forward: async () => {}, reload: async () => {}, screenshot: async () => "", close: async () => {}
+  }), close: async () => {} }) };
+  const tools = createBrowserTools(runtime), get = (name: string) => tools.find((item) => item.name === name)!;
+  await get("browser.open").execute({}, {} as never);
+  const inspect = get("browser.transaction.confirmation.inspect");
+  assert.deepEqual(inspect.effects, ["read"]);
+  const result = await inspect.execute({ pageId: "confirm-page", confirmationText: "Thank you for your order", orderReference: "A-1042" }, {} as never) as { confirmed: boolean; checks: Record<string, boolean>; limitation: string };
+  assert.equal(result.confirmed, true);
+  assert.equal(result.checks.confirmationFound, true);
+  assert.equal(result.checks.orderReferenceFound, true);
+  assert.match(result.limitation, /not proof that a payment settled/i);
+  html = "<main><h1>Something went wrong</h1></main>";
+  const failed = await inspect.execute({ pageId: "confirm-page", confirmationText: "Thank you for your order", orderReference: "A-1042" }, {} as never) as { confirmed: boolean };
+  assert.equal(failed.confirmed, false);
+});
+
 test("browser.close closes only the requested page when pageId is provided", async () => {
   const harness = setup();
   const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
@@ -258,4 +313,90 @@ test("browser.login keeps the authenticated session available across Brain runs"
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+
+test("concurrent browser profile acquisition shares one owner-scoped session", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-browser-profile-singleflight-"));
+  try {
+    const store = new BrowserProfileStore(root);
+    const profile = await store.create("principal-a");
+    let launches = 0;
+    let closes = 0;
+    let releaseLaunch!: () => void;
+    const launchGate = new Promise<void>((resolve) => { releaseLaunch = resolve; });
+    const runtime: BrowserRuntime = {
+      launch: async () => {
+        launches++;
+        await launchGate;
+        return {
+          id: "singleflight-session",
+          newPage: async () => ({
+            id: "singleflight-page",
+            url: async () => "about:blank",
+            title: async () => "",
+            content: async () => "",
+            goto: async () => {},
+            click: async () => {},
+            type: async () => {},
+            select: async () => {},
+            scroll: async () => {},
+            wait: async () => {},
+            press: async () => {},
+            back: async () => {},
+            forward: async () => {},
+            reload: async () => {},
+            screenshot: async () => "",
+            close: async () => {},
+          }),
+          close: async () => { closes++; },
+        };
+      },
+    };
+    const manager = new BrowserProfileSessionManager(store, () => runtime);
+    const first = manager.acquire("principal-a", profile.id);
+    const second = manager.acquire("principal-a", profile.id);
+    releaseLaunch();
+    const [one, two] = await Promise.all([first, second]);
+    assert.equal(one, two);
+    assert.equal(launches, 1);
+    await manager.closeAll();
+    assert.equal(closes, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("browser.transaction.inspect returns read-only evidence and fails on mismatches", async () => {
+  const html = "<main><h1>Checkout</h1><p>Acme Store</p><p>USD $42.50</p><p>Canvas bag x 1</p></main>";
+  const runtime: BrowserRuntime = {
+    launch: async () => ({
+      id: "transaction-session",
+      newPage: async () => ({
+        id: "transaction-page", url: async () => "https://shop.example/checkout",
+        title: async () => "Checkout", content: async () => html,
+        goto: async () => {}, click: async () => {}, type: async () => {},
+        select: async () => {}, scroll: async () => {}, wait: async () => {},
+        press: async () => {}, back: async () => {}, forward: async () => {},
+        reload: async () => {}, screenshot: async () => "", close: async () => {},
+      } satisfies BrowserPage),
+      close: async () => {},
+    } satisfies BrowserSession),
+  };
+  const tools = createBrowserTools(runtime);
+  const open = tools.find((item) => item.name === "browser.open")!;
+  const inspect = tools.find((item) => item.name === "browser.transaction.inspect")!;
+  assert.deepEqual(inspect.effects, ["read"]);
+  const { pageId } = await open.execute({}, {} as never) as { pageId: string };
+  const matched = await inspect.execute({
+    pageId, recipient: "Acme Store", amount: "$42.50", currency: "USD",
+    items: ["Canvas bag x 1"],
+  }, {} as never) as { verified: boolean; missing: string[]; url: string };
+  assert.equal(matched.verified, true);
+  assert.deepEqual(matched.missing, []);
+  const mismatch = await inspect.execute({
+    pageId, recipient: "Different Store", amount: "$42.50",
+  }, {} as never) as { verified: boolean; missing: string[] };
+  assert.equal(mismatch.verified, false);
+  assert.deepEqual(mismatch.missing, ["recipient"]);
 });
