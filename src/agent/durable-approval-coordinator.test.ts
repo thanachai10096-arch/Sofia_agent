@@ -94,7 +94,7 @@ test("durable approval does not return proposed input after rejection or expiry"
   });
 });
 
-test("durable approval compensates metadata when proposed input cannot be serialized", {
+test("durable approval creates no metadata when proposed input cannot be serialized", {
   skip: !supportsNodeSqlite,
 }, async () => {
   await fixture(async ({ origin, coordinator }) => {
@@ -102,7 +102,6 @@ test("durable approval compensates metadata when proposed input cannot be serial
     circular.self = circular;
     const ticket = coordinator.create({ ...request, input: circular });
     assert.equal(ticket, null);
-    assert.equal(origin.history("tenant-a").length, 1);
-    assert.equal(origin.history("tenant-a")[0]?.status, "interrupted");
+    assert.equal(origin.history("tenant-a").length, 0);
   });
 });
