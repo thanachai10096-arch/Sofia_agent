@@ -98,6 +98,13 @@ export interface JobRuntime {
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyKey?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
+  reconcile?(
+    id: string,
+    stepId: string,
+    outcome: "completed" | "retry",
+    actorId: string,
+    note?: string,
+  ): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
   markNotificationDelivered?(id: string): Promise<void>;
@@ -553,7 +560,7 @@ export class DurableJobRuntime implements JobRuntime {
   async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
     // Reserve the resume slot before the first await. Otherwise two callers can both
     // pass the guard while get() is pending and race to resume the same checkpoint.
-    if (this.resuming.has(id)) throw new Error("Job is already being resumed");
+    if (this.resuming.has(id)) throw new Error("Job is already being resumed or reconciled");
     this.resuming.add(id);
     try {
       const fetched = await this.get(id);
@@ -572,6 +579,58 @@ export class DurableJobRuntime implements JobRuntime {
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
       await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
+      return publicJobRecord(record);
+    } finally {
+      this.resuming.delete(id);
+    }
+  }
+
+  async reconcile(
+    id: string,
+    stepId: string,
+    outcome: "completed" | "retry",
+    actorId: string,
+    note?: string,
+  ): Promise<JobRecord> {
+    if (this.resuming.has(id)) throw new Error("Job is already being resumed or reconciled");
+    this.resuming.add(id);
+    try {
+      const fetched = await this.get(id);
+      if (!fetched) throw new Error("Unknown job");
+      const record = this.jobs.get(id) ?? fetched;
+      if (record.status !== "failed") throw new Error("Only failed jobs can be reconciled");
+      if (!record.snapshot) throw new Error("Job has no resumable snapshot");
+      const snapshot = record.snapshot;
+      if (!snapshot.inFlightStepId || snapshot.inFlightStepId !== stepId) {
+        throw new Error("Step does not match the unresolved in-flight step");
+      }
+      if (!snapshot.plan.steps.some((step) => step.id === stepId)) {
+        throw new Error("Unresolved step is missing from the saved plan");
+      }
+      if (snapshot.completedStepIds.includes(stepId)) {
+        throw new Error("In-flight step is already marked completed");
+      }
+      const decidedAt = new Date().toISOString();
+      const reconciled: BrainRunSnapshot = {
+        ...snapshot,
+        completedStepIds: outcome === "completed"
+          ? [...new Set([...snapshot.completedStepIds, stepId])]
+          : [...snapshot.completedStepIds],
+        inFlightStepId: undefined,
+        reconciliations: [
+          ...(snapshot.reconciliations ?? []),
+          { stepId, outcome, decidedAt, actorId, ...(note ? { note: String(redactSecrets(note)).slice(0, 1000) } : {}) },
+        ],
+      };
+      const safeSnapshot = redactSecrets(reconciled) as BrainRunSnapshot;
+      // Persist the canonical checkpoint first. The job record embeds the same
+      // snapshot as a fallback; a failed job-store write can be retried safely.
+      await this.runStore?.save(safeSnapshot);
+      record.snapshot = safeSnapshot;
+      record.updatedAt = decidedAt;
+      const saved = await this.state.save(record);
+      if (!saved) throw new Error("Job state changed before reconciliation could be saved");
+      this.jobs.set(id, record);
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
