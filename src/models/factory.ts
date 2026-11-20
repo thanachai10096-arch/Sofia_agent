@@ -17,6 +17,7 @@ import { createToolRegistry } from "../tools/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { createAgentReachTools } from "../integrations/agent-reach.js";
+import { createSofiaPluginHost } from "../integrations/deepseek-harness/plugin-host.js";
 import { createBrowserTools } from "../browser/tools.js";
 import { BrowserProfileStore } from "../browser/profile-store.js";
 import { BrowserProfileSessionManager } from "../browser/profile-sessions.js";
@@ -123,10 +124,24 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
-  const tools=createToolRegistry([
-    ...createBuiltinTools(),
-    ...(process.env.SOFIA_ENABLE_AGENT_REACH === "true" ? createAgentReachTools() : []),
-  ]);
+  // Compose process-wide, stateless capabilities through the native plugin host.
+  // Every resulting tool still runs through Sofia's existing Tool Gateway.
+  const pluginHost = createSofiaPluginHost();
+  pluginHost.use({
+    id: "sofia.builtin-tools",
+    install: (plugin) => {
+      for (const tool of createBuiltinTools()) plugin.registerTool(tool);
+    },
+  });
+  if (process.env.SOFIA_ENABLE_AGENT_REACH === "true") {
+    pluginHost.use({
+      id: "sofia.agent-reach",
+      install: (plugin) => {
+        for (const tool of createAgentReachTools()) plugin.registerTool(tool);
+      },
+    });
+  }
+  const tools=createToolRegistry(pluginHost.listTools());
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
