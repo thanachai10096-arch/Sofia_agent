@@ -34,3 +34,22 @@ Execution feedback is an evidence stream for review, not a self-approval mechani
 Use `createBrainSkillFeedbackRecorder()` to bridge those events to the active Skill Registry version and `SkillFeedbackLedger`. The adapter resolves project scope from the authenticated principal and obtains safety-incident counts from a host safety monitor. Built-in or unregistered skills are ignored. Do not supply a model-generated scope, principal, evidence ID, or incident count.
 
 The callback is optional and best-effort. The default model factory is not yet wired to a production PostgreSQL pool, so production feedback collection remains inactive until the host injects the adapter and provisions the durable store.
+
+## Host factory injection
+
+The standard factory now accepts an optional third argument, `SkillFeedbackHostConfig`. This is the explicit production integration seam; no process-global or in-memory production fallback is enabled:
+
+```ts
+const dependencies = createSofiaAgentDependencies(
+  workspace,
+  approval,
+  {
+    registry: durableSkillRegistryStore,
+    ledger: new SkillFeedbackLedger(durableSkillFeedbackStore),
+    resolveScope: (principalId) => tenantDirectory.projectScopeFor(principalId),
+    resolveSafetyIncidentCount: (event) => safetyMonitor.incidentsForToolEvent(event),
+  },
+);
+```
+
+The supplied stores must be backed by durable transactional storage and initialized by the host. The scope resolver must verify the principal's project membership; the safety monitor must query trusted host records. The regular API entrypoint intentionally does not construct these dependencies automatically, because this repository does not currently include a PostgreSQL client or a configured database pool. Therefore the feature is opt-in and remains inactive in the default production entrypoint until an operator supplies these trusted dependencies.
