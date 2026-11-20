@@ -911,11 +911,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       cronClosed = true;
       if (cronTimer) clearInterval(cronTimer);
       cronTimer = undefined;
-      return closeHttpServer(() => {
+      return closeHttpServer((error?: Error) => {
         void (async () => {
           await cronInitialization.catch(() => undefined);
           await Promise.allSettled([...cronSchedulers.values()].map(scheduler => scheduler.close()));
-          callback?.();
+          callback?.(error);
         })();
       });
     }) as typeof server.close;
