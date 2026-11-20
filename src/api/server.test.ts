@@ -359,11 +359,45 @@ test("API routes runs through resolver-issued tenant dependency contexts", async
     createdTenants.push(context.tenantId);
     const sessionStore = new MemorySessionStore();
     tenantSessions.set(context.principalId, sessionStore);
+    const jobs = new Map<string, { id: string; ownerKeyId: string; task: string; status: "queued" | "cancelled"; createdAt: string; updatedAt: string }>();
+    const jobRuntime = {
+      async submit(input: { task: string; ownerKeyId?: string }) {
+        if (!input.ownerKeyId || input.ownerKeyId !== context.principalId) throw new Error("Tenant job owner mismatch");
+        const now = new Date().toISOString();
+        const job = { id: context.principalId + "-job", ownerKeyId: context.principalId, task: input.task, status: "queued" as const, createdAt: now, updatedAt: now };
+        jobs.set(job.id, job);
+        return job;
+      },
+      async get(id: string) { return jobs.get(id); },
+      async getForOwner(id: string, ownerKeyId: string) {
+        const job = jobs.get(id);
+        return job?.ownerKeyId === ownerKeyId ? job : undefined;
+      },
+      async resume(id: string) {
+        const job = jobs.get(id);
+        if (!job) throw new Error("Job not found");
+        return job;
+      },
+      async resumeForOwner(id: string, ownerKeyId: string) {
+        const job = await this.getForOwner(id, ownerKeyId);
+        if (!job) throw new Error("Job not found");
+        return job;
+      },
+      async cancel() { return false; },
+      async cancelForOwner(id: string, ownerKeyId: string) {
+        const job = await this.getForOwner(id, ownerKeyId);
+        if (!job) return false;
+        job.status = "cancelled";
+        return true;
+      },
+      async list() { return [...jobs.values()]; },
+    };
     return {
       provider: { generate: async () => { generatedOwners.push(context.principalId); return { text: "tenant scoped result" }; } },
       router: { select: () => route, markUnhealthy: () => undefined },
       reviewer: { review: async () => ({ approved: true, reason: "tenant scoped" }) },
       sessionStore,
+      jobRuntime,
       close: async () => { closedOwners.push(context.principalId); },
     };
   });
@@ -373,8 +407,8 @@ test("API routes runs through resolver-issued tenant dependency contexts", async
     reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
   }, {
     apiKeys: {
-      "tenant-run-owner-one": ["agent:run", "agent:read"],
-      "tenant-run-owner-two": ["agent:run", "agent:read"],
+      "tenant-run-owner-one": ["agent:run", "agent:read", "jobs:read", "jobs:manage", "cron:read", "cron:manage"],
+      "tenant-run-owner-two": ["agent:run", "agent:read", "jobs:read", "jobs:manage", "cron:read", "cron:manage"],
     },
     tenantDependencyRegistry: registry,
   });
@@ -397,6 +431,36 @@ test("API routes runs through resolver-issued tenant dependency contexts", async
     const ownerTwoId = createHash("sha256").update("tenant-run-owner-two").digest("hex").slice(0, 32);
     const first = await run("tenant-run-owner-one");
     const second = await run("tenant-run-owner-two");
+    const startJob = await fetch(baseUrl + "/v1/jobs", {
+      method: "POST",
+      headers: { authorization: "Bearer tenant-run-owner-one", "content-type": "application/json" },
+      body: JSON.stringify({ task: "tenant one background job" }),
+    });
+    assert.equal(startJob.status, 202);
+    const job = await startJob.json() as { id: string; ownerKeyId: string };
+    assert.equal(job.ownerKeyId, createHash("sha256").update("tenant-run-owner-one").digest("hex").slice(0, 32));
+    const ownerJob = await fetch(baseUrl + "/v1/jobs/" + job.id, {
+      headers: { authorization: "Bearer tenant-run-owner-one" },
+    });
+    const otherOwnerJob = await fetch(baseUrl + "/v1/jobs/" + job.id, {
+      headers: { authorization: "Bearer tenant-run-owner-two" },
+    });
+    assert.equal(ownerJob.status, 200);
+    assert.equal(otherOwnerJob.status, 404);
+    const otherOwnerJobs = await fetch(baseUrl + "/v1/jobs", {
+      headers: { authorization: "Bearer tenant-run-owner-two" },
+    });
+    assert.equal((await otherOwnerJobs.json() as { jobs: unknown[] }).jobs.length, 0);
+    const createCron = await fetch(baseUrl + "/v1/cron/schedules", {
+      method: "POST",
+      headers: { authorization: "Bearer tenant-run-owner-one", "content-type": "application/json" },
+      body: JSON.stringify({ name: "tenant cron", task: "tenant cron task", runAt: "2099-01-01T00:00:00.000Z", timeZone: "UTC" }),
+    });
+    assert.equal(createCron.status, 201);
+    const otherOwnerCron = await fetch(baseUrl + "/v1/cron/schedules", {
+      headers: { authorization: "Bearer tenant-run-owner-two" },
+    });
+    assert.equal((await otherOwnerCron.json() as { schedules: unknown[] }).schedules.length, 0);
     assert.ok(first.result);
     assert.ok(second.result);
     assert.deepEqual(generatedOwners.sort(), [ownerOneId, ownerTwoId].sort());
