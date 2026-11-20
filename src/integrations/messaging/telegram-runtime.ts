@@ -52,7 +52,7 @@ export async function reportTelegramRunCompletion(input: {
 }): Promise<void> {
   let run: TelegramRunResult;
   try {
-    run = await input.waitForRun(input.runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000 });
+    run = await input.waitForRun(input.runId, { timeoutMs: 30 * 60 * 1_000, intervalMs: 1_000, signal: input.signal });
   } catch (error) {
     if (input.signal?.aborted) return;
     const failureKind = classifyRunWaitFailure(error);
