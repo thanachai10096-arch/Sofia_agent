@@ -27,6 +27,7 @@ from agent_reach.runtime.result import (
 )
 from agent_reach.runtime.run import CommandFailed, http_request, run_cmd
 from agent_reach.runtime.sessions import has_login_state, session_env
+from agent_reach.utils.url import safe_urlopen
 
 from .base import Action, Channel, Param
 
@@ -46,7 +47,7 @@ def _bvid(target: str, timeout: float) -> str:
     if "b23.tv/" in t:
         url = t if "://" in t else f"https://{t}"
         req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": _UA})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with safe_urlopen(req, timeout=timeout) as resp:
             m = _BV_RE.search(resp.geturl())
         if m:
             return m.group(0)
