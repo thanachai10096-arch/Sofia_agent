@@ -67,7 +67,7 @@ export class FinancialActionEngine {
 
   async cancel(id: string): Promise<FinancialOrder> {
     const current = await this.requireOrder(id);
-    if (current.status === "paid" || current.status === "cancelled") throw new Error("Paid or already cancelled orders cannot be cancelled by this transition.");
+    if (current.status !== "prepared") throw new Error("Only a prepared order can be cancelled locally; submitted orders require provider-side cancellation or refund reconciliation.");
     return this.update(current, { ...current, status: "cancelled" });
   }
 
