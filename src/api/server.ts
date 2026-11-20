@@ -877,16 +877,29 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
+        const rawIdempotencyKey = req.headers["idempotency-key"];
+        if (Array.isArray(rawIdempotencyKey) || (rawIdempotencyKey !== undefined &&
+            (typeof rawIdempotencyKey !== "string" || rawIdempotencyKey.length < 1 || rawIdempotencyKey.length > 200))) {
+          return json(res, 400, { error: "invalid_idempotency_key" }, origin, config);
+        }
         try {
           const job = await jobRuntime.submit({
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
             ...(normalizeAcceptanceCriteria(input.acceptanceCriteria)?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
+            ...(rawIdempotencyKey ? {
+              idempotencyId: createHash("sha256").update(auth.keyId + ":" + rawIdempotencyKey).digest("hex"),
+              requestFingerprint: idempotencyFingerprint(input),
+            } : {}),
           });
           return json(res, 202, job, origin, config);
         } catch (error) {
-          return json(res, 502, { error: "job_submit_failed", message: error instanceof Error ? error.message : "Job submission failed" }, origin, config);
+          const message = error instanceof Error ? error.message : "Job submission failed";
+          if (message === "idempotency_key_reused_with_different_request") {
+            return json(res, 409, { error: "idempotency_key_reused_with_different_request" }, origin, config);
+          }
+          return json(res, 502, { error: "job_submit_failed", message }, origin, config);
         }
       }
 
