@@ -14,6 +14,7 @@ export interface TransactionalApprovalStore {
   ): boolean;
   expirePending(now: number): number;
   pending(principalId: string, now?: number): ApprovalAuditRecord[];
+  get(principalId: string, id: string, now?: number): ApprovalAuditRecord | null;
   history(principalId: string, limit?: number): ApprovalAuditRecord[];
 }
 
@@ -174,6 +175,18 @@ export class SqliteApprovalStore implements TransactionalApprovalStore {
       ORDER BY created_at ASC, id ASC
     `).all(owner) as ApprovalRow[];
     return rows.map(toRecord);
+  }
+
+  /** Read one owner-scoped approval state; separate SQLite connections observe committed decisions. */
+  get(principalId: string, id: string, now = Date.now()): ApprovalAuditRecord | null {
+    const owner = principalId.trim();
+    if (!owner || !id || !Number.isSafeInteger(now)) return null;
+    this.expirePending(now);
+    const row = this.db.prepare(`
+      SELECT id, run_id, principal_id, tool_name, action_hash, risk, status, created_at, expires_at, settled_at
+      FROM approvals WHERE principal_id = ? AND id = ?
+    `).get(owner, id) as ApprovalRow | undefined;
+    return row ? toRecord(row) : null;
   }
 
   history(principalId: string, limit = 100): ApprovalAuditRecord[] {
