@@ -18,7 +18,7 @@ export class PostgresSkillFeedbackStore implements SkillFeedbackStore {
   async ensureSchema(): Promise<void> {
     await this.pool.query(`CREATE TABLE IF NOT EXISTS ${this.table} (
       scope_id text PRIMARY KEY CHECK (length(scope_id) BETWEEN 1 AND 512),
-      state jsonb NOT NULL,
+      state jsonb NOT NULL CHECK (jsonb_typeof(state) = 'object'),
       updated_at timestamptz NOT NULL DEFAULT now()
     )`);
   }
