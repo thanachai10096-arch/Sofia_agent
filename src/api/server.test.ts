@@ -163,12 +163,13 @@ test("API job endpoints hide another principal's jobs and block cross-principal 
     ownerKeyId: createHash("sha256").update("key-one").digest("hex").slice(0, 32),
     snapshot: { checkpointId: "private-checkpoint" },
   };
-  const calls = { resume: 0, cancel: 0 };
+  const calls = { resume: 0, cancel: 0, reconcile: 0 };
   const runtime = {
     async get(id: string) { return id === job.id ? job : undefined; },
     async list() { return [job]; },
     async resume() { calls.resume += 1; return { ...job, status: "running" }; },
     async cancel() { calls.cancel += 1; return true; },
+    async reconcile(_id: string, stepId: string, outcome: "completed" | "retry", actorId: string) { calls.reconcile += 1; return { ...job, snapshot: { inFlightStepId: undefined, reconciliations: [{ stepId, outcome, actorId }] } }; },
     async submit() { throw new Error("not used"); },
   };
   const server = createSofiaApi({
@@ -203,11 +204,32 @@ test("API job endpoints hide another principal's jobs and block cross-principal 
     const foreignCancel = await request("key-two", `/v1/jobs/${job.id}/cancel`, "POST");
     assert.equal(foreignCancel.status, 404);
 
+    const foreignReconcile = await fetch(baseUrl + `/v1/jobs/${job.id}/reconcile`, {
+      method: "POST",
+      headers: { authorization: "Bearer key-two", "content-type": "application/json" },
+      body: JSON.stringify({ stepId: "step-1", outcome: "completed" }),
+    });
+    assert.equal(foreignReconcile.status, 404);
+
+    const missingRetryConfirmation = await fetch(baseUrl + `/v1/jobs/${job.id}/reconcile`, {
+      method: "POST",
+      headers: { authorization: "Bearer key-one", "content-type": "application/json" },
+      body: JSON.stringify({ stepId: "step-1", outcome: "retry" }),
+    });
+    assert.equal(missingRetryConfirmation.status, 400);
+
+    const confirmedRetry = await fetch(baseUrl + `/v1/jobs/${job.id}/reconcile`, {
+      method: "POST",
+      headers: { authorization: "Bearer key-one", "content-type": "application/json" },
+      body: JSON.stringify({ stepId: "step-1", outcome: "retry", confirmNoSideEffect: true }),
+    });
+    assert.equal(confirmedRetry.status, 200);
+
     const foreignList = await request("key-two", "/v1/jobs");
     assert.equal(foreignList.status, 200);
     assert.deepEqual(await foreignList.json(), { jobs: [] });
 
-    assert.deepEqual(calls, { resume: 0, cancel: 0 }, "unauthorized requests must not invoke job mutations");
+    assert.deepEqual(calls, { resume: 0, cancel: 0, reconcile: 1 }, "unauthorized requests and unconfirmed retries must not invoke job mutations");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
