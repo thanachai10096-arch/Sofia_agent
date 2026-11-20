@@ -176,6 +176,15 @@ def load_allocations(state_root):
     return data
 
 
+def assert_workspace_registry_consistent(root, allocations):
+    expected = {"run-" + run_id for run_id in allocations}
+    for child in root.iterdir():
+        if child.name not in expected:
+            fail("workspace root contains an untracked entry; refusing quota allocation or cleanup")
+        info = child.lstat()
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            fail("registered workspace path is not a real directory")
+
 def save_allocations(state_root, data):
     target = state_root / "allocations.json"
     temp = state_root / ("allocations." + uuid.uuid4().hex + ".tmp")
@@ -239,6 +248,7 @@ def create(root, state_root, request):
     if type(byte_limit) is not int or byte_limit < 1024 * 1024 or type(inode_limit) is not int or inode_limit != INODE_LIMIT:
         fail("requested quota limits are outside host policy")
     allocations = load_allocations(state_root)
+    assert_workspace_registry_consistent(root, allocations)
     if run_id in allocations:
         fail("runId already has an allocation")
     used = {entry.get("project_id") for entry in allocations.values() if isinstance(entry, dict)}
@@ -283,6 +293,7 @@ def create(root, state_root, request):
 def dispose(root, state_root, request, abort=False):
     run_id = validate_run_id(request["runId"])
     allocations = load_allocations(state_root)
+    assert_workspace_registry_consistent(root, allocations)
     entry = allocations.get(run_id)
     if entry is None:
         return {"ok": True, "runId": run_id}
