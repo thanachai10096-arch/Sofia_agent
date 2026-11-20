@@ -14,6 +14,7 @@ from typing import Mapping, Optional, Sequence
 
 from agent_reach import __version__
 from agent_reach.utils.process import utf8_subprocess_env, windows_hidden_kwargs
+from agent_reach.utils.url import safe_urlopen
 
 from .result import BAD_INPUT, NEED_SETUP, TIMEOUT, ReachError, _clean
 
@@ -160,7 +161,7 @@ def http_request(
     merged = {"User-Agent": _USER_AGENT}
     merged.update(headers or {})
     req = urllib.request.Request(url, data=data, headers=merged)
-    with urllib.request.urlopen(req, timeout=max(timeout, 0.1)) as resp:
+    with safe_urlopen(req, timeout=max(timeout, 0.1)) as resp:
         body = resp.read(max_bytes + 1)
         declared = getattr(resp, "headers", {}).get("Content-Length", "")
         if isinstance(declared, str) and declared.strip().isdigit() and len(body) <= max_bytes:
