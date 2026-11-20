@@ -63,7 +63,7 @@ export class SofiaPluginHost {
   private readonly tools = new Map<string, SofiaTool>();
   private readonly services = new Map<string, { pluginId: string; value: unknown }>();
   private readonly listeners = new Map<SofiaPluginEventName, Set<(payload: never) => void>>();
-  private readonly installing = new Set<string>();
+  private readonly installing = new Map<string, SofiaPluginManifest | undefined>();
   private disposed = false;
 
   constructor(options: SofiaPluginHostOptions = {}) {
@@ -164,7 +164,7 @@ export class SofiaPluginHost {
 
     // Publish only after installation succeeds. Roll back partial registrations
     // in reverse order if a plugin fails halfway through installation.
-    this.installing.add(plugin.id);
+    this.installing.set(plugin.id, manifest);
     try {
       plugin.install(context);
       this.plugins.set(plugin.id, installed);
@@ -183,7 +183,9 @@ export class SofiaPluginHost {
     if (!installed) return false;
     const dependent = [...this.plugins.values()].find((candidate) =>
       candidate.manifest?.dependencies?.includes(pluginId),
-    );
+    ) ?? [...this.installing.entries()]
+      .map(([id, manifest]) => ({ id, manifest }))
+      .find((candidate) => candidate.manifest?.dependencies?.includes(pluginId));
     if (dependent) {
       throw new Error(`Cannot uninstall Sofia plugin "${pluginId}" while "${dependent.id}" depends on it.`);
     }
@@ -217,6 +219,9 @@ export class SofiaPluginHost {
 
   dispose(): void {
     if (this.disposed) return;
+    if (this.installing.size > 0) {
+      throw new Error("Cannot dispose Sofia plugin host while a plugin installation is in progress.");
+    }
     // Close the host before invoking user cleanup to prevent re-entrant installs.
     this.disposed = true;
     const installed = [...this.plugins.values()].reverse();
