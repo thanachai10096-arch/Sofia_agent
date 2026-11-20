@@ -104,6 +104,15 @@ export class TenantJobRuntimeRouter implements JobRuntime {
     throw new Error("Unscoped job cancellation is disabled by TenantJobRuntimeRouter.");
   }
 
+  async recoverQueued(): Promise<number> {
+    const pending = await Promise.all([...this.allowedOwners].map((owner) => this.runtimeFor(owner)));
+    let dispatched = 0;
+    for (const runtime of pending) {
+      if (runtime.recoverQueued) dispatched += await runtime.recoverQueued();
+    }
+    return dispatched;
+  }
+
   async listForOwner(ownerKeyId: string): Promise<JobRecord[]> {
     const runtime = await this.runtimeFor(ownerKeyId);
     if (!runtime.listForOwner) {
@@ -176,6 +185,7 @@ export function createRegistryBackedTenantJobRuntimeRouter(
       list: runtime.list.bind(runtime),
       ...(runtime.listForOwner ? { listForOwner: runtime.listForOwner.bind(runtime) } : {}),
       ...(runtime.markNotificationDelivered ? { markNotificationDelivered: runtime.markNotificationDelivered.bind(runtime) } : {}),
+      ...(runtime.recoverQueued ? { recoverQueued: runtime.recoverQueued.bind(runtime) } : {}),
       // TenantDependencyRegistry closes the full dependency bundle at API shutdown.
       close: async () => undefined,
     };
