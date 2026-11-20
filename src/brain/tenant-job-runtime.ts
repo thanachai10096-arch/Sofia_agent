@@ -1,5 +1,6 @@
 import type { BrainRunInput } from "./executor.js";
 import type { JobRecord, JobRuntime } from "./job-runtime.js";
+import type { TenantDependencyRegistry } from "../platform/tenant-dependency-registry.js";
 
 type TenantJobRuntimeFactory = (ownerKeyId: string) => JobRuntime | Promise<JobRuntime>;
 
@@ -120,4 +121,34 @@ export class TenantJobRuntimeRouter implements JobRuntime {
     })();
     return this.closePromise;
   }
+}
+
+
+/**
+ * Connect the API owner router to the same resolver-backed dependency registry
+ * used by interactive Agent runs. The registry remains the lifecycle owner of
+ * tenant dependencies; this adapter deliberately does not close them a second time.
+ */
+export function createRegistryBackedTenantJobRuntimeRouter(
+  ownerKeyIds: readonly string[],
+  registry: TenantDependencyRegistry,
+): TenantJobRuntimeRouter {
+  return new TenantJobRuntimeRouter(ownerKeyIds, async (ownerKeyId) => {
+    const dependencies = await registry.getForPrincipal(ownerKeyId);
+    const runtime = dependencies.jobRuntime;
+    if (!runtime) throw new Error("Tenant Agent dependencies do not provide a JobRuntime.");
+    return {
+      submit: runtime.submit.bind(runtime),
+      get: runtime.get.bind(runtime),
+      ...(runtime.getForOwner ? { getForOwner: runtime.getForOwner.bind(runtime) } : {}),
+      resume: runtime.resume.bind(runtime),
+      ...(runtime.resumeForOwner ? { resumeForOwner: runtime.resumeForOwner.bind(runtime) } : {}),
+      cancel: runtime.cancel.bind(runtime),
+      ...(runtime.cancelForOwner ? { cancelForOwner: runtime.cancelForOwner.bind(runtime) } : {}),
+      list: runtime.list.bind(runtime),
+      ...(runtime.markNotificationDelivered ? { markNotificationDelivered: runtime.markNotificationDelivered.bind(runtime) } : {}),
+      // TenantDependencyRegistry closes the full dependency bundle at API shutdown.
+      close: async () => undefined,
+    };
+  });
 }
