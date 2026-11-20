@@ -762,3 +762,52 @@ test("API runs use a distinct dependency bundle for each authenticated owner", a
   assert.deepEqual(closedOwners.sort(), [ownerOneId, ownerTwoId].sort());
 });
 
+
+
+test("API close drains active cron execution before its close callback", async () => {
+  const cronStoreRoot = await mkdtemp(path.join(tmpdir(), "sofia-api-cron-shutdown-"));
+  let submitted = 0;
+  let cancelled = false;
+  const runtime = {
+    async submit() {
+      submitted++;
+      return { id: "cron-shutdown-job", status: "running", task: "shutdown task" };
+    },
+    async getForOwner() {
+      return { id: "cron-shutdown-job", status: cancelled ? "cancelled" : "running", task: "shutdown task" };
+    },
+    async cancelForOwner() { cancelled = true; return true; },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    jobRuntime: runtime as never,
+  }, {
+    apiKeys: { "cron-shutdown-owner": ["cron:manage"] },
+    cronStoreRoot,
+  });
+
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/cron/schedules", {
+      method: "POST",
+      headers: { authorization: "Bearer cron-shutdown-owner", "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "shutdown", task: "shutdown task",
+        runAt: new Date(Date.now() - 1_000).toISOString(), timeZone: "UTC",
+      }),
+    });
+    assert.equal(response.status, 201);
+    for (let i = 0; i < 250 && submitted === 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(submitted, 1);
+
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    assert.equal(cancelled, true);
+  } finally {
+    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(cronStoreRoot, { recursive: true, force: true });
+  }
+});
