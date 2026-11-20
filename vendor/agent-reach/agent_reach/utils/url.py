@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import urllib.request
 from urllib.parse import urlsplit
 
 _BLOCKED_PUBLIC_FETCH_HOSTS = {
@@ -119,3 +120,24 @@ def host_matches(url: str, *domains: str) -> bool:
         return False
 
     return domain_matches(host, *domains)
+
+
+class PublicOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Revalidate every redirect hop so a public URL cannot redirect to a local host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        normalize_public_http_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def safe_urlopen(url_or_request, *args, **kwargs):
+    """Open only public HTTP(S) URLs and enforce the same rule on redirects."""
+    raw_url = url_or_request.full_url if isinstance(url_or_request, urllib.request.Request) else url_or_request
+    normalize_public_http_url(raw_url)
+    opener = urllib.request.build_opener(PublicOnlyRedirectHandler())
+    return opener.open(url_or_request, *args, **kwargs)
+
+
+def safe_build_opener(*handlers):
+    """Build an opener that preserves supplied handlers and validates redirects."""
+    return urllib.request.build_opener(PublicOnlyRedirectHandler(), *handlers)
