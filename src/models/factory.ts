@@ -17,6 +17,7 @@ import { createToolRegistry } from "../tools/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { createAgentReachTools } from "../integrations/agent-reach.js";
+import { createSofiaPluginHost } from "../integrations/deepseek-harness/plugin-host.js";
 import { createBrowserTools } from "../browser/tools.js";
 import { BrowserProfileStore } from "../browser/profile-store.js";
 import { BrowserProfileSessionManager } from "../browser/profile-sessions.js";
@@ -46,7 +47,7 @@ function intEnv(name:string,fallback:number,minimum=0){const value=Number(proces
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:NonNullable<AgentDependencies["tools"]>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
@@ -123,10 +124,25 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
-  const tools=createToolRegistry([
-    ...createBuiltinTools(),
-    ...createAgentReachTools(),
-  ]);
+  // Compose stateless capabilities as plugins. The live registry ensures
+  // trusted host-installed plugins become available to the next Sofia run.
+  const pluginHost = createSofiaPluginHost();
+  pluginHost.use({
+    id: "sofia.builtin-tools",
+    install: (plugin) => {
+      for (const tool of createBuiltinTools()) plugin.registerTool(tool);
+    },
+  });
+  pluginHost.use({
+    id: "sofia.agent-reach",
+    install: (plugin) => {
+      for (const tool of createAgentReachTools()) plugin.registerTool(tool);
+    },
+  });
+  const tools = {
+    get: (name: string) => pluginHost.listTools().find((tool) => tool.name === name),
+    list: () => pluginHost.listTools(),
+  };
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
@@ -136,7 +152,7 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore();
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,pluginHost,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
