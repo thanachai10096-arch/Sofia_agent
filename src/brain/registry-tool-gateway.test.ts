@@ -181,6 +181,43 @@ test("security kill switch prevents a tool from starting after approval wait", a
   assert.match(result.error?.message ?? "", /kill switch/i);
 });
 
+test("stale distributed ownership blocks a tool after approval and before its side effect", async () => {
+  let ownershipChecks = 0;
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Write requiring approval",
+    inputSchema: { type: "object" },
+    effects: ["write"] as const,
+    async execute() { executions += 1; return { committed: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    {
+      runtime: runtime(),
+      tools: registry,
+      async assertOwnership() {
+        ownershipChecks += 1;
+        if (ownershipChecks === 2) throw new Error("Run ownership lease is no longer current.");
+      },
+    },
+    defaultPolicy,
+    async () => true,
+  );
+  const result = await gateway.execute(
+    { tool: "custom.write", input: { value: "must-not-run" } },
+    {
+      runId: "stale-owner-fence-test",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(ownershipChecks, 2, "ownership must be checked again after approval");
+  assert.equal(executions, 0, "stale workers must not start side effects");
+  assert.equal(result.ok, false);
+  assert.match(result.error?.message ?? "", /ownership lease is no longer current/i);
+});
+
 test("approval cannot mutate the action that the gateway executes", async () => {
   const rt = runtime();
   let executedInput: Record<string, unknown> | undefined;

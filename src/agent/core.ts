@@ -133,6 +133,7 @@ export class SofiaAgent {
       ...(request.principalId ? { principalId: request.principalId } : {}),
       ...(request.modelRouteId && request.modelRouteId !== "auto" ? { modelRouteId: request.modelRouteId } : {}),
       ...(request.desktopCapabilities?.length ? { desktopCapabilities: request.desktopCapabilities } : {}),
+      ...(request.assertOwnership ? { assertOwnership: request.assertOwnership } : {}),
       onEvent: (event) => {
         if (event.type === "brain.tool.started") {
           emit({ type: "tool.started", message: "Running Brain tool.", metadata: { stepId: event.stepId } });
@@ -340,6 +341,7 @@ export class SofiaAgent {
             // Approval may take time. Never start an action after the caller or host
             // kill switch has cancelled this run while approval was pending.
             request.signal?.throwIfAborted();
+            await request.assertOwnership?.();
 
             try {
               const result = await tool.execute(actionInput, {

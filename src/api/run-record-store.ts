@@ -7,6 +7,27 @@ import type { AgentResult } from "../agent/types.js";
 
 export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; /** SHA-256 of owner-scoped idempotency key; never store the raw key. */ idempotencyId?:string; requestFingerprint?:string; }
 export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; load?(id:string):RunRecord|undefined; }
+
+/**
+ * Async contract for a genuinely distributed Run Record backend.
+ *
+ * This deliberately does NOT extend RunRecordStore: loadAllSync() cannot be
+ * implemented correctly by a remote store without a potentially stale local
+ * cache. Reads are tenant-scoped, creation is atomic and non-overwriting, and
+ * every mutation of an owned run is fenced in the same storage transaction.
+ */
+export interface DistributedFencedRunRecordStore {
+ /** Atomically create a new queued record; return false if its ID already exists. */
+ create(record: RunRecord): Promise<boolean>;
+ /** Return a record only when it belongs to the supplied principal. */
+ load(id: string, principalId: string): Promise<RunRecord | undefined>;
+ /** List records belonging only to the supplied principal. */
+ list(principalId: string): Promise<RunRecord[]>;
+ /** Atomically compare the current lease and persist this owner's record. */
+ saveFenced(record: RunRecord, lease: import("./run-ownership-store.js").RunOwnershipLease): Promise<boolean>;
+ /** Atomically compare the current lease and remove this owner's record. */
+ removeFenced(id: string, lease: import("./run-ownership-store.js").RunOwnershipLease): Promise<boolean>;
+}
 const SAFE_ID=/^[A-Za-z0-9-]{8,64}$/;
 const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
 const KINDS=new Set(["coding","debugging","research","analysis","vision","general"]);
