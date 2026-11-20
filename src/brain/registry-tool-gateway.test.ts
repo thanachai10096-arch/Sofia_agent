@@ -1151,3 +1151,57 @@ test("approval broker keeps effectful tools blocked until the exact pending acti
   assert.equal(executions, 1, "the tool must execute exactly once after approval");
   assert.deepEqual(await broker.listPending(principalId), []);
 });
+
+
+test("effectful tool exceptions after invocation are indeterminate, not confirmed failures", async () => {
+  const events = new Map<string, SecurityAuditEvent>();
+  let externalEffectOccurred = false;
+  const audit: SecurityAuditSink = {
+    durable: true,
+    record(event) { events.set(event.id, event); },
+    read(id) { return events.get(id); },
+    list() { return [...events.values()]; },
+  };
+  const registry = new MapToolRegistry([{
+    name: "custom.purchase",
+    description: "Simulate an external purchase that times out after submission",
+    inputSchema: { type: "object" },
+    effects: ["write"] as const,
+    async execute() {
+      externalEffectOccurred = true;
+      throw new Error("Provider timed out before returning its receipt.");
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, capabilitySecret: "indeterminate-purchase-test-secret" },
+    async () => true,
+    undefined,
+    undefined,
+    audit,
+  );
+
+  const result = await gateway.execute(
+    { tool: "custom.purchase", input: { orderId: "order-42" } },
+    {
+      runId: "indeterminate-purchase-run",
+      principalId: "authenticated-owner",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(externalEffectOccurred, true);
+  const started = [...events.values()].find((event) => event.decision === "execution_started");
+  const uncertain = [...events.values()].find((event) => event.decision === "indeterminate");
+  assert.ok(started, "the write-ahead receipt must exist before the external call");
+  assert.ok(uncertain, "a timeout after invocation must not be recorded as a confirmed failure");
+  assert.equal(uncertain.relatedEventId, started.id);
+  assert.deepEqual(
+    findIndeterminateExecutions([...events.values()]).map((event) => event.id),
+    [started.id],
+    "the action must remain in reconciliation instead of being considered safe to retry",
+  );
+});
