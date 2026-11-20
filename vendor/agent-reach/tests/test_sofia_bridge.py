@@ -86,7 +86,12 @@ class EmptyYouTubeTranscriptTests(unittest.TestCase):
 
 class ReadOnlyDispatchBoundaryTests(unittest.TestCase):
     def test_handle_rejects_financial_and_account_mutations_before_dispatch(self):
-        for action in ("checkout", "transfer_funds", "pay_invoice", "send_message", "delete_comment"):
+        for action in (
+            "checkout", "transfer_funds", "pay_invoice", "send_message", "delete_comment",
+            "bookmark", "save_post", "connect_account", "invite_user", "accept_invite",
+            "decline_invite", "star_repository", "subscribe_channel", "unsubscribe_channel",
+            "edit_profile", "update_settings", "remove_member", "place_order",
+        ):
             with self.subTest(action=action), patch("sofia_bridge.get_channel", return_value=object()), patch(
                 "sofia_bridge.run_action"
             ) as dispatch:
