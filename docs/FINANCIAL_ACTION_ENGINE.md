@@ -26,3 +26,8 @@ Sofia now has a provider-neutral payment execution foundation. It deliberately d
 `MemoryFinancialActionStore` and `MemoryFinancialLedger` are test/reference implementations only. A production adapter must provide durable, owner-scoped atomic reservation, immutable append-only ledger writes, and crash-safe state transitions. The store reservation and ledger append should share a database transaction or an outbox pattern. Provider adapter must implement the provider official create/verify APIs and signature rules, with secrets held server-side. Add provider sandbox integration tests, reconciliation for `unknown` and `processing`, refunds/disputes, merchant identity checks, and operational alerting before enabling real payments.
 
 No payment provider is currently selected or configured. This module does not claim that Sofia can yet charge a card, transfer funds, or place a real order.
+## Durable local persistence
+
+`FileFinancialActionStore` persists reservations and updates as JSON files with restrictive directory/file permissions, exclusive creation for idempotency reservations, and atomic rename for updates. `FileFinancialLedger` appends JSONL events and syncs each append. These adapters survive process restarts on a persistent local volume.
+
+They are intended for one trusted Sofia process only. They are not a distributed transaction manager or multi-host lock. For multiple processes/replicas, implement the interfaces with a database unique constraint on `(owner_id, idempotency_hash)`, transactional state changes, and an append-only ledger/outbox. Back up and protect the local payment directory; it contains sensitive transaction metadata.
