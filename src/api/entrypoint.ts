@@ -217,6 +217,8 @@ const server = createSofiaApi(deps, {
   resolvePrincipalRunStore: async (authenticatedPrincipalId) => new FileRunRecordStore(
     await principalRunWorkspace.resolveStoreDirectory(authenticatedPrincipalId, "api-runs"),
   ),
+  resolvePrincipalUsageStorePath: async (authenticatedPrincipalId) =>
+    path.join(await principalRunWorkspace.resolveStoreDirectory(authenticatedPrincipalId, "api-usage"), "usage.json"),
   resolvePrincipalCronScheduler: async (authenticatedPrincipalId, principalDeps) => {
     if (!principalDeps.jobRuntime) throw new Error("Tenant JobRuntime is unavailable.");
     const cronDirectory = await principalRunWorkspace.resolveStoreDirectory(authenticatedPrincipalId, "cron");
