@@ -50,9 +50,11 @@ def _video_url(target: str) -> str:
     from agent_reach.utils.url import host_matches
 
     t = str(target).strip()
-    if _VIDEO_ID_RE.match(t):
-        return f"https://www.youtube.com/watch?v={t}"
-    candidate = t if "://" in t else f"https://{t}"
+    candidate = (
+        f"https://www.youtube.com/watch?v={t}"
+        if _VIDEO_ID_RE.match(t)
+        else (t if "://" in t else f"https://{t}")
+    )
     from agent_reach.utils.url import assert_public_http_url
 
     try:
