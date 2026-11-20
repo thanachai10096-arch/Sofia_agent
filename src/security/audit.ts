@@ -11,7 +11,7 @@ export type SecurityAuditEvent = {
   toolName: string;
   actionHash: string;
   risk: RiskLevel;
-  decision: "allow" | "deny" | "approval_required" | "approval_denied" | "approval_approved" | "execution_started" | "completed" | "failed";
+  decision: "allow" | "deny" | "approval_required" | "approval_denied" | "approval_approved" | "execution_started" | "completed" | "failed" | "indeterminate";
   reason?: string;
   input?: unknown;
   result?: unknown;
