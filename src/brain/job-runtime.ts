@@ -11,6 +11,8 @@ import { redactSecrets } from "../security/guard.js";
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export interface JobRecord {
   id: string;
+  /** Stable caller-provided key used for durable, owner-scoped submit deduplication. */
+  idempotencyKey?: string;
   status: JobStatus;
   createdAt: string;
   updatedAt: string;
@@ -70,12 +72,13 @@ function publicJobRecord(record: JobRecord): JobRecord {
   // Lease ownership is an internal concurrency capability and must never be returned
   // to API/Discord clients, even though it remains in the durable store.
   delete safe.leaseOwnerToken;
+  delete safe.idempotencyKey;
   return safe;
 }
 
 
 export interface JobRuntime {
-  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
+  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyKey?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
@@ -380,6 +383,19 @@ class FileJobStateStore {
     }
   }
 
+  async createIfAbsent(record: JobRecord): Promise<{ record: JobRecord; created: boolean }> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      if (record.idempotencyKey) {
+        const existing = records.find(item => item.idempotencyKey === record.idempotencyKey && item.ownerKeyId === record.ownerKeyId);
+        if (existing) return { record: { ...existing }, created: false };
+      }
+      records.push({ ...record });
+      await this.write(records);
+      return { record: { ...record }, created: true };
+    });
+  }
+
   async save(record: JobRecord): Promise<boolean> {
     const operation = this.writes.then(() => this.withFileLock(async () => {
       const records = await this.read();
@@ -440,11 +456,12 @@ export class DurableJobRuntime implements JobRuntime {
     this.state = new FileJobStateStore(namespace);
   }
 
-  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
+  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyKey?: string }): Promise<JobRecord> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const record: JobRecord = {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
       ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
@@ -452,10 +469,11 @@ export class DurableJobRuntime implements JobRuntime {
       ...(input.sessionTask ? { sessionTask: input.sessionTask } : {}),
       notificationDelivered: false,
     };
-    this.jobs.set(id, record);
-    await this.state.save(record);
-    void this.execute(record, input);
-    return publicJobRecord(record);
+    const persisted = await this.state.createIfAbsent(record);
+    const canonical = persisted.record;
+    this.jobs.set(canonical.id, canonical);
+    if (persisted.created) void this.execute(canonical, input);
+    return publicJobRecord(canonical);
   }
 
   private async recoverInterrupted(record: JobRecord): Promise<JobRecord> {
