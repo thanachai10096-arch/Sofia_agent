@@ -115,12 +115,17 @@ export class SofiaPluginHost {
     }
 
     const installed: InstalledPlugin = { id: plugin.id, manifest, disposers: [] };
+    let contextOpen = true;
+    const assertContextOpen = (): void => {
+      if (!contextOpen) throw new Error(`Sofia plugin context for "${plugin.id}" is only valid during installation.`);
+      this.assertActive();
+    };
     const context: SofiaPluginContext = {
       pluginId: plugin.id,
       scope: this.scope,
       ...(this.principalId ? { principalId: this.principalId } : {}),
       registerTool: (tool) => {
-        this.assertActive();
+        assertContextOpen();
         if (!tool.name.trim()) throw new Error("Sofia plugin tool name must not be empty.");
         if (tool.name !== tool.name.trim()) throw new Error("Sofia plugin tool name must not contain surrounding whitespace.");
         if (this.tools.has(tool.name)) throw new Error(`Sofia tool "${tool.name}" is already registered.`);
@@ -141,7 +146,7 @@ export class SofiaPluginHost {
         installed.disposers.push(() => this.tools.delete(tool.name));
       },
       provideService: <T>(name: string, service: T) => {
-        this.assertActive();
+        assertContextOpen();
         if (!name.trim()) throw new Error("Sofia plugin service name must not be empty.");
         if (name !== name.trim()) throw new Error("Sofia plugin service name must not contain surrounding whitespace.");
         if (this.services.has(name)) throw new Error(`Sofia service "${name}" is already provided.`);
@@ -149,6 +154,7 @@ export class SofiaPluginHost {
         installed.disposers.push(() => this.services.delete(name));
       },
       getService: <T>(name: string) => {
+        assertContextOpen();
         const entry = this.services.get(name);
         if (!entry) return undefined;
         if (entry.pluginId !== plugin.id && !(manifest?.dependencies ?? []).includes(entry.pluginId)) {
@@ -157,7 +163,7 @@ export class SofiaPluginHost {
         return entry.value as T;
       },
       onDispose: (disposer) => {
-        this.assertActive();
+        assertContextOpen();
         installed.disposers.push(disposer);
       },
     };
@@ -172,6 +178,7 @@ export class SofiaPluginHost {
       try { this.runDisposers(installed); } catch { /* preserve the original install error */ }
       throw error;
     } finally {
+      contextOpen = false;
       this.installing.delete(plugin.id);
     }
     this.emit("plugin:installed", { pluginId: plugin.id });
