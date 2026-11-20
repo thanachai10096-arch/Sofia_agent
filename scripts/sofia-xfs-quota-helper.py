@@ -135,7 +135,7 @@ def locked_state(state_root):
     lock_path = state_root / "allocations.lock"
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     info = os.fstat(fd)
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077 or info.st_nlink != 1:
         os.close(fd)
         fail("allocation lock is not a private root-owned regular file")
     fcntl.flock(fd, fcntl.LOCK_EX)
