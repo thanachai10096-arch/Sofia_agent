@@ -9,20 +9,24 @@ export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResu
 export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; load?(id:string):RunRecord|undefined; }
 
 /**
- * Contract required before RunRecord persistence can be shared by multiple API
- * instances. Implementations MUST compare the current lease generation and
- * commit the record mutation in the SAME atomic storage transaction (for
- * example, one Redis Lua script or a database conditional write).
+ * Async contract for a genuinely distributed Run Record backend.
  *
- * A separate assertCurrent() followed by save()/remove() is NOT sufficient:
- * ownership can change between those operations. Returning false means the
- * caller's fencing generation is stale and the mutation was not applied.
- *
- * FileRunRecordStore intentionally does not implement this contract.
+ * This deliberately does NOT extend RunRecordStore: loadAllSync() cannot be
+ * implemented correctly by a remote store without a potentially stale local
+ * cache. Reads are tenant-scoped, creation is atomic and non-overwriting, and
+ * every mutation of an owned run is fenced in the same storage transaction.
  */
-export interface FencedRunRecordStore extends RunRecordStore {
- saveFenced(record:RunRecord, lease:import("./run-ownership-store.js").RunOwnershipLease):Promise<boolean>;
- removeFenced(id:string, lease:import("./run-ownership-store.js").RunOwnershipLease):Promise<boolean>;
+export interface DistributedFencedRunRecordStore {
+ /** Atomically create a new queued record; return false if its ID already exists. */
+ create(record: RunRecord): Promise<boolean>;
+ /** Return a record only when it belongs to the supplied principal. */
+ load(id: string, principalId: string): Promise<RunRecord | undefined>;
+ /** List records belonging only to the supplied principal. */
+ list(principalId: string): Promise<RunRecord[]>;
+ /** Atomically compare the current lease and persist this owner's record. */
+ saveFenced(record: RunRecord, lease: import("./run-ownership-store.js").RunOwnershipLease): Promise<boolean>;
+ /** Atomically compare the current lease and remove this owner's record. */
+ removeFenced(id: string, lease: import("./run-ownership-store.js").RunOwnershipLease): Promise<boolean>;
 }
 const SAFE_ID=/^[A-Za-z0-9-]{8,64}$/;
 const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
