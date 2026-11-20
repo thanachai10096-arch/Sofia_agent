@@ -913,6 +913,7 @@ export class SofiaBrain {
     const resumed = input.resume;
     let understanding: TaskUnderstanding | undefined;
     let completedStepIds = new Set<string>();
+    let inFlightStepId: string | undefined;
 
     const checkpointState = async (plan: ExecutionPlan | undefined): Promise<void> => {
       if (!plan || !checkpointId || !understanding) return;
@@ -924,6 +925,7 @@ export class SofiaBrain {
         plan,
         acceptanceCriteria: input.acceptanceCriteria ?? [],
         completedStepIds: [...completedStepIds],
+        ...(inFlightStepId ? { inFlightStepId } : {}),
         checkpointId,
         baselineSnapshotId: baselineId,
         usage: { ...this.usage },
@@ -946,6 +948,12 @@ export class SofiaBrain {
         checkpointId = resumed.checkpointId;
         baselineId = resumed.baselineSnapshotId;
         completedStepIds = new Set(resumed.completedStepIds);
+        inFlightStepId = resumed.inFlightStepId;
+        if (inFlightStepId) {
+          throw new Stop(
+            `Cannot safely resume: step "${inFlightStepId}" may have completed an external side effect before the previous worker stopped. Reconcile its outcome before retrying.`,
+          );
+        }
         this.observations = [...resumed.observations];
         this.diagnoses.push(...resumed.diagnoses);
         this.decisions.push(...resumed.decisions);
@@ -1033,9 +1041,14 @@ export class SofiaBrain {
               }
             }
 
+            // Persist intent before invoking a tool. If the process dies during
+            // an external side effect, recovery must not blindly replay the step.
+            inFlightStepId = step.id;
+            await checkpointState(currentPlan);
             await this.executeStep(step, input.principalId);
             done.add(step.id);
             completedStepIds.add(step.id);
+            inFlightStepId = undefined;
             await checkpointState(currentPlan);
           }
 
