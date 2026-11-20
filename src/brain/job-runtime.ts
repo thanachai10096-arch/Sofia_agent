@@ -77,6 +77,23 @@ function publicJobRecord(record: JobRecord): JobRecord {
 }
 
 
+/**
+ * Persistence contract for durable jobs.
+ *
+ * Implementations used by multiple hosts must make each mutation transactional
+ * and enforce the lease fencing token in the database, not in process memory.
+ */
+export interface JobStateStore {
+  createIfAbsent(record: JobRecord): Promise<{ record: JobRecord; created: boolean }>;
+  claim(id: string, ownerToken: string, leaseMs: number): Promise<JobRecord | undefined>;
+  heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean>;
+  markInterruptedIfExpired(id: string): Promise<JobRecord | undefined>;
+  cancel(id: string): Promise<JobRecord | undefined>;
+  save(record: JobRecord): Promise<boolean>;
+  list(): Promise<JobRecord[]>;
+  get(id: string): Promise<JobRecord | undefined>;
+}
+
 export interface JobRuntime {
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyKey?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
@@ -108,7 +125,7 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
   }
 }
 
-class FileJobStateStore {
+export class FileJobStateStore implements JobStateStore {
   private readonly file: string;
   private readonly lockFile: string;
   private writes: Promise<void> = Promise.resolve();
@@ -441,7 +458,7 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly controllers = new Map<string, AbortController>();
   private readonly resuming = new Set<string>();
   private readonly starting = new Set<string>();
-  private readonly state: FileJobStateStore;
+  private readonly state: JobStateStore;
 
   constructor(
     private readonly brainFactory: (options: {
@@ -452,8 +469,9 @@ export class DurableJobRuntime implements JobRuntime {
     }) => SofiaBrain,
     private readonly runStore?: RunStore,
     namespace = process.cwd(),
+    stateStore?: JobStateStore,
   ) {
-    this.state = new FileJobStateStore(namespace);
+    this.state = stateStore ?? new FileJobStateStore(namespace);
   }
 
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyKey?: string }): Promise<JobRecord> {
