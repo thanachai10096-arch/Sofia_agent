@@ -6,7 +6,12 @@ from typing import Any
 from agent_reach.channels import get_all_channels, get_channel
 from agent_reach.runtime.dispatch import run_action
 
-READ_ONLY_BLOCKED = {"post", "publish", "comment", "like", "follow", "unfollow", "send", "dm", "delete", "upload", "create", "buy", "purchase"}
+READ_ONLY_ACTION_PREFIXES = ("search", "read", "get", "list", "fetch", "retrieve", "show", "view", "info", "metadata", "subtitle", "transcript", "query", "status")
+
+
+def _is_read_only_action(name: str) -> bool:
+    normalized = name.strip().lower()
+    return bool(normalized) and any(normalized == prefix or normalized.startswith(prefix + "_") for prefix in READ_ONLY_ACTION_PREFIXES)
 
 def _channels() -> dict[str, Any]:
     items = []
@@ -20,7 +25,7 @@ def _channels() -> dict[str, Any]:
                  "params": [{"name": p.name, "description": p.help,
                              "required": p.required, "type": getattr(p.type, "__name__", "string")}
                             for p in action.params]}
-                for action in channel.actions if action.name.lower() not in READ_ONLY_BLOCKED
+                for action in channel.actions if _is_read_only_action(action.name)
             ],
         })
     return {"ok": True, "channels": items}
@@ -46,11 +51,13 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("channel and action are required")
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
-    if action_name.lower() in READ_ONLY_BLOCKED:
+    if not _is_read_only_action(action_name):
         raise ValueError("This Agent-Reach action is not enabled in Sofia's read-only integration")
     channel = get_channel(channel_name)
     if channel is None:
         raise ValueError("Unknown channel: " + channel_name)
+    if not any(action.name == action_name for action in channel.actions):
+        raise ValueError("Unknown action for channel: " + action_name)
     timeout = request.get("timeout", 30)
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0 or timeout > 1800:
         raise ValueError("timeout must be between 0 and 1800 seconds")
