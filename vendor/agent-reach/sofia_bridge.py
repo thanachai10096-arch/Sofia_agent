@@ -1,12 +1,28 @@
 """In-process Agent-Reach adapter for Sofia; no external CLI is invoked."""
 from __future__ import annotations
 import json
+import re
 import sys
 from typing import Any
 from agent_reach.channels import get_all_channels, get_channel
 from agent_reach.runtime.dispatch import run_action
 
-READ_ONLY_BLOCKED = {"post", "publish", "comment", "like", "follow", "unfollow", "send", "dm", "delete", "upload", "create", "buy", "purchase"}
+# Agent-Reach action names vary by channel (for example create_post,
+# send_message, or delete_comment). Match verb tokens, not only exact names.
+MUTATING_ACTIONS = {
+    "post", "publish", "comment", "like", "follow", "unfollow", "send", "dm",
+    "delete", "upload", "create", "buy", "purchase", "write", "reply", "share",
+    "retweet", "repost", "subscribe", "unsubscribe", "edit", "update", "remove",
+    "star", "bookmark", "save", "connect", "invite", "accept", "decline",
+    "transfer", "checkout", "order", "pay",
+}
+
+
+def is_mutating_action(name: str) -> bool:
+    """Return True for mutating action names, including compound snake/kebab names."""
+    tokens = set(re.findall(r"[a-z0-9]+", name.lower()))
+    return bool(tokens & MUTATING_ACTIONS)
+
 
 def _channels() -> dict[str, Any]:
     items = []
@@ -20,10 +36,11 @@ def _channels() -> dict[str, Any]:
                  "params": [{"name": p.name, "description": p.help,
                              "required": p.required, "type": getattr(p.type, "__name__", "string")}
                             for p in action.params]}
-                for action in channel.actions if action.name.lower() not in READ_ONLY_BLOCKED
+                for action in channel.actions if not is_mutating_action(action.name)
             ],
         })
     return {"ok": True, "channels": items}
+
 
 def handle(request: dict[str, Any]) -> dict[str, Any]:
     operation = request.get("operation")
@@ -46,7 +63,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("channel and action are required")
     if not isinstance(params, dict):
         raise ValueError("params must be an object")
-    if action_name.lower() in READ_ONLY_BLOCKED:
+    if is_mutating_action(action_name):
         raise ValueError("This Agent-Reach action is not enabled in Sofia's read-only integration")
     channel = get_channel(channel_name)
     if channel is None:
@@ -55,6 +72,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
     if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0 or timeout > 1800:
         raise ValueError("timeout must be between 0 and 1800 seconds")
     return run_action(channel, action_name, params, timeout=float(timeout))
+
 
 def main() -> int:
     try:
@@ -69,6 +87,7 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001 - normalized bridge boundary
         print(json.dumps({"ok": False, "error": {"code": "BRIDGE_ERROR", "message": str(exc)[:500]}}, ensure_ascii=False))
         return 1
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
