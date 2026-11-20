@@ -1156,6 +1156,14 @@ test("DurableJobRuntime reconciles an uncertain tool step and audits the explici
   const reconciled = await runtime.reconcile(submitted.id, stepId, "completed", "owner-a", "Verified in the merchant account");
   assert.equal(reconciled.snapshot?.inFlightStepId, undefined);
   assert.deepEqual(reconciled.snapshot?.completedStepIds, [stepId]);
+  assert.deepEqual(reconciled.snapshot?.reconciliations?.[0]?.observation, {
+    stepId,
+    tool: "purchase",
+    ok: true,
+    evidenceId: reconciled.snapshot?.reconciliations?.[0]?.observation?.evidenceId,
+    preview: "Verified in the merchant account",
+    truncated: false,
+  });
   assert.deepEqual(reconciled.snapshot?.reconciliations?.map((entry) => ({
     stepId: entry.stepId, outcome: entry.outcome, actorId: entry.actorId, note: entry.note,
   })), [{
