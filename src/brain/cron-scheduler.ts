@@ -391,58 +391,58 @@ export class CronScheduler {
   }
   private async runTick(): Promise<void> {
     while (!this.closed && this.active.size < this.maxConcurrent) {
-        const claim = await this.store.transact(async state => {
-          const now = this.now();
-          const activeExecutions = state.history.filter(item => item.status === "claimed" || item.status === "running").length;
-          if (activeExecutions >= this.maxConcurrent) return undefined;
-          const due = state.schedules.filter(s =>
-            s.status === "enabled" &&
+      const claim = await this.store.transact(async state => {
+        const now = this.now();
+        const activeExecutions = state.history.filter(item => item.status === "claimed" || item.status === "running").length;
+        if (activeExecutions >= this.maxConcurrent) return undefined;
+        const due = state.schedules.filter(s =>
+          s.status === "enabled" &&
             Date.parse(s.nextRunAt) <= now.getTime() &&
             !state.history.some(item => item.scheduleId === s.id && (item.status === "claimed" || item.status === "running"))
-          ).sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))[0];
-          if (!due) return undefined;
-          const scheduledFor = due.nextRunAt;
-          const lateByMs = now.getTime() - Date.parse(scheduledFor);
-          const isMisfire = lateByMs >= 60_000;
-          if (due.cron) {
-            const next = isMisfire
-              ? nextCronOccurrence(due.cron, due.timeZone, now)
-              : nextCronOccurrence(due.cron, due.timeZone, new Date(scheduledFor));
-            due.nextRunAt = next.toISOString();
-          } else {
-            // One-time schedules are disabled atomically with their claim.
-            due.status = "disabled";
+        ).sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))[0];
+        if (!due) return undefined;
+        const scheduledFor = due.nextRunAt;
+        const lateByMs = now.getTime() - Date.parse(scheduledFor);
+        const isMisfire = lateByMs >= 60_000;
+        if (due.cron) {
+          const next = isMisfire
+            ? nextCronOccurrence(due.cron, due.timeZone, now)
+            : nextCronOccurrence(due.cron, due.timeZone, new Date(scheduledFor));
+          due.nextRunAt = next.toISOString();
+        } else {
+          // One-time schedules are disabled atomically with their claim.
+          due.status = "disabled";
           }
-          due.updatedAt = now.toISOString();
-          const previous = state.history.find(h => h.scheduleId === due.id && h.scheduledFor === scheduledFor);
-          if (previous) return undefined;
-          if (isMisfire && due.misfirePolicy === "skip") {
-            state.history.push({
-              id: randomUUID(), scheduleId: due.id, scheduledFor, startedAt: now.toISOString(),
+        due.updatedAt = now.toISOString();
+        const previous = state.history.find(h => h.scheduleId === due.id && h.scheduledFor === scheduledFor);
+        if (previous) return undefined;
+        if (isMisfire && due.misfirePolicy === "skip") {
+          state.history.push({
+            id: randomUUID(), scheduleId: due.id, scheduledFor, startedAt: now.toISOString(),
               finishedAt: now.toISOString(), status: "skipped", attempt: 0,
               error: "Missed occurrence skipped by misfire policy",
-            });
-            await this.recordAudit(state, { at: now.toISOString(), actor: "scheduler", action: "schedule.misfire.skipped", scheduleId: due.id, detail: scheduledFor });
-            return { skipped: true as const };
+      });
+        await this.recordAudit(state, { at: now.toISOString(), actor: "scheduler", action: "schedule.misfire.skipped", scheduleId: due.id, detail: scheduledFor });
+          return { skipped: true as const };
           }
-          const execution: CronExecution = {
+        const execution: CronExecution = {
             id: randomUUID(), scheduleId: due.id, scheduledFor, startedAt: now.toISOString(),
-            status: "claimed", attempt: 0,
+          status: "claimed", attempt: 0,
           };
-          state.history.push(execution);
-          await this.recordAudit(state, {
-            at: now.toISOString(), actor: "scheduler",
-            action: isMisfire ? "schedule.misfire.run_once" : "schedule.claimed",
-            scheduleId: due.id, detail: scheduledFor,
-          });
-          return { schedule: { ...due, nextRunAt: scheduledFor }, executionId: execution.id, scheduledFor };
-        });
-        if (!claim) break;
-        if ("skipped" in claim) continue;
-        if (this.active.size >= this.maxConcurrent) break;
-        const controller = new AbortController();
-        this.active.set(claim.schedule.id, controller);
-        if (this.closed) controller.abort(new Error("Cron scheduler is shutting down"));
+        state.history.push(execution);
+        await this.recordAudit(state, {
+          at: now.toISOString(), actor: "scheduler",
+          action: isMisfire ? "schedule.misfire.run_once" : "schedule.claimed",
+          scheduleId: due.id, detail: scheduledFor,
+      });
+        return { schedule: { ...due, nextRunAt: scheduledFor }, executionId: execution.id, scheduledFor };
+      });
+      if (!claim) break;
+      if ("skipped" in claim) continue;
+      if (this.active.size >= this.maxConcurrent) break;
+      const controller = new AbortController();
+      this.active.set(claim.schedule.id, controller);
+      if (this.closed) controller.abort(new Error("Cron scheduler is shutting down"));
       this.trackTask(this.executeClaim(claim.schedule, claim.executionId, claim.scheduledFor, controller), this.activeTasks);
     }
   }
