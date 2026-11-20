@@ -20,9 +20,15 @@ class MutatingActionGuardTests(unittest.TestCase):
                 self.assertTrue(is_mutating_action(action))
 
     def test_allows_research_actions(self):
-        for action in ("search", "read", "get", "list", "fetch", "subtitles", "metadata"):
+        for action in ("search", "read", "get", "list", "fetch", "subtitles", "metadata",
+                       "subtitle", "transcribe", "search_posts", "get_user_profile"):
             with self.subTest(action=action):
                 self.assertFalse(is_mutating_action(action))
+
+    def test_denies_unknown_actions_by_default(self):
+        for action in ("react", "vote", "pin", "open", "run_custom_action", ""):
+            with self.subTest(action=action):
+                self.assertTrue(is_mutating_action(action))
 
 
 if __name__ == "__main__":
@@ -91,6 +97,7 @@ class ReadOnlyDispatchBoundaryTests(unittest.TestCase):
             "bookmark", "save_post", "connect_account", "invite_user", "accept_invite",
             "decline_invite", "star_repository", "subscribe_channel", "unsubscribe_channel",
             "edit_profile", "update_settings", "remove_member", "place_order",
+            "react", "vote", "pin", "run_custom_action",
         ):
             with self.subTest(action=action), patch("sofia_bridge.get_channel", return_value=object()), patch(
                 "sofia_bridge.run_action"
