@@ -480,7 +480,10 @@ test("API routes runs through resolver-issued tenant dependency contexts", async
     assert.notEqual(tenantSessions.get(ownerOneId), tenantSessions.get(ownerTwoId));
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-    await registry.close();
+    assert.deepEqual(closedOwners.sort(), [
+      createHash("sha256").update("tenant-run-owner-one").digest("hex").slice(0, 32),
+      createHash("sha256").update("tenant-run-owner-two").digest("hex").slice(0, 32),
+    ].sort(), "server.close callback must wait for tenant dependency cleanup");
     await rm(root, { recursive: true, force: true });
   }
   assert.deepEqual(closedOwners.sort(), [
