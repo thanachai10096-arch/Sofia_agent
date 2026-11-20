@@ -50,3 +50,20 @@ test("Postgres skill feedback bootstrap rejects partial schema initialization", 
     }), /database unavailable/);
     assert.equal(calls, 2);
 });
+
+test("Postgres skill feedback bootstrap supports operator-managed migrations", async () => {
+  let schemaCalls = 0;
+  const pool = {
+    async query() { schemaCalls += 1; return { rows: [] }; },
+    async connect() { throw new Error("not used"); },
+  };
+  const config = await createPostgresSkillFeedbackHostConfig({
+    pool,
+    initializeSchema: false,
+    resolveScope: () => "tenant:test",
+    resolveSafetyIncidentCount: () => 0,
+  });
+  assert.ok(config.registry);
+  assert.ok(config.ledger);
+  assert.equal(schemaCalls, 0);
+});
