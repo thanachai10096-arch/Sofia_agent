@@ -162,7 +162,7 @@ test("Telegram run completion polling aborts quietly without sending a shutdown 
     signal: controller.signal,
     waitForRun: async (_id, options) => {
       receivedSignal = options.signal;
-      return await new Promise((_resolve, reject) => {
+      return await new Promise<never>((_resolve, reject) => {
         options.signal?.addEventListener("abort", () => reject(new Error("Polling aborted")), { once: true });
       });
     },
