@@ -270,7 +270,11 @@ test("plugin hosts expose an immutable process, run, or principal ownership boun
   const runHost = new SofiaPluginHost({ scope: "run" });
   assert.equal(runHost.scope, "run");
 
-  const principalHost = new SofiaPluginHost({ scope: "principal", principalId: "user-123" });
+  const principalHost = new SofiaPluginHost({
+    scope: "principal",
+    principalId: "user-123",
+    grants: [{ pluginId: "principal.connector", capabilities: ["read", "network"] }],
+  });
   let observed: { scope: string; principalId?: string } | undefined;
   principalHost.use({
     id: "principal.connector",
@@ -344,4 +348,60 @@ test("registered tool schemas are defensive immutable snapshots", () => {
   assert.throws(() => {
     (registered.inputSchema.required as string[]).push("mutated");
   }, TypeError);
+});
+
+
+test("principal-scoped plugin installation requires a trusted exact-ID grant", () => {
+  const denied = new SofiaPluginHost({ scope: "principal", principalId: "user-123" });
+  assert.throws(() => denied.use({
+    id: "unapproved.connector",
+    manifest: { version: "1.0.0", capabilities: ["read"] },
+    install() {},
+  }), /no trusted grant/);
+  assert.deepEqual(denied.listPlugins("user-123"), []);
+
+  const limited = new SofiaPluginHost({
+    scope: "principal",
+    principalId: "user-123",
+    grants: [{ pluginId: "web.connector", capabilities: ["read"] }],
+  });
+  assert.throws(() => limited.use({
+    id: "web.connector",
+    manifest: { version: "1.0.0", capabilities: ["read", "network"] },
+    install() {},
+  }), /ungranted capability "network"/);
+  assert.deepEqual(limited.listPlugins("user-123"), []);
+
+  const allowed = new SofiaPluginHost({
+    scope: "principal",
+    principalId: "user-123",
+    grants: [{ pluginId: "web.connector", capabilities: ["read", "network"] }],
+  });
+  allowed.use({
+    id: "web.connector",
+    manifest: { version: "1.0.0", capabilities: ["read", "network"] },
+    install() {},
+  });
+  assert.deepEqual(allowed.listPlugins("user-123"), ["web.connector"]);
+  assert.throws(() => allowed.listPlugins("user-456"), /access denied/);
+});
+
+test("principal plugin grants are snapshotted and duplicate grant IDs are rejected", () => {
+  const capabilities: ("read" | "network")[] = ["read"];
+  const grants = [{ pluginId: "snapshot.connector", capabilities }];
+  const host = new SofiaPluginHost({ scope: "principal", principalId: "user-123", grants });
+  capabilities.push("network");
+  assert.throws(() => host.use({
+    id: "snapshot.connector",
+    manifest: { version: "1.0.0", capabilities: ["read", "network"] },
+    install() {},
+  }), /ungranted capability "network"/);
+  assert.throws(() => new SofiaPluginHost({
+    scope: "principal",
+    principalId: "user-123",
+    grants: [
+      { pluginId: "duplicate", capabilities: ["read"] },
+      { pluginId: "duplicate", capabilities: ["network"] },
+    ],
+  }), /Duplicate Sofia plugin grant/);
 });
