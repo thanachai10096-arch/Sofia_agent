@@ -214,6 +214,48 @@ test("run-scoped browser cleanup closes the session even when the model never ca
   assert.equal(closes, 1);
 });
 
+test("run cleanup waits for an in-flight browser launch before disposing it", async () => {
+  let finishLaunch!: (session: BrowserSession) => void;
+  let closed = 0;
+  let cleanup: (() => Promise<void>) | undefined;
+  const runtime: BrowserRuntime = {
+    launch: async () => new Promise<BrowserSession>((resolve) => { finishLaunch = resolve; }),
+  };
+  const tools = createBrowserTools(runtime, (dispose) => { cleanup = dispose; });
+  const opening = tools.find((item) => item.name === "browser.open")!.execute({}, {} as never);
+  await Promise.resolve();
+  assert.ok(cleanup);
+  let cleanupFinished = false;
+  const cleaning = cleanup!().then(() => { cleanupFinished = true; });
+  await Promise.resolve();
+  assert.equal(cleanupFinished, false, "cleanup must wait behind the in-flight launch");
+  finishLaunch({
+    id: "late-session",
+    newPage: async () => ({
+      id: "late-page",
+      url: async () => "about:blank",
+      title: async () => "",
+      content: async () => "",
+      goto: async () => {},
+      click: async () => {},
+      type: async () => {},
+      select: async () => {},
+      scroll: async () => {},
+      wait: async () => {},
+      press: async () => {},
+      back: async () => {},
+      forward: async () => {},
+      reload: async () => {},
+      screenshot: async () => "",
+      close: async () => {},
+    }),
+    close: async () => { closed++; },
+  });
+  await opening;
+  await cleaning;
+  assert.equal(closed, 1, "late-created session must be closed by run cleanup");
+});
+
 test("browser.login keeps the authenticated session available across Brain runs", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-browser-login-"));
   try {
