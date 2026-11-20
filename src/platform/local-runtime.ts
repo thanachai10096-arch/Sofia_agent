@@ -10,9 +10,18 @@ const SECRET_NAME = /^(?:\.env(?:\..*)?|id_(?:rsa|ed25519)|credentials(?:\.json)
 const IGNORED_DIRS = new Set([".git", "node_modules", "dist", ".next", "coverage"]);
 const BLOCKED_ENV = /(?:TOKEN|SECRET|PASSWORD|PRIVATE.?KEY|API.?KEY|AUTHORIZATION|AWS_ACCESS_KEY|AWS_SECRET|GITHUB_TOKEN|NPM_TOKEN|COOKIE|CREDENTIAL)/i;
 
-function safeEnv(): NodeJS.ProcessEnv {
+const ALLOWED_AGENT_REACH_SECRETS = new Set(["GROQ_API_KEY", "OPENAI_API_KEY"]);
+
+function safeEnv(extraAllowed: readonly string[] = []): NodeJS.ProcessEnv {
+  const requested = extraAllowed.map((name) => name.toUpperCase());
+  if (requested.some((name) => !ALLOWED_AGENT_REACH_SECRETS.has(name))) {
+    throw new Error("Only explicitly approved Agent-Reach provider credentials may be inherited.");
+  }
+  const allowed = new Set(requested);
   return Object.fromEntries(
-    Object.entries(process.env).filter(([key]) => !BLOCKED_ENV.test(key)),
+    Object.entries(process.env).filter(([key]) =>
+      !BLOCKED_ENV.test(key) || allowed.has(key.toUpperCase()),
+    ),
   );
 }
 
@@ -107,8 +116,15 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
           cwd: path.relative(base, cwd),
           timeoutMs: timeout,
           maxOutputBytes: 8 * 1024 * 1024,
-          allowNetwork: false,
+          allowNetwork: options.allowNetwork === true,
+          allowedEnvironmentVariables: options.allowedEnvironmentVariables ? [...options.allowedEnvironmentVariables] : [],
         });
+      }
+
+      if (options.allowNetwork === false) {
+        throw new Error(
+          "Network isolation was requested, but the process runtime cannot enforce it. Select SOFIA_SANDBOX_MODE=docker with a pinned sandbox image.",
+        );
       }
 
       const result = await execFileAsync(command, args, {
@@ -116,7 +132,7 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
         windowsHide: true,
         maxBuffer: 8 * 1024 * 1024,
         timeout,
-        env: safeEnv(),
+        env: safeEnv(options.allowedEnvironmentVariables),
       });
       return { stdout: result.stdout, stderr: result.stderr, code: 0 };
     } catch (error) {

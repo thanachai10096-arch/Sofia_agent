@@ -1,0 +1,179 @@
+"""Security helpers for untrusted URLs."""
+
+from __future__ import annotations
+
+import ipaddress
+import socket
+import urllib.request
+from urllib.parse import urlsplit
+
+_BLOCKED_PUBLIC_FETCH_HOSTS = {
+    "home.arpa",
+    "instance-data",
+    "internal",
+    "ip6-localhost",
+    "ip6-loopback",
+    "lan",
+    "local",
+    "localdomain",
+    "localhost",
+    "metadata.google.internal",
+}
+_BLOCKED_PUBLIC_FETCH_SUFFIXES = (
+    ".home.arpa",
+    ".internal",
+    ".lan",
+    ".local",
+    ".localdomain",
+    ".localhost",
+)
+
+
+def _literal_ip_address(
+    host: str,
+) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """Parse canonical and legacy IPv4 literal spellings without DNS."""
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+
+    try:
+        packed = socket.inet_aton(host)
+    except OSError:
+        return None
+    return ipaddress.IPv4Address(packed)
+
+
+def normalize_public_http_url(url: str) -> str:
+    """Normalize a URL or reject targets that are not clearly public HTTP(S)."""
+    candidate = str(url or "").strip()
+    if (
+        not candidate
+        or "\\" in candidate
+        or any(
+            character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+            for character in candidate
+        )
+    ):
+        raise ValueError("only public HTTP(S) URLs are allowed")
+    if "://" not in candidate:
+        candidate = f"https://{candidate}"
+
+    try:
+        parsed = urlsplit(candidate)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        # Accessing the port rejects malformed or out-of-range authorities.
+        _ = parsed.port
+    except (TypeError, ValueError):
+        raise ValueError("only public HTTP(S) URLs are allowed") from None
+
+    literal_address = _literal_ip_address(host)
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not host
+        or parsed.username is not None
+        or parsed.password is not None
+        or "%" in host
+        or host in _BLOCKED_PUBLIC_FETCH_HOSTS
+        or host.endswith(_BLOCKED_PUBLIC_FETCH_SUFFIXES)
+        or ("." not in host and literal_address is None)
+        or (literal_address is not None and not literal_address.is_global)
+    ):
+        raise ValueError("only public HTTP(S) URLs are allowed")
+
+    return parsed.geturl()
+
+
+
+def assert_public_http_url(
+    url: str,
+    *,
+    resolver=socket.getaddrinfo,
+) -> str:
+    """Validate URL syntax and reject hostnames with any non-public DNS answer.
+
+    This is a DNS preflight only. It does not pin the address used by urllib or
+    external subprocesses, so callers still need an enforced outbound network
+    boundary to prevent DNS rebinding between validation and connection.
+    """
+    normalized = normalize_public_http_url(url)
+    parsed = urlsplit(normalized)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if _literal_ip_address(host) is not None:
+        return normalized
+    try:
+        answers = resolver(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except OSError:
+        raise ValueError("public HTTP(S) URL host could not be resolved safely") from None
+    if not answers:
+        raise ValueError("public HTTP(S) URL host has no DNS addresses")
+    for answer in answers:
+        try:
+            address = ipaddress.ip_address(answer[4][0].split("%", 1)[0])
+        except (IndexError, TypeError, ValueError):
+            raise ValueError("public HTTP(S) URL host returned an invalid DNS address") from None
+        if not address.is_global:
+            raise ValueError("public HTTP(S) URL host resolves to a non-public address")
+    return normalized
+
+def domain_matches(host: str, *domains: str) -> bool:
+    """Match a hostname/cookie domain exactly or as a real subdomain."""
+    normalized_host = str(host or "").lower().lstrip(".").rstrip(".")
+    if not normalized_host:
+        return False
+    for domain in domains:
+        allowed = domain.lower().lstrip(".").rstrip(".")
+        if normalized_host == allowed or normalized_host.endswith("." + allowed):
+            return True
+    return False
+
+
+def host_matches(url: str, *domains: str) -> bool:
+    """Return whether *url* has an exact allowed host or a real subdomain.
+
+    Only HTTP(S) URLs without userinfo are accepted. Using ``hostname`` rather
+    than substring matching prevents lookalikes such as ``x.com.evil.test`` and
+    userinfo disguises such as ``x.com@evil.test``.
+    """
+    try:
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        # ``hostname`` is permissive: malformed or out-of-range ports only
+        # raise when ``port`` is accessed. Force that validation here so
+        # hostile authorities fail closed.
+        _ = parsed.port
+    except (TypeError, ValueError):
+        return False
+
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return False
+    if not host or parsed.username is not None or parsed.password is not None:
+        return False
+
+    return domain_matches(host, *domains)
+
+
+class PublicOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Revalidate every redirect hop so a public URL cannot redirect to a local host."""
+
+    def __init__(self, resolver=socket.getaddrinfo):
+        super().__init__()
+        self._resolver = resolver
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        assert_public_http_url(newurl, resolver=self._resolver)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def safe_urlopen(url_or_request, *args, **kwargs):
+    """Open only public HTTP(S) URLs and enforce the same rule on redirects."""
+    raw_url = url_or_request.full_url if isinstance(url_or_request, urllib.request.Request) else url_or_request
+    assert_public_http_url(raw_url)
+    opener = urllib.request.build_opener(PublicOnlyRedirectHandler())
+    return opener.open(url_or_request, *args, **kwargs)
+
+
+def safe_build_opener(*handlers):
+    """Build an opener that preserves supplied handlers and validates redirects."""
+    return urllib.request.build_opener(PublicOnlyRedirectHandler(), *handlers)

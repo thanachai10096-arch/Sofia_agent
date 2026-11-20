@@ -54,6 +54,21 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       async execute(input) { const p = page(String(input.pageId)); await p.goto(String(input.url)); return { url: await p.url(), title: await p.title() }; },
     },
     {
+      name: "browser.navigate",
+      description: "Navigate to a URL. Creates a browser page when pageId is omitted; otherwise navigates the supplied page.",
+      inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" } }, required: ["url"], additionalProperties: false },
+      async execute(input) {
+        let target = typeof input.pageId === "string" ? page(input.pageId) : undefined;
+        if (!target) {
+          session ??= await runtime.launch();
+          target = await session.newPage();
+          pages.set(target.id, target);
+        }
+        await target.goto(String(input.url));
+        return { pageId: target.id, url: await target.url(), title: await target.title() };
+      },
+    },
+    {
       name: "browser.click",
       description: "Click a page selector.",
       inputSchema: { type: "object", properties: { pageId: { type: "string" }, selector: { type: "string" } }, required: ["pageId", "selector"], additionalProperties: false },

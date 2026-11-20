@@ -1,0 +1,304 @@
+"""Unit tests for Sofia's read-only Agent-Reach boundary."""
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from sofia_bridge import _read_youtube, handle, is_mutating_action
+
+
+class MutatingActionGuardTests(unittest.TestCase):
+    def test_blocks_compound_mutation_names(self):
+        for action in (
+            "post", "create_post", "send_message", "delete_comment",
+            "publish-video", "reply_to_comment", "upload_file",
+            "purchase_item", "follow_user", "retweet",
+        ):
+            with self.subTest(action=action):
+                self.assertTrue(is_mutating_action(action))
+
+    def test_allows_research_actions(self):
+        for action in ("search", "read", "get", "list", "fetch", "subtitles", "metadata",
+                       "subtitle", "transcribe", "search_posts", "get_user_profile"):
+            with self.subTest(action=action):
+                self.assertFalse(is_mutating_action(action))
+
+    def test_denies_unknown_actions_by_default(self):
+        for action in ("react", "vote", "pin", "open", "run_custom_action", ""):
+            with self.subTest(action=action):
+                self.assertTrue(is_mutating_action(action))
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class YouTubeReadTests(unittest.TestCase):
+    def test_read_includes_thai_captions(self):
+        metadata = {"ok": True, "items": [{"title": "Short", "text": "description", "raw": {}}]}
+        captions = {"ok": True, "items": [{"text": "นี่คือคำบรรยายภาษาไทย", "raw": {"lang": "th"}}]}
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action", side_effect=[metadata, captions]
+        ) as run:
+            result = _read_youtube("https://www.youtube.com/shorts/abcdefghijk", 180)
+        self.assertTrue(result["ok"])
+        self.assertIn("นี่คือคำบรรยายภาษาไทย", result["items"][0]["text"])
+        self.assertEqual(result["items"][0]["raw"]["transcript_source"], "youtube_subtitles")
+        self.assertIn("th,th-TH", run.call_args_list[1].args[2]["lang"])
+
+    def test_does_not_claim_video_was_read_without_transcript(self):
+        metadata = {"ok": True, "items": [{"title": "Short", "text": "description", "raw": {}}]}
+        unavailable = {"ok": False, "error": {"message": "no subtitles"}}
+        no_provider = {"ok": False, "error": {"message": "no provider configured"}}
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action", side_effect=[metadata, unavailable, no_provider]
+        ):
+            result = _read_youtube("https://www.youtube.com/shorts/abcdefghijk", 180)
+        raw = result["items"][0]["raw"]
+        self.assertEqual(raw["content_status"], "metadata_only")
+        self.assertIn("Do not summarize the video as watched", raw["content_warning"])
+
+
+
+
+class EmptyYouTubeTranscriptTests(unittest.TestCase):
+    def test_empty_captions_fall_back_to_speech_transcription(self):
+        metadata = {"ok": True, "items": [{"title": "Short", "text": "description", "raw": {}}]}
+        empty_captions = {"ok": True, "items": []}
+        transcript = {"ok": True, "items": [{"text": "เนื้อหาที่ถอดเสียงได้", "raw": {"lang": "th"}}]}
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action", side_effect=[metadata, empty_captions, transcript]
+        ) as run:
+            result = _read_youtube("https://www.youtube.com/shorts/abcdefghijk", 180)
+        self.assertIn("เนื้อหาที่ถอดเสียงได้", result["items"][0]["text"])
+        self.assertEqual(result["items"][0]["raw"]["content_status"], "transcript_available")
+        self.assertEqual(result["items"][0]["raw"]["transcript_source"], "speech_transcription")
+        self.assertEqual(run.call_count, 3)
+
+    def test_empty_captions_and_empty_transcription_are_metadata_only(self):
+        metadata = {"ok": True, "items": [{"title": "Short", "text": "description", "raw": {}}]}
+        empty_captions = {"ok": True, "items": []}
+        empty_transcript = {"ok": True, "items": []}
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action", side_effect=[metadata, empty_captions, empty_transcript]
+        ):
+            result = _read_youtube("https://www.youtube.com/shorts/abcdefghijk", 180)
+        raw = result["items"][0]["raw"]
+        self.assertEqual(raw["content_status"], "metadata_only")
+        self.assertIn("Do not summarize the video as watched", raw["content_warning"])
+
+
+class ReadOnlyDispatchBoundaryTests(unittest.TestCase):
+    def test_handle_rejects_financial_and_account_mutations_before_dispatch(self):
+        for action in (
+            "checkout", "transfer_funds", "pay_invoice", "send_message", "delete_comment",
+            "bookmark", "save_post", "connect_account", "invite_user", "accept_invite",
+            "decline_invite", "star_repository", "subscribe_channel", "unsubscribe_channel",
+            "edit_profile", "update_settings", "remove_member", "place_order",
+            "react", "vote", "pin", "run_custom_action",
+        ):
+            with self.subTest(action=action), patch("sofia_bridge.get_channel", return_value=object()), patch(
+                "sofia_bridge.run_action"
+            ) as dispatch:
+                with self.assertRaisesRegex(ValueError, "not enabled"):
+                    handle({
+                        "channel": "example",
+                        "action": action,
+                        "params": {"amount": 100},
+                    })
+                dispatch.assert_not_called()
+
+    def test_handle_dispatches_read_only_action(self):
+        channel = object()
+        expected = {"ok": True, "items": []}
+        with patch("sofia_bridge.get_channel", return_value=channel), patch(
+            "sofia_bridge.run_action", return_value=expected
+        ) as dispatch:
+            result = handle({
+                "channel": "example",
+                "action": "search",
+                "params": {"query": "Sofia"},
+            })
+        self.assertEqual(result, expected)
+        dispatch.assert_called_once_with(channel, "search", {"query": "Sofia"}, timeout=30.0)
+
+
+class PublicUrlBoundaryTests(unittest.TestCase):
+    def test_read_rejects_local_and_private_urls_before_channel_dispatch(self):
+        for url in (
+            "http://localhost/admin", "http://127.0.0.1/", "http://10.0.0.5/",
+            "http://169.254.169.254/latest/meta-data/", "http://[::1]/",
+        ):
+            with self.subTest(url=url), patch("sofia_bridge.get_channel") as get_channel_mock:
+                with self.assertRaisesRegex(ValueError, "public HTTP"):
+                    handle({"operation": "read", "url": url})
+                get_channel_mock.assert_not_called()
+
+    def test_action_rejects_private_url_nested_in_params_before_dispatch(self):
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action"
+        ) as dispatch:
+            with self.assertRaisesRegex(ValueError, "public HTTP"):
+                handle({
+                    "channel": "web", "action": "read",
+                    "params": {"target": "http://192.168.1.1/admin"},
+                })
+            dispatch.assert_not_called()
+
+    def test_action_allows_public_url_nested_in_params(self):
+        channel = object()
+        expected = {"ok": True, "items": []}
+        with patch("sofia_bridge.get_channel", return_value=channel), patch(
+            "sofia_bridge.run_action", return_value=expected
+        ) as dispatch:
+            result = handle({
+                "channel": "web", "action": "read",
+                "params": {"target": "https://example.com/article"},
+            })
+        self.assertEqual(result, expected)
+        dispatch.assert_called_once()
+
+
+class PublicDnsPreflightTests(unittest.TestCase):
+    def test_rejects_hostname_with_private_or_mixed_dns_answers(self):
+        from agent_reach.utils.url import assert_public_http_url
+
+        def mixed_answers(host, port, *, type):
+            return [
+                (2, 1, 6, "", ("93.184.216.34", port)),
+                (2, 1, 6, "", ("127.0.0.1", port)),
+            ]
+
+        with self.assertRaisesRegex(ValueError, "non-public address"):
+            assert_public_http_url("https://example.test/path", resolver=mixed_answers)
+
+    def test_rejects_empty_and_unresolvable_dns_answers(self):
+        from agent_reach.utils.url import assert_public_http_url
+
+        with self.assertRaisesRegex(ValueError, "no DNS addresses"):
+            assert_public_http_url("https://empty.test", resolver=lambda *args, **kwargs: [])
+
+        def failed_lookup(*args, **kwargs):
+            raise OSError("DNS unavailable")
+
+        with self.assertRaisesRegex(ValueError, "could not be resolved"):
+            assert_public_http_url("https://offline.test", resolver=failed_lookup)
+
+    def test_accepts_hostname_with_only_public_dns_answers(self):
+        from agent_reach.utils.url import assert_public_http_url
+
+        def public_answers(host, port, *, type):
+            return [(2, 1, 6, "", ("93.184.216.34", port))]
+
+        self.assertEqual(
+            assert_public_http_url("https://example.test/path", resolver=public_answers),
+            "https://example.test/path",
+        )
+
+    def test_public_redirect_requires_public_dns_answers(self):
+        from agent_reach.utils.url import PublicOnlyRedirectHandler
+
+        handler = PublicOnlyRedirectHandler(
+            resolver=lambda host, port, **kwargs: [
+                (2, 1, 6, "", ("127.0.0.1", port))
+            ]
+        )
+        request = __import__("urllib.request", fromlist=["Request"]).Request("https://example.com/start")
+        with self.assertRaisesRegex(ValueError, "non-public address"):
+            handler.redirect_request(request, None, 302, "Found", {}, "https://redirect.example.test/")
+
+class PublicRedirectGuardTests(unittest.TestCase):
+    def test_redirect_handler_rejects_private_redirect_targets(self):
+        from agent_reach.utils.url import PublicOnlyRedirectHandler
+
+        handler = PublicOnlyRedirectHandler()
+        request = __import__("urllib.request", fromlist=["Request"]).Request("https://example.com/start")
+        for target in (
+            "http://127.0.0.1/admin",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/",
+            "http://internal.example.local/",
+        ):
+            with self.subTest(target=target):
+                with self.assertRaisesRegex(ValueError, "public HTTP"):
+                    handler.redirect_request(request, None, 302, "Found", {}, target)
+
+    def test_redirect_handler_allows_public_redirect_targets(self):
+        from agent_reach.utils.url import PublicOnlyRedirectHandler
+
+        handler = PublicOnlyRedirectHandler(
+            resolver=lambda host, port, **kwargs: [
+                (2, 1, 6, "", ("93.184.216.34", port))
+            ]
+        )
+        request = __import__("urllib.request", fromlist=["Request"]).Request("https://example.com/start")
+        redirected = handler.redirect_request(
+            request, None, 302, "Found", {}, "https://docs.example.org/article"
+        )
+        self.assertEqual(redirected.full_url, "https://docs.example.org/article")
+
+
+
+class TranscriptionPublicUrlTests(unittest.TestCase):
+    def test_transcription_uses_shared_public_url_validation(self):
+        from agent_reach.transcribe import _assert_safe_public_url
+
+        with patch("agent_reach.utils.url.assert_public_http_url", side_effect=lambda value: value):
+            self.assertEqual(
+                _assert_safe_public_url("https://example.com/audio"),
+                "https://example.com/audio",
+            )
+
+    def test_transcription_rejects_legacy_private_ip_spellings(self):
+        from agent_reach.transcribe import TranscribeError, _assert_safe_public_url
+
+        for url in (
+            "http://127.1/audio",
+            "http://2130706433/audio",
+            "http://0x7f000001/audio",
+            "http://0177.0.0.1/audio",
+            "http://0xA9FEA9FE/audio",
+            "http://user:pass@example.com/audio",
+            "file:///etc/passwd",
+        ):
+            with self.subTest(url=url):
+                with self.assertRaises(TranscribeError):
+                    _assert_safe_public_url(url)
+
+
+
+class YouTubeUrlValidationTests(unittest.TestCase):
+    def test_video_url_accepts_public_youtube_urls(self):
+        from agent_reach.channels.youtube import _video_url
+
+        with patch("agent_reach.utils.url.assert_public_http_url", side_effect=lambda value: value):
+            self.assertEqual(
+                _video_url("https://www.youtube.com/watch?v=jNQXAC9IVRw"),
+                "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            )
+
+    def test_video_id_still_runs_public_dns_preflight(self):
+        from agent_reach.channels.youtube import _video_url
+
+        with patch("agent_reach.utils.url.assert_public_http_url", side_effect=lambda value: value) as guard:
+            self.assertEqual(
+                _video_url("jNQXAC9IVRw"),
+                "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            )
+        guard.assert_called_once_with("https://www.youtube.com/watch?v=jNQXAC9IVRw")
+
+    def test_video_url_rejects_non_public_and_malformed_targets(self):
+        from agent_reach.channels.youtube import _video_url
+        from agent_reach.runtime.result import ReachError
+
+        for target in (
+            "http://127.0.0.1.evil.test/watch?v=jNQXAC9IVRw",
+            "https://user:pass@www.youtube.com/watch?v=jNQXAC9IVRw",
+            "file://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "http://2130706433/watch?v=jNQXAC9IVRw",
+        ):
+            with self.subTest(target=target):
+                with self.assertRaises(ReachError):
+                    _video_url(target)

@@ -23,6 +23,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install vendored Agent-Reach dependencies
+        run: python -m pip install --disable-pip-version-check -r vendor/agent-reach/requirements.txt
+
+      - name: Test Sofia read-only Agent-Reach action guard
+        working-directory: vendor/agent-reach
+        run: python -m unittest discover -s tests -p 'test_*.py'
+
+      - name: Verify vendored Agent-Reach bridge
+        run: python vendor/agent-reach/sofia_bridge.py --request-base64 eyJvcGVyYXRpb24iOiJjaGFubmVscyJ9
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -42,7 +57,6 @@ jobs:
 
       - name: Build
         run: npm run build
-
 
   container-sandbox-smoke:
     name: Container sandbox integration (Docker)
@@ -79,7 +93,6 @@ jobs:
 
       - name: Verify browser egress proxy against public HTTP and HTTPS
         run: node scripts/browser-egress-proxy-smoke.mjs
-
 
   browser-runtime-smoke:
     name: Playwright browser egress integration

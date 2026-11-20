@@ -197,22 +197,26 @@ export interface ContainerSandboxOptions {
 
 export type ContainerCommandRunner = (
   args: string[],
-  options: { timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal },
+  options: { timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal; allowedEnvironmentVariables?: string[] },
 ) => Promise<{ stdout: string; stderr: string; code: number }>;
 
 function runContainerCli(
   executable: string,
   args: string[],
-  options: { timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal },
+  options: { timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal; allowedEnvironmentVariables?: string[] },
 ): Promise<{ stdout: string; stderr: string; code: number }> {
   if (options.signal?.aborted) return Promise.reject(new Error("Container execution was aborted."));
   const timeoutMs = positiveFinite(options.timeoutMs, "timeoutMs");
   const maxOutputBytes = positiveFinite(options.maxOutputBytes, "maxOutputBytes");
+  const allowedEnv = options.allowedEnvironmentVariables ?? [];
+  if (allowedEnv.some((name) => !/^(?:GROQ_API_KEY|OPENAI_API_KEY)$/.test(name))) {
+    return Promise.reject(new Error("Only approved Agent-Reach provider credentials may be inherited by the Docker client."));
+  }
   const child = spawn(executable, args, {
     shell: false,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => new Set(["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"]).has(key.toUpperCase()))),
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => new Set(["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", ...allowedEnv]).has(key.toUpperCase()))),
   });
 
   return new Promise((resolve, reject) => {
@@ -323,6 +327,7 @@ export class ContainerSandbox implements Sandbox {
     const dockerArgs = [
       "run", "--rm", "--pull=never", "--name", containerName,
       ...containerUserArgs,
+      ...((limits.allowedEnvironmentVariables ?? []).filter((name) => Boolean(process.env[name])).flatMap((name) => ["--env", name])),
       "--network", limits.allowNetwork ? "bridge" : "none",
       "--read-only",
       "--cap-drop=ALL",
@@ -339,7 +344,7 @@ export class ContainerSandbox implements Sandbox {
     ];
     try {
       // Preserve non-zero container exit codes for verification by the caller.
-      return await this.runner(dockerArgs, { timeoutMs, maxOutputBytes, signal });
+      return await this.runner(dockerArgs, { timeoutMs, maxOutputBytes, signal, allowedEnvironmentVariables: limits.allowedEnvironmentVariables });
     } catch (error) {
       // Killing the Docker CLI on timeout/abort can leave the container running.
       // Best-effort cleanup is deliberately independent of the aborted task signal.

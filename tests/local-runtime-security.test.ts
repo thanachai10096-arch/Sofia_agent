@@ -55,6 +55,21 @@ test("workspace search skips secret-named files", async () => {
   }
 });
 
+test("process runtime fails closed when a caller requests network isolation", async () => {
+  const f = await fixture();
+  try {
+    const result = await f.runtime.run(
+      process.execPath,
+      ["-e", "process.exit(0)"],
+      { allowNetwork: false },
+    );
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /process runtime cannot enforce it/);
+  } finally {
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
+
 test("workspace commands enforce timeout and preserve exit status", async () => {
   const f = await fixture();
   try {
