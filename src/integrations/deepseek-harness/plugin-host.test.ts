@@ -12,20 +12,21 @@ function tool(name: string): SofiaTool {
   };
 }
 
-test("plugin host installs tools and services into one Sofia runtime", () => {
+test("plugin host installs tools and exposes registered services", () => {
   const host = new SofiaPluginHost();
+  const counter = { value: 7 };
   host.use({
     id: "test.plugin",
     install(ctx) {
       ctx.registerTool(tool("test.read"));
-      ctx.provideService("test.counter", { value: 7 });
+      ctx.provideService("test.counter", counter);
+      assert.equal(ctx.getService<typeof counter>("test.counter"), counter);
     },
   });
 
   assert.deepEqual(host.listPlugins(), ["test.plugin"]);
   assert.equal(host.listTools()[0]?.name, "test.read");
   assert.equal(host.listTools().length, 1);
-  assert.deepEqual(host.listTools()[0] && { name: host.listTools()[0].name }, { name: "test.read" });
 });
 
 test("plugin host rejects duplicate plugin and tool identities", () => {
@@ -41,20 +42,48 @@ test("failed plugin installation rolls back registrations", () => {
     id: "broken",
     install(ctx) {
       ctx.registerTool(tool("temporary.tool"));
+      ctx.provideService("temporary.service", true);
       throw new Error("installation failed");
     },
   }), /installation failed/);
   assert.deepEqual(host.listTools(), []);
   assert.deepEqual(host.listPlugins(), []);
+  host.use({ id: "recovered", install: (ctx) => ctx.registerTool(tool("temporary.tool")) });
+  assert.deepEqual(host.listPlugins(), ["recovered"]);
 });
 
-test("disposing the host reverses plugin effects and is idempotent", () => {
+test("lifecycle events fire on install and unload", () => {
+  const host = new SofiaPluginHost();
+  const events: string[] = [];
+  host.on("plugin:installed", ({ pluginId }) => events.push(`installed:${pluginId}`));
+  const stop = host.on("plugin:uninstalled", ({ pluginId }) => events.push(`uninstalled:${pluginId}`));
+  host.use({ id: "events.plugin", install() {} });
+  assert.equal(host.unuse("events.plugin"), true);
+  assert.equal(host.unuse("events.plugin"), false);
+  stop();
+  assert.deepEqual(events, ["installed:events.plugin", "uninstalled:events.plugin"]);
+});
+
+test("disposing runs every cleanup in reverse plugin order and is idempotent", () => {
   const host = new SofiaPluginHost();
   const disposed: string[] = [];
   host.use({ id: "first", install(ctx) { ctx.onDispose(() => disposed.push("first")); } });
   host.use({ id: "second", install(ctx) { ctx.onDispose(() => disposed.push("second")); } });
   host.dispose();
   host.dispose();
+  assert.deepEqual(disposed, ["second", "first"]);
+  assert.throws(() => host.listTools(), /disposed/);
+});
+
+test("a failing cleanup does not prevent other plugins from being disposed", () => {
+  const host = new SofiaPluginHost();
+  const disposed: string[] = [];
+  host.use({ id: "first", install(ctx) { ctx.onDispose(() => disposed.push("first")); } });
+  host.use({ id: "second", install(ctx) {
+    ctx.onDispose(() => disposed.push("second"));
+    ctx.onDispose(() => { throw new Error("cleanup failed"); });
+  } });
+  assert.throws(() => host.dispose(), /failed to dispose/);
   assert.deepEqual(disposed, ["second", "first"]);
   assert.throws(() => host.listTools(), /disposed/);
 });
