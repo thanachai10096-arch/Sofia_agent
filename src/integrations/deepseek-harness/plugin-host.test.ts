@@ -205,3 +205,23 @@ test("undeclared custom tools require the destructive capability by default", ()
   });
   assert.equal(host.listTools().length, 1);
 });
+
+
+test("plugin hosts expose an immutable process, run, or principal ownership boundary", () => {
+  const processHost = new SofiaPluginHost();
+  assert.equal(processHost.scope, "process");
+  assert.equal(processHost.principalId, undefined);
+
+  const runHost = new SofiaPluginHost({ scope: "run" });
+  assert.equal(runHost.scope, "run");
+
+  const principalHost = new SofiaPluginHost({ scope: "principal", principalId: "user-123" });
+  let observed: { scope: string; principalId?: string } | undefined;
+  principalHost.use({
+    id: "principal.connector",
+    install(ctx) { observed = { scope: ctx.scope, principalId: ctx.principalId }; },
+  });
+  assert.deepEqual(observed, { scope: "principal", principalId: "user-123" });
+  assert.throws(() => new SofiaPluginHost({ scope: "principal" }), /requires an authenticated principalId/);
+  assert.throws(() => new SofiaPluginHost({ scope: "run", principalId: "user-123" }), /only be set on a principal-scoped/);
+});
