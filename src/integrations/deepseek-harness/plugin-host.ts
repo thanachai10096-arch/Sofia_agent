@@ -50,6 +50,17 @@ export interface SofiaPlugin {
   install(context: SofiaPluginContext): void;
 }
 
+function cloneAndFreezeSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const snapshot = structuredClone(schema);
+  const freeze = (value: unknown): void => {
+    if (value === null || typeof value !== "object" || Object.isFrozen(value)) return;
+    for (const child of Object.values(value)) freeze(child);
+    Object.freeze(value);
+  };
+  freeze(snapshot);
+  return snapshot;
+}
+
 interface InstalledPlugin {
   id: string;
   manifest?: SofiaPluginManifest;
@@ -138,8 +149,12 @@ export class SofiaPluginHost {
             }
           }
         }
+        // Snapshot the schema as well as the tool object. A shallow freeze would
+        // still let a plugin mutate nested properties/required arrays after install
+        // and silently change the arguments accepted by the Tool Gateway.
         const registeredTool: SofiaTool = Object.freeze({
           ...tool,
+          inputSchema: cloneAndFreezeSchema(tool.inputSchema),
           ...(tool.effects ? { effects: Object.freeze([...tool.effects]) } : {}),
         });
         this.tools.set(tool.name, registeredTool);
