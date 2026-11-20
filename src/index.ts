@@ -131,4 +131,4 @@ export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessa
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
 
 export { createSofiaPluginHost, SofiaPluginHost } from "./integrations/deepseek-harness/plugin-host.js";
-export type { SofiaPlugin, SofiaPluginContext, SofiaPluginEventMap, SofiaPluginEventName, SofiaPluginEventListener } from "./integrations/deepseek-harness/plugin-host.js";
+export type { SofiaPlugin, SofiaPluginContext, SofiaPluginManifest, SofiaPluginEventMap, SofiaPluginEventName, SofiaPluginEventListener } from "./integrations/deepseek-harness/plugin-host.js";
