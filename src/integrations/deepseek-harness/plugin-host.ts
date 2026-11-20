@@ -39,6 +39,7 @@ export class SofiaPluginHost {
   private readonly tools = new Map<string, SofiaTool>();
   private readonly services = new Map<string, unknown>();
   private readonly listeners = new Map<SofiaPluginEventName, Set<(payload: never) => void>>();
+  private readonly installing = new Set<string>();
   private disposed = false;
 
   on<K extends SofiaPluginEventName>(
@@ -54,29 +55,42 @@ export class SofiaPluginHost {
 
   use(plugin: SofiaPlugin): void {
     this.assertActive();
-    if (!plugin.id.trim()) throw new Error("Sofia plugin id must not be empty.");
-    if (this.plugins.has(plugin.id)) throw new Error(`Sofia plugin "${plugin.id}" is already installed.`);
+    const pluginId = plugin.id.trim();
+    if (!pluginId) throw new Error("Sofia plugin id must not be empty.");
+    if (this.plugins.has(pluginId) || this.installing.has(pluginId)) {
+      throw new Error(`Sofia plugin "${pluginId}" is already installed or installing.`);
+    }
 
-    const installed: InstalledPlugin = { id: plugin.id, disposers: [] };
+    this.installing.add(pluginId);
+    const installed: InstalledPlugin = { id: pluginId, disposers: [] };
+    let contextActive = true;
+    const assertContextActive = () => {
+      this.assertActive();
+      if (!contextActive) throw new Error(`Sofia plugin "${pluginId}" installation context is no longer active.`);
+    };
     const context: SofiaPluginContext = {
-      pluginId: plugin.id,
+      pluginId,
       registerTool: (tool) => {
-        this.assertActive();
+        assertContextActive();
         if (!tool.name.trim()) throw new Error("Sofia plugin tool name must not be empty.");
         if (this.tools.has(tool.name)) throw new Error(`Sofia tool "${tool.name}" is already registered.`);
         this.tools.set(tool.name, tool);
         installed.disposers.push(() => this.tools.delete(tool.name));
       },
       provideService: <T>(name: string, service: T) => {
-        this.assertActive();
+        assertContextActive();
         if (!name.trim()) throw new Error("Sofia plugin service name must not be empty.");
         if (this.services.has(name)) throw new Error(`Sofia service "${name}" is already provided.`);
         this.services.set(name, service);
         installed.disposers.push(() => this.services.delete(name));
       },
-      getService: <T>(name: string) => this.services.get(name) as T | undefined,
+      getService: <T>(name: string) => {
+        assertContextActive();
+        return this.services.get(name) as T | undefined;
+      },
       onDispose: (disposer) => {
-        this.assertActive();
+        assertContextActive();
+        if (typeof disposer !== "function") throw new Error("Sofia plugin disposer must be a function.");
         installed.disposers.push(disposer);
       },
     };
@@ -85,12 +99,18 @@ export class SofiaPluginHost {
     // in reverse order if a plugin fails halfway through installation.
     try {
       plugin.install(context);
-      this.plugins.set(plugin.id, installed);
+      this.assertActive();
+      this.plugins.set(pluginId, installed);
     } catch (error) {
       try { this.runDisposers(installed); } catch { /* preserve the original install error */ }
       throw error;
+    } finally {
+      // Installation contexts are capabilities, not long-lived handles. A plugin
+      // must finish registering all effects before install() returns.
+      contextActive = false;
+      this.installing.delete(pluginId);
     }
-    this.emit("plugin:installed", { pluginId: plugin.id });
+    this.emit("plugin:installed", { pluginId });
   }
 
   unuse(pluginId: string): boolean {
