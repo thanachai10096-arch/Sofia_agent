@@ -16,6 +16,10 @@ A crash between persisting a claim and persisting the runtime job ID remains inh
 
 Misfires at least one minute late follow the configured policy: `skip` records a skipped occurrence; `run-once` dispatches one coalesced execution and advances the next run beyond the current time. Validate file-lock behavior and recovery before unattended production use. The file store is intended for processes sharing a local filesystem, not multi-host coordination. This is a foundation, not a guarantee of exactly-once delivery.
 
+## API job submission idempotency
+
+`POST /v1/jobs` accepts an optional `Idempotency-Key` header (1–200 characters). The runtime hashes it together with the authenticated owner ID and atomically creates or finds the durable job under the file-store lock. Repeating the same key with the same validated request returns the existing job without dispatching a second execution; reusing the key with a different request returns HTTP 409. The raw key is not persisted. This protects client/network retries and concurrent duplicate submissions, but does not close the crash window between durable queue creation and worker dispatch.
+
 ## Durable Job Runtime recovery boundary
 
 The file-backed `DurableJobRuntime` atomically persists a submitted job as `queued` before it begins the asynchronous lease claim. A process crash in that interval can leave a durable `queued` record. The current runtime reconciles expired `running` leases when jobs are read or listed, but it does not yet have a startup dispatcher that reclaims and starts orphaned `queued` records. Operators must treat such records as pending recovery rather than assuming they will execute automatically.
