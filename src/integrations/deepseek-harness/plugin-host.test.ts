@@ -101,3 +101,33 @@ test("host cannot be repopulated from a disposal callback", () => {
   host.dispose();
   assert.throws(() => host.listPlugins(), /disposed/);
 });
+
+
+test("plugin installation context cannot mutate the host after install returns", () => {
+  const host = new SofiaPluginHost();
+  let retained: import("./plugin-host.js").SofiaPluginContext | undefined;
+  host.use({
+    id: "context-lifetime",
+    install(context) { retained = context; },
+  });
+
+  assert.ok(retained);
+  assert.throws(() => retained!.registerTool(tool("late.tool")), /context is no longer active/);
+  assert.throws(() => retained!.provideService("late.service", true), /context is no longer active/);
+  assert.throws(() => retained!.onDispose(() => undefined), /context is no longer active/);
+  assert.deepEqual(host.listTools(), []);
+});
+
+test("plugin cannot recursively install a second instance with the same identity", () => {
+  const host = new SofiaPluginHost();
+  host.use({
+    id: "recursive",
+    install() {
+      assert.throws(
+        () => host.use({ id: "recursive", install() {} }),
+        /already installed or installing/,
+      );
+    },
+  });
+  assert.deepEqual(host.listPlugins(), ["recursive"]);
+});
