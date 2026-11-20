@@ -55,7 +55,7 @@ test("complete Telegram configuration constructs a runtime without starting netw
     SOFIA_API_BASE_URL: "https://sofia.example.invalid",
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.ok(runtime);
-  await runtime.stop();
+  await Promise.all([runtime.stop(), runtime.stop()]);
   assert.deepEqual(warnings, []);
 });
 
@@ -149,4 +149,31 @@ test("Telegram run completion records timeout and failed delivery separately", a
     "telegram_run_wait_failed run_id=run-timeout kind=timeout",
     "telegram_completion_delivery_failed run_id=run-timeout",
   ]);
+});
+
+
+test("Telegram run completion polling aborts quietly without sending a shutdown notice", async () => {
+  const controller = new AbortController();
+  const sent: Array<{ conversationId: string; text: string }> = [];
+  let receivedSignal: AbortSignal | undefined;
+  const task = reportTelegramRunCompletion({
+    runId: "run-shutdown",
+    conversationId: "chat-456",
+    signal: controller.signal,
+    waitForRun: async (_id, options) => {
+      receivedSignal = options.signal;
+      return await new Promise((_resolve, reject) => {
+        options.signal?.addEventListener("abort", () => reject(new Error("Polling aborted")), { once: true });
+      });
+    },
+    send: async (message) => {
+      sent.push({ conversationId: message.conversationId, text: message.text });
+      return true;
+    },
+  });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(receivedSignal, controller.signal);
+  controller.abort(new Error("shutdown"));
+  await task;
+  assert.deepEqual(sent, []);
 });
