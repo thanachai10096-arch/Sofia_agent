@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sofia_bridge import _read_youtube, is_mutating_action
+from sofia_bridge import _read_youtube, handle, is_mutating_action
 
 
 class MutatingActionGuardTests(unittest.TestCase):
@@ -82,3 +82,32 @@ class EmptyYouTubeTranscriptTests(unittest.TestCase):
         raw = result["items"][0]["raw"]
         self.assertEqual(raw["content_status"], "metadata_only")
         self.assertIn("Do not summarize the video as watched", raw["content_warning"])
+
+
+class ReadOnlyDispatchBoundaryTests(unittest.TestCase):
+    def test_handle_rejects_financial_and_account_mutations_before_dispatch(self):
+        for action in ("checkout", "transfer_funds", "pay_invoice", "send_message", "delete_comment"):
+            with self.subTest(action=action), patch("sofia_bridge.get_channel", return_value=object()), patch(
+                "sofia_bridge.run_action"
+            ) as dispatch:
+                with self.assertRaisesRegex(ValueError, "not enabled"):
+                    handle({
+                        "channel": "example",
+                        "action": action,
+                        "params": {"amount": 100},
+                    })
+                dispatch.assert_not_called()
+
+    def test_handle_dispatches_read_only_action(self):
+        channel = object()
+        expected = {"ok": True, "items": []}
+        with patch("sofia_bridge.get_channel", return_value=channel), patch(
+            "sofia_bridge.run_action", return_value=expected
+        ) as dispatch:
+            result = handle({
+                "channel": "example",
+                "action": "search",
+                "params": {"query": "Sofia"},
+            })
+        self.assertEqual(result, expected)
+        dispatch.assert_called_once_with(channel, "search", {"query": "Sofia"}, timeout=30.0)
