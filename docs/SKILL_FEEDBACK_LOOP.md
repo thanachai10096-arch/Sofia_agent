@@ -62,6 +62,8 @@ const dependencies = await createSofiaAgentDependenciesWithPostgresSkillFeedback
 }, workspace, approval);
 ```
 
+Set `initializeSchema: false` when an operator-managed migration has already created both tables. This allows the runtime role to operate without DDL privileges; the default remains `true` for explicit development/bootstrap workflows. Keep migration credentials separate from the normal Agent process.
+
 The function deliberately accepts a pool rather than importing a database driver. The host owns driver selection, connection lifecycle, TLS, pool sizing, credential rotation, and shutdown. The database role used for schema initialization needs DDL privileges; runtime-only deployments should run migrations separately and use a least-privilege role. The helper does not create or connect a live database, and it does not wire the API entrypoint automatically.
 
 The supplied stores must be backed by durable transactional storage and initialized by the host. The scope resolver must verify the principal's project membership; the safety monitor must query trusted host records. The regular API entrypoint intentionally does not construct these dependencies automatically, because this repository does not currently include a PostgreSQL client or a configured database pool. Therefore the feature is opt-in and remains inactive in the default production entrypoint until an operator supplies these trusted dependencies.
