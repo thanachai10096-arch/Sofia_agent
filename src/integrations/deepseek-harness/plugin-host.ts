@@ -187,18 +187,21 @@ export class SofiaPluginHost {
     return true;
   }
 
-  listTools(): SofiaTool[] {
+  listTools(principalId?: string): SofiaTool[] {
     this.assertActive();
+    this.assertPrincipal(principalId);
     return [...this.tools.values()];
   }
 
-  listPlugins(): string[] {
+  listPlugins(principalId?: string): string[] {
     this.assertActive();
+    this.assertPrincipal(principalId);
     return [...this.plugins.keys()];
   }
 
-  getPluginManifest(pluginId: string): SofiaPluginManifest | undefined {
+  getPluginManifest(pluginId: string, principalId?: string): SofiaPluginManifest | undefined {
     this.assertActive();
+    this.assertPrincipal(principalId);
     const manifest = this.plugins.get(pluginId)?.manifest;
     return manifest ? { ...manifest, capabilities: [...manifest.capabilities], dependencies: [...(manifest.dependencies ?? [])] } : undefined;
   }
@@ -237,6 +240,13 @@ export class SofiaPluginHost {
       try { listener(payload as never); } catch {
         // Observers must not break plugin installation or teardown.
       }
+    }
+  }
+
+  private assertPrincipal(principalId?: string): void {
+    if (this.scope !== "principal") return;
+    if (!principalId?.trim() || principalId.trim() !== this.principalId) {
+      throw new Error("Sofia plugin host access denied: authenticated principal does not own this host.");
     }
   }
 
