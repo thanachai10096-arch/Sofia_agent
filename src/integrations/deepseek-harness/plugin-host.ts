@@ -49,7 +49,7 @@ interface InstalledPlugin {
 export class SofiaPluginHost {
   private readonly plugins = new Map<string, InstalledPlugin>();
   private readonly tools = new Map<string, SofiaTool>();
-  private readonly services = new Map<string, unknown>();
+  private readonly services = new Map<string, { pluginId: string; value: unknown }>();
   private readonly listeners = new Map<SofiaPluginEventName, Set<(payload: never) => void>>();
   private disposed = false;
 
@@ -104,10 +104,17 @@ export class SofiaPluginHost {
         this.assertActive();
         if (!name.trim()) throw new Error("Sofia plugin service name must not be empty.");
         if (this.services.has(name)) throw new Error(`Sofia service "${name}" is already provided.`);
-        this.services.set(name, service);
+        this.services.set(name, { pluginId: plugin.id, value: service });
         installed.disposers.push(() => this.services.delete(name));
       },
-      getService: <T>(name: string) => this.services.get(name) as T | undefined,
+      getService: <T>(name: string) => {
+        const entry = this.services.get(name);
+        if (!entry) return undefined;
+        if (entry.pluginId !== plugin.id && !(manifest?.dependencies ?? []).includes(entry.pluginId)) {
+          throw new Error(`Sofia plugin "${plugin.id}" must declare "${entry.pluginId}" as a dependency to access service "${name}".`);
+        }
+        return entry.value as T;
+      },
       onDispose: (disposer) => {
         this.assertActive();
         installed.disposers.push(disposer);
