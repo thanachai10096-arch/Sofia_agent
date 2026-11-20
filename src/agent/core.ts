@@ -143,15 +143,27 @@ export class SofiaAgent {
       metadata: { kind },
     });
 
-    const report = await brain.run({
-      task: request.task,
-      ...(request.context !== undefined ? { context: request.context } : {}),
-      ...(request.principalId ? { principalId: request.principalId } : {}),
-      ...(request.acceptanceCriteria
-        ? { acceptanceCriteria: request.acceptanceCriteria }
-        : {}),
-      ...(request.signal ? { signal: request.signal } : {}),
+    const stopPluginInstalled = this.deps.pluginHost?.on("plugin:installed", ({ pluginId }) => {
+      emit({ type: "plugin.installed", message: `Plugin ${pluginId} installed.`, metadata: { pluginId } });
     });
+    const stopPluginUninstalled = this.deps.pluginHost?.on("plugin:uninstalled", ({ pluginId }) => {
+      emit({ type: "plugin.uninstalled", message: `Plugin ${pluginId} uninstalled.`, metadata: { pluginId } });
+    });
+    let report: Awaited<ReturnType<typeof brain.run>>;
+    try {
+      report = await brain.run({
+        task: request.task,
+        ...(request.context !== undefined ? { context: request.context } : {}),
+        ...(request.principalId ? { principalId: request.principalId } : {}),
+        ...(request.acceptanceCriteria
+          ? { acceptanceCriteria: request.acceptanceCriteria }
+          : {}),
+        ...(request.signal ? { signal: request.signal } : {}),
+      });
+    } finally {
+      stopPluginInstalled?.();
+      stopPluginUninstalled?.();
+    }
 
     if (!report.completed) {
       emit({
