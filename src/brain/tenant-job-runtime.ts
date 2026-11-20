@@ -104,6 +104,14 @@ export class TenantJobRuntimeRouter implements JobRuntime {
     throw new Error("Unscoped job cancellation is disabled by TenantJobRuntimeRouter.");
   }
 
+  async listForOwner(ownerKeyId: string): Promise<JobRecord[]> {
+    const runtime = await this.runtimeFor(ownerKeyId);
+    if (!runtime.listForOwner) {
+      return (await runtime.list()).filter((record) => record.ownerKeyId === ownerKeyId);
+    }
+    return (await runtime.listForOwner(ownerKeyId)).filter((record) => record.ownerKeyId === ownerKeyId);
+  }
+
   async list(): Promise<JobRecord[]> {
     // Materialize every configured owner runtime so each can load and recover its
     // own persisted jobs after restart before the API returns an aggregate list.
