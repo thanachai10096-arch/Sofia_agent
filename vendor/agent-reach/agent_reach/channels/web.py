@@ -19,7 +19,7 @@ from agent_reach.runtime.result import (
     make_item,
 )
 from agent_reach.runtime.run import http_request
-from agent_reach.utils.url import normalize_public_http_url
+from agent_reach.utils.url import normalize_public_http_url, safe_urlopen
 
 from .base import Action, Channel, Param
 
@@ -186,7 +186,7 @@ class WebChannel(Channel):
             jina_url,
             headers={"User-Agent": _UA, "Accept": "text/plain"},
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with safe_urlopen(req, timeout=timeout) as resp:
             body = resp.read(_MAX_RESPONSE_BYTES + 1)
         if len(body) > _MAX_RESPONSE_BYTES:
             raise ValueError(
