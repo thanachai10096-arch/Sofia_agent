@@ -169,7 +169,7 @@ export class RegistryToolGateway implements ToolGateway {
       const message=String(redactSecrets(error instanceof Error?error.message:String(error)));
       const warnings:string[]=[];
       try {
-        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:redactSecrets(input),...(executionStartReceiptId ? {relatedEventId:executionStartReceiptId} : {})});
+        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision: executionStartReceiptId ? "indeterminate" : "failed",reason:message,input:redactSecrets(input),...(executionStartReceiptId ? {relatedEventId:executionStartReceiptId} : {})});
       } catch {
         warnings.push("Security audit could not persist the tool failure event.");
       }
