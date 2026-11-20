@@ -71,6 +71,37 @@ test("TenantJobRuntimeRouter isolates job submission, lookup, cancellation, and 
   assert.deepEqual(closed.sort(), [ownerOne, ownerTwo]);
 });
 
+test("TenantJobRuntimeRouter hydrates every owner before a cross-runtime job lookup", async () => {
+  const created: string[] = [];
+  const restored: JobRecord = {
+    id: "owner-two-restored-job",
+    ownerKeyId: ownerTwo,
+    task: "restored after process restart",
+    status: "queued",
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  };
+  const router = new TenantJobRuntimeRouter([ownerOne, ownerTwo], (owner) => {
+    created.push(owner);
+    return {
+      async submit() { throw new Error("unused"); },
+      async get(id) { return owner === ownerTwo && id === restored.id ? restored : undefined; },
+      async getForOwner(id, requestedOwner) {
+        return requestedOwner === ownerTwo && id === restored.id ? restored : undefined;
+      },
+      async resume() { throw new Error("unused"); },
+      async resumeForOwner() { throw new Error("unused"); },
+      async cancel() { return false; },
+      async cancelForOwner() { return false; },
+      async list() { return owner === ownerTwo ? [restored] : []; },
+    };
+  });
+
+  assert.deepEqual(await router.get(restored.id), restored);
+  assert.deepEqual(created.sort(), [ownerOne, ownerTwo]);
+  await router.close();
+});
+
 test("TenantJobRuntimeRouter rejects one runtime instance reused across tenants", async () => {
   const shared = fakeRuntime(ownerOne, []);
   const router = new TenantJobRuntimeRouter([ownerOne, ownerTwo], () => shared);
