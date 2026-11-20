@@ -172,6 +172,38 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function unknownToolDiagnostic(name: string, tools: ToolGateway): string {
+  const available = tools.listTools?.() ?? [];
+  const namespace = name.includes(".") ? name.slice(0, name.indexOf(".") + 1) : "";
+  const sameNamespace = namespace ? available.filter((tool) => tool.name.startsWith(namespace)) : [];
+  const candidates = sameNamespace.length ? sameNamespace : available;
+  const distance = (left: string, right: string): number => {
+    const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+    for (let i = 1; i <= left.length; i += 1) {
+      let diagonal = previous[0]!;
+      previous[0] = i;
+      for (let j = 1; j <= right.length; j += 1) {
+        const above = previous[j]!;
+        previous[j] = Math.min(previous[j]! + 1, previous[j - 1]! + 1, diagonal + (left[i - 1] === right[j - 1] ? 0 : 1));
+        diagonal = above;
+      }
+    }
+    return previous[right.length]!;
+  };
+  const suggestions = candidates
+    .map((tool) => ({ name: tool.name, distance: distance(name, tool.name) }))
+    .filter((item) => item.distance <= Math.max(2, Math.floor(name.length * 0.25)))
+    .sort((a, b) => a.distance - b.distance || a.name.localeCompare(b.name))
+    .slice(0, 3)
+    .map((item) => item.name);
+  const catalog = suggestions.length
+    ? " Closest registered tool names: " + suggestions.join(", ") + "."
+    : sameNamespace.length
+      ? " Registered tools in this namespace: " + sameNamespace.slice(0, 8).map((tool) => tool.name).join(", ") + "."
+      : "";
+  return "Unknown or unavailable tool: " + name + "." + catalog + " Use only exact registered tool names.";
+}
+
 function failureCategory(error: unknown): FailureCategory {
   if (error instanceof RecoverableFailure) return error.category;
 
