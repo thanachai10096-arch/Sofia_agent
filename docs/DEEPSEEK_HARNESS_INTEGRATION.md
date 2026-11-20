@@ -46,10 +46,11 @@ copy of Cordis source.
 
 ## Next integration stages
 
-1. Move browser, desktop, messaging, and MCP adapters behind native plugins
-   so every capability uses the same registration lifecycle.
+1. Move messaging and MCP adapters behind native plugins so every capability
+   uses the same registration lifecycle. Browser and desktop tools are already
+   registered in a short-lived host per Brain run.
 2. Bridge plugin lifecycle events to Sofia's existing run/step/tool event stream.
-3. Add tenant-scoped plugin instances and scoped service injection.
+3. Add tenant-scoped process plugin instances and scoped service injection.
 4. Add per-plugin capability manifests and approval metadata.
 5. Evaluate selective upstream source vendoring only where it is compatible
    with Sofia's Node >=20 runtime and does not duplicate core authority.
