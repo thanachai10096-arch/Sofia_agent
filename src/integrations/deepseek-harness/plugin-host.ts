@@ -17,8 +17,18 @@ export type SofiaPluginEventName = keyof SofiaPluginEventMap;
 export type SofiaPluginEventListener<K extends SofiaPluginEventName> =
   (payload: SofiaPluginEventMap[K]) => void;
 
+export type SofiaPluginHostScope = "process" | "run" | "principal";
+
+export interface SofiaPluginHostOptions {
+  readonly scope?: SofiaPluginHostScope;
+  /** Required for principal-scoped hosts; never inferred from plugin input. */
+  readonly principalId?: string;
+}
+
 export interface SofiaPluginContext {
   readonly pluginId: string;
+  readonly scope: SofiaPluginHostScope;
+  readonly principalId?: string;
   registerTool(tool: SofiaTool): void;
   provideService<T>(name: string, service: T): void;
   getService<T>(name: string): T | undefined;
@@ -47,11 +57,24 @@ interface InstalledPlugin {
 }
 
 export class SofiaPluginHost {
+  readonly scope: SofiaPluginHostScope;
+  readonly principalId?: string;
   private readonly plugins = new Map<string, InstalledPlugin>();
   private readonly tools = new Map<string, SofiaTool>();
   private readonly services = new Map<string, { pluginId: string; value: unknown }>();
   private readonly listeners = new Map<SofiaPluginEventName, Set<(payload: never) => void>>();
   private disposed = false;
+
+  constructor(options: SofiaPluginHostOptions = {}) {
+    this.scope = options.scope ?? "process";
+    if (this.scope === "principal" && !options.principalId?.trim()) {
+      throw new Error("A principal-scoped Sofia plugin host requires an authenticated principalId.");
+    }
+    if (this.scope !== "principal" && options.principalId !== undefined) {
+      throw new Error("principalId may only be set on a principal-scoped Sofia plugin host.");
+    }
+    this.principalId = options.principalId?.trim();
+  }
 
   on<K extends SofiaPluginEventName>(
     event: K,
@@ -90,6 +113,8 @@ export class SofiaPluginHost {
     const installed: InstalledPlugin = { id: plugin.id, manifest, disposers: [] };
     const context: SofiaPluginContext = {
       pluginId: plugin.id,
+      scope: this.scope,
+      ...(this.principalId ? { principalId: this.principalId } : {}),
       registerTool: (tool) => {
         this.assertActive();
         if (!tool.name.trim()) throw new Error("Sofia plugin tool name must not be empty.");
@@ -220,7 +245,7 @@ export class SofiaPluginHost {
   }
 }
 
-/** Create a fresh host for one Sofia dependency composition. */
-export function createSofiaPluginHost(): SofiaPluginHost {
-  return new SofiaPluginHost();
+/** Create a fresh host with an explicit lifetime and ownership boundary. */
+export function createSofiaPluginHost(options: SofiaPluginHostOptions = {}): SofiaPluginHost {
+  return new SofiaPluginHost(options);
 }
