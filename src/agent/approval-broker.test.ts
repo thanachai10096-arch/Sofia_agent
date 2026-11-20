@@ -10,7 +10,7 @@ test("approval broker exposes a pending action and accepts one exact hash-bound 
     principalId: "principal-1",
     toolName: "workspace.write_file",
     input: { path: "secret.txt", content: "safe", apiKey: "secret-value" },
-    actionHash: "action-hash-1",
+    actionHash: "a".repeat(64),
     risk: "high",
   });
 
@@ -18,13 +18,29 @@ test("approval broker exposes a pending action and accepts one exact hash-bound 
   assert.ok(record);
   assert.equal(record.runId, "run-1");
   assert.equal(record.toolName, "workspace.write_file");
-  assert.equal(record.actionHash, "action-hash-1");
+  assert.equal(record.actionHash, "a".repeat(64));
   assert.equal(JSON.stringify(record.input).includes("secret-value"), false);
-  assert.equal(await broker.approve(record.id, "wrong-hash", "principal-1"), false);
+  assert.equal(await broker.approve(record.id, "b".repeat(64), "principal-1"), false);
   assert.equal(await broker.approve(record.id, record.actionHash, "another-principal"), false, "another principal cannot decide this request");
   assert.equal(await broker.approve(record.id, record.actionHash, "principal-1"), true);
   assert.equal(await pending, true);
   assert.equal(await broker.deny(record.id, record.actionHash, "principal-1"), false, "terminal decisions cannot be replayed");
+});
+
+
+test("approval broker rejects malformed action hashes before creating an approval", async () => {
+  const store = new InMemoryApprovalDecisionStore();
+  const broker = new ApprovalBroker({ store });
+  assert.equal(await broker.handle({
+    runId: "run-invalid-hash",
+    principalId: "principal-1",
+    toolName: "workspace.write_file",
+    input: {},
+    actionHash: "not-a-sha256-digest",
+    risk: "high",
+  }), false);
+  assert.deepEqual(await broker.listPending("principal-1"), []);
+  assert.equal(await broker.approve("missing", "not-a-sha256-digest", "principal-1"), false);
 });
 
 test("approval broker denies requests without a trusted principal", async () => {
@@ -48,7 +64,7 @@ test("approval broker expires requests and denies late approvals", async () => {
     principalId: "principal-1",
     toolName: "process.execute",
     input: { command: "unsafe" },
-    actionHash: "hash-expire",
+    actionHash: "c".repeat(64),
     risk: "critical",
   });
   const [record] = await broker.listPending("principal-1");
@@ -69,7 +85,7 @@ test("approval broker cancels a pending request when its run is aborted", async 
     principalId: "principal-1",
     toolName: "workspace.write_file",
     input: {},
-    actionHash: "hash-abort",
+    actionHash: "d".repeat(64),
     risk: "high",
     signal: controller.signal,
   });
@@ -91,7 +107,7 @@ test("approval broker bounds the serialized review payload", async () => {
   const broker = new ApprovalBroker({ store: new InMemoryApprovalDecisionStore() });
   await assert.rejects(broker.handle({
     runId: "run-large-input", principalId: "principal-1", toolName: "workspace.write_file",
-    input: { content: "x".repeat(70 * 1024) }, actionHash: "large-input-hash", risk: "high",
+    input: { content: "x".repeat(70 * 1024) }, actionHash: "e".repeat(64), risk: "high",
   }), /64 KiB limit/);
   assert.deepEqual(await broker.listPending("principal-1"), []);
 });
