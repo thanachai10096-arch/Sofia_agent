@@ -71,9 +71,25 @@ export class BrowserProfileSessionManager {
     await this.withLifecycleLock(async () => {
       const key = this.key(ownerId, profileId);
       const current = this.sessions.get(key);
-      if (current) await (await current).close();
+      // Revoke the on-disk credentials even if Chromium refuses to close.
+      // Keep cleanup errors visible, but never leave the profile reusable.
       this.sessions.delete(key);
-      await this.store.revoke(ownerId, profileId);
+      const failures: unknown[] = [];
+      if (current) {
+        try {
+          await (await current).close();
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      try {
+        await this.store.revoke(ownerId, profileId);
+      } catch (error) {
+        failures.push(error);
+      }
+      if (failures.length > 0) {
+        throw new AggregateError(failures, "Browser profile revocation cleanup was incomplete.");
+      }
     });
   }
 
