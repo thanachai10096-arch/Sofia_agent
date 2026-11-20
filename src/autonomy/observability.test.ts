@@ -68,3 +68,31 @@ test("concurrent duplicate writes are recorded once", async () => {
   assert.equal(results.filter((result) => result.recorded).length, 1);
   assert.equal((await telemetry.summarize("tenant-a")).total, 1);
 });
+
+
+test("runtime lifecycle audit is captured as privacy-bounded observability events", async () => {
+  const telemetry = new AutonomyObservability(new InMemoryAutonomyEventStore());
+  const { createAutonomyRuntimeAuditRecorder } = await import("./observability.js");
+  const recordAudit = createAutonomyRuntimeAuditRecorder(telemetry);
+  await recordAudit({
+    type: "autonomy.research.started", principalId: "tenant-user-1",
+    at: "2026-11-20T12:00:00.000Z",
+  });
+  await recordAudit({
+    type: "autonomy.research.completed", principalId: "tenant-user-1",
+    at: "2026-11-20T12:00:02.000Z", cycleCount: 2,
+  });
+  await recordAudit({
+    type: "autonomy.research.failed", principalId: "tenant-user-2",
+    at: "2026-11-20T12:01:00.000Z",
+  });
+  const first = await telemetry.summarize("tenant-user-1");
+  assert.equal(first.total, 2);
+  assert.equal(first.byType["research.started"], 1);
+  assert.equal(first.byType["research.completed"], 1);
+  assert.equal(first.resources.cycles, 2);
+  const second = await telemetry.list("tenant-user-2");
+  assert.equal(second.length, 1);
+  assert.equal(second[0]?.outcome, "failed");
+  assert.equal("error" in (second[0] ?? {}), false);
+});
