@@ -11,6 +11,15 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
   // Serialize session mutations: parallel browser.open/login/close calls must
   // not launch competing sessions or attach pages to a session being replaced.
   let sessionOperation: Promise<void> = Promise.resolve();
+  let closing = false;
+  const activePageOperations = new Set<Promise<unknown>>();
+  const trackPageOperation = <T>(operation: () => Promise<T>): Promise<T> => {
+    if (closing) return Promise.reject(new Error("Browser run is closing; no new page actions are accepted."));
+    const pending = Promise.resolve().then(operation);
+    activePageOperations.add(pending);
+    void pending.finally(() => activePageOperations.delete(pending)).catch(() => undefined);
+    return pending;
+  };
   const withSessionLock = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = sessionOperation.then(operation, operation);
     sessionOperation = result.then(() => undefined, () => undefined);
@@ -34,9 +43,16 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
   // Queue final cleanup behind in-flight session mutations. Brain's abortable
   // wrapper may stop awaiting a tool before its underlying browser promise
   // settles; this barrier prevents a late launch from leaking past onFinally.
-  registerCleanup?.(() => withSessionLock(dispose));
+  registerCleanup?.(() => withSessionLock(async () => {
+    closing = true;
+    // Brain may abort waiting while a Playwright operation is still settling.
+    // Drain those operations before closing tabs or their owning context.
+    await Promise.allSettled([...activePageOperations]);
+    await dispose();
+  }));
 
   const page = (id: string) => {
+    if (closing) throw new Error("Browser run is closing.");
     const value = pages.get(id);
     if (!value) throw new Error("Unknown browser page: " + id);
     return value;
@@ -48,7 +64,9 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       description: "Launch an isolated browser page. Optionally use this user's saved profileId.",
       inputSchema: { type: "object", properties: { profileId: { type: "string" } }, additionalProperties: false },
       async execute(input) {
+        if (closing) throw new Error("Browser run is closing.");
         return withSessionLock(async () => {
+          if (closing) throw new Error("Browser run is closing.");
           if (typeof input.profileId === "string") {
             if (!options.profileSessions || !options.ownerId) throw new Error("Saved browser profiles are unavailable on this host.");
             if (session && activeProfileId !== input.profileId) await dispose();
@@ -72,38 +90,39 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       name: "browser.goto",
       description: "Navigate an existing browser page.",
       inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" } }, required: ["pageId", "url"], additionalProperties: false },
-      async execute(input) { const p = page(String(input.pageId)); await p.goto(String(input.url)); return { url: await p.url(), title: await p.title() }; },
+      async execute(input) { return trackPageOperation(async () => { const p = page(String(input.pageId)); await p.goto(String(input.url)); return { url: await p.url(), title: await p.title() }; }); },
     },
     {
       // Backward-compatible alias used by agent plans and external tool callers.
       name: "browser.navigate",
       description: "Navigate an existing browser page (alias of browser.goto).",
       inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" } }, required: ["pageId", "url"], additionalProperties: false },
-      async execute(input) { const p = page(String(input.pageId)); await p.goto(String(input.url)); return { url: await p.url(), title: await p.title() }; },
+      async execute(input) { return trackPageOperation(async () => { const p = page(String(input.pageId)); await p.goto(String(input.url)); return { url: await p.url(), title: await p.title() }; }); },
     },
     {
       name: "browser.click",
       description: "Click a page selector.",
       inputSchema: { type: "object", properties: { pageId: { type: "string" }, selector: { type: "string" } }, required: ["pageId", "selector"], additionalProperties: false },
-      async execute(input) { await page(String(input.pageId)).click(String(input.selector)); return { ok: true }; },
+      async execute(input) { return trackPageOperation(async () => { await page(String(input.pageId)).click(String(input.selector)); return { ok: true }; }); },
     },
     {
       name: "browser.type",
       description: "Fill a page input.",
       inputSchema: { type: "object", properties: { pageId: { type: "string" }, selector: { type: "string" }, text: { type: "string" } }, required: ["pageId", "selector", "text"], additionalProperties: false },
-      async execute(input) { await page(String(input.pageId)).type(String(input.selector), String(input.text)); return { ok: true }; },
+      async execute(input) { return trackPageOperation(async () => { await page(String(input.pageId)).type(String(input.selector), String(input.text)); return { ok: true }; }); },
     },
     {
       name: "browser.observe",
       description: "Read URL, title and current HTML for evidence.",
       inputSchema: { type: "object", properties: { pageId: { type: "string" } }, required: ["pageId"], additionalProperties: false },
-      async execute(input) { const p=page(String(input.pageId)); return { url: await p.url(), title: await p.title(), content: (await p.content()).slice(0, 50_000) }; },
+      async execute(input) { return trackPageOperation(async () => { const p=page(String(input.pageId)); return { url: await p.url(), title: await p.title(), content: (await p.content()).slice(0, 50_000) }; }); },
     },
     {
       name: "browser.action",
       description: "Perform select, scroll, wait, press, back or forward.",
       inputSchema: { type: "object", properties: { pageId:{type:"string"}, action:{type:"string",enum:["select","scroll","wait","press","back","forward","reload"]}, selector:{type:"string"}, value:{type:"string"}, x:{type:"number"}, y:{type:"number"}, ms:{type:"number"} }, required:["pageId","action"], additionalProperties:false },
       async execute(input) {
+        return trackPageOperation(async () => {
         const p=page(String(input.pageId)); const action=String(input.action);
         if(action==="select") await p.select(String(input.selector),String(input.value));
         else if(action==="scroll") await p.scroll(Number(input.x??0),Number(input.y??500));
@@ -113,13 +132,14 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
         else if(action==="forward") await p.forward();
         else await p.reload();
         return { url: await p.url() };
+        });
       },
     },
     {
       name: "browser.screenshot",
       description: "Capture the current browser page.",
       inputSchema: { type:"object", properties:{pageId:{type:"string"}}, required:["pageId"], additionalProperties:false },
-      async execute(input){ return { imageBase64: await page(String(input.pageId)).screenshot() }; },
+      async execute(input){ return trackPageOperation(async () => ({ imageBase64: await page(String(input.pageId)).screenshot() })); },
     },
     {
       name: "browser.close",
@@ -127,7 +147,8 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       inputSchema: { type:"object", properties:{pageId:{type:"string"}}, additionalProperties:false },
       async execute(input){
         if (typeof input.pageId === "string") {
-          const id = input.pageId;
+          return trackPageOperation(async () => {
+          const id = input.pageId as string;
           const value = page(id);
           try {
             await value.close();
@@ -136,6 +157,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
             pages.delete(id);
           }
           return { ok: true, closed: "page", pageId: id };
+          });
         }
         return withSessionLock(async () => {
           const managedProfileSession = activeProfileId !== undefined;
