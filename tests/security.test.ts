@@ -61,6 +61,22 @@ describe("Sofia security controls",()=>{
     assert.equal(trailingDot.allowed, true);
   });
 
+  it("allows a wildcard host policy only for Sofia Internet Reach tools", () => {
+    const reach = assessAction(
+      { runId: "r", toolName: "internet.reach.read", input: { url: "https://example.org/article" }, effects: ["read", "network"] },
+      [],
+      ["*"],
+    );
+    assert.equal(reach.allowed, true);
+
+    const other = assessAction(
+      { runId: "r", toolName: "custom.fetch", input: { url: "https://example.org/article" }, effects: ["network"] },
+      [],
+      ["*"],
+    );
+    assert.equal(other.allowed, false);
+  });
+
   it("fails closed for Git network operations with opaque configured remotes", () => {
     const fetch = assessAction(
       { runId: "r", toolName: "git.run", input: { command: "git fetch origin" }, effects: ["read", "write", "shell", "network"] },
