@@ -55,7 +55,7 @@ test("SQLite approval payload store encrypts before persistence and decrypts onl
     assert.equal(payloads.save(secret, wrongAction, cipher, 2_001), false);
     assert.equal(payloads.load({ ...context, expiresAt: -1 }, cipher, 2_001), null);
 
-    assert.equal(fs.readFileSync(file).includes(Buffer.from("plaintext-must-never-hit-disk")), false);
+    for (const diskFile of [file, file + "-wal", file + "-shm"]) {\n      if (fs.existsSync(diskFile)) {\n        assert.equal(fs.readFileSync(diskFile).includes(Buffer.from("plaintext-must-never-hit-disk")), false);\n      }\n    }
     assert.equal(metadata.settlePending(record.id, record.principalId, record.actionHash, "approved", 3_000), true);
     assert.equal(payloads.load(context, cipher, 3_001), null);
     assert.equal(payloads.delete(record.id), true);
