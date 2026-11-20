@@ -125,9 +125,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const agent = new SofiaAgent(deps);
   // Per-owner agents are created only through a server-side resolver after authentication.
   const tenantAgents = new Map<string, Promise<{ agent: SofiaAgent; dependencies: AgentDependencies }>>();
-  const agentForOwner = async (ownerKeyId: string): Promise<SofiaAgent> => {
+  const agentForOwner = async (ownerKeyId: string, requiresSessionStore = false): Promise<SofiaAgent> => {
     if (config.tenantDependencyRegistry) {
       const tenantDependencies = await config.tenantDependencyRegistry.getForPrincipal(ownerKeyId);
+      if (requiresSessionStore && !tenantDependencies.sessionStore) {
+        throw new Error("tenant_session_store_required");
+      }
       return new SofiaAgent(tenantDependencies);
     }
     if (!config.dependenciesForOwner) return agent;
@@ -135,6 +138,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     if (!pending) {
       pending = Promise.resolve().then(async () => {
         const tenantDependencies = await config.dependenciesForOwner!(ownerKeyId);
+        if (requiresSessionStore && !tenantDependencies.sessionStore) {
+          throw new Error("tenant_session_store_required");
+        }
         return { agent: new SofiaAgent(tenantDependencies), dependencies: tenantDependencies };
       }).catch((error: unknown) => {
         tenantAgents.delete(ownerKeyId);
@@ -283,7 +289,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
-        const ownerAgent = await agentForOwner(run.ownerKeyId);
+        const ownerAgent = await agentForOwner(run.ownerKeyId, input.sessionId !== undefined);
         const result = await ownerAgent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
@@ -571,7 +577,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         res.on("close", abortOnDisconnect);
         try {
           run.status = "running";
-          const ownerAgent = await agentForOwner(auth.keyId);
+          const ownerAgent = await agentForOwner(auth.keyId, input.sessionId !== undefined);
           const result = await ownerAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
