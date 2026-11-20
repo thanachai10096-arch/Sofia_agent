@@ -1,4 +1,4 @@
-import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { FinancialActionEvent, FinancialActionRecord, FinancialActionStore, FinancialLedger } from "./financial-actions.js";
@@ -43,13 +43,20 @@ export class FileFinancialActionStore implements FinancialActionStore {
     const operation = this.chain.then(async () => {
       await this.ready(); const target = this.filename(record.ownerId, record.idempotencyHash);
       if (!validRecord(record, record.ownerId, record.idempotencyHash)) throw new Error("Refusing to persist an invalid financial action record.");
-      const handle = await open(target, "wx", 0o600).catch(async (error: unknown) => {
-        if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") return undefined;
+      const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
+      await writeFile(temporary, JSON.stringify(record), { encoding: "utf8", mode: 0o600, flag: "wx" });
+      const handle = await open(temporary, "r"); try { await handle.sync(); } finally { await handle.close(); }
+      try { await link(temporary, target); }
+      catch (error) {
+        try { await unlink(temporary); } catch { /* temporary file may already be absent */ }
+        if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") {
+          const existing = await this.find(record.ownerId, record.idempotencyHash);
+          if (!existing) throw new Error("Existing financial action record is invalid.");
+          return { created: false, record: existing };
+        }
         throw error;
-      });
-      if (!handle) { const existing = await this.find(record.ownerId, record.idempotencyHash); if (!existing) throw new Error("Existing financial action record is invalid."); return { created: false, record: existing }; }
-      try { await handle.writeFile(JSON.stringify(record), "utf8"); await handle.sync(); } catch (error) { await handle.close(); try { await unlink(target); } catch { /* best effort cleanup */ } throw error; }
-      await handle.close(); return { created: true, record };
+      }
+      await unlink(temporary); return { created: true, record };
     });
     this.chain = operation.then(() => undefined, () => undefined); return operation;
   }
