@@ -141,7 +141,12 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
       },
     });
   }
-  const tools=createToolRegistry(pluginHost.listTools());
+  // Keep the registry live so plugins installed after startup become available
+  // to the next Agent run without rebuilding Sofia's dependency graph.
+  const tools = {
+    get: (name: string) => pluginHost.listTools().find((tool) => tool.name === name),
+    list: () => pluginHost.listTools(),
+  };
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
@@ -151,7 +156,7 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore();
-  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
+  return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,pluginHost,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
