@@ -71,6 +71,18 @@ test("TenantJobRuntimeRouter isolates job submission, lookup, cancellation, and 
   assert.deepEqual(closed.sort(), [ownerOne, ownerTwo]);
 });
 
+test("TenantJobRuntimeRouter rejects one runtime instance reused across tenants", async () => {
+  const shared = fakeRuntime(ownerOne, []);
+  const router = new TenantJobRuntimeRouter([ownerOne, ownerTwo], () => shared);
+  const outcomes = await Promise.allSettled([
+    router.submit({ task: "owner one", ownerKeyId: ownerOne }),
+    router.submit({ task: "owner two", ownerKeyId: ownerTwo }),
+  ]);
+  assert.equal(outcomes.filter(item => item.status === "fulfilled").length, 1);
+  assert.equal(outcomes.filter(item => item.status === "rejected").length, 1);
+  await router.close();
+});
+
 test("TenantJobRuntimeRouter rejects missing, malformed, and unconfigured owners", async () => {
   assert.throws(() => new TenantJobRuntimeRouter([ownerOne, ownerOne], () => fakeRuntime(ownerOne, [])), /unique/u);
   assert.throws(() => new TenantJobRuntimeRouter(["client-controlled"], () => fakeRuntime(ownerOne, [])), /32-character/u);
