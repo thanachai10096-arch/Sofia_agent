@@ -447,6 +447,16 @@ test("API routes runs through resolver-issued tenant dependency contexts", async
     });
     assert.equal(ownerJob.status, 200);
     assert.equal(otherOwnerJob.status, 404);
+    const foreignCancel = await fetch(baseUrl + "/v1/jobs/" + job.id + "/cancel", {
+      method: "POST",
+      headers: { authorization: "Bearer tenant-run-owner-two" },
+    });
+    assert.equal(foreignCancel.status, 404);
+    const ownerCancel = await fetch(baseUrl + "/v1/jobs/" + job.id + "/cancel", {
+      method: "POST",
+      headers: { authorization: "Bearer tenant-run-owner-one" },
+    });
+    assert.equal(ownerCancel.status, 202);
     const otherOwnerJobs = await fetch(baseUrl + "/v1/jobs", {
       headers: { authorization: "Bearer tenant-run-owner-two" },
     });
