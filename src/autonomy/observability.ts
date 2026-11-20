@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 export type AutonomyEventType =
   | "job.started" | "job.completed" | "job.failed" | "job.cancelled"
+  | "research.started" | "research.completed" | "research.failed"
   | "research.cycle.completed" | "research.cycle.failed" | "research.cycle.denied"
   | "skill.feedback.recorded" | "skill.promoted" | "skill.rolled_back";
 
@@ -53,6 +54,7 @@ export interface AutonomyObservabilitySummary {
 
 const eventTypes = new Set<AutonomyEventType>([
   "job.started", "job.completed", "job.failed", "job.cancelled",
+  "research.started", "research.completed", "research.failed",
   "research.cycle.completed", "research.cycle.failed", "research.cycle.denied",
   "skill.feedback.recorded", "skill.promoted", "skill.rolled_back",
 ]);
@@ -206,4 +208,39 @@ export class InMemoryAutonomyEventStore implements AutonomyEventStore {
       if (this.queues.get(scope) === queued) this.queues.delete(scope);
     }
   }
+}
+
+
+/** Shape emitted by SofiaAutonomyRuntime; error text is intentionally discarded. */
+export interface AutonomyRuntimeAuditEvent {
+  type: "autonomy.research.started" | "autonomy.research.completed" | "autonomy.research.failed";
+  principalId: string;
+  at: string;
+  cycleCount?: number;
+}
+
+/**
+ * Bridges runtime lifecycle audit into bounded telemetry. Scope is the
+ * authenticated principal supplied by the runtime; no model text or raw errors
+ * are persisted. Hosts may compose this with their own audit sink.
+ */
+export function createAutonomyRuntimeAuditRecorder(
+  telemetry: AutonomyObservability,
+): (event: AutonomyRuntimeAuditEvent) => Promise<void> {
+  return async (event) => {
+    const mapping = {
+      "autonomy.research.started": { type: "research.started", outcome: "succeeded" },
+      "autonomy.research.completed": { type: "research.completed", outcome: "succeeded" },
+      "autonomy.research.failed": { type: "research.failed", outcome: "failed" },
+    } as const;
+    const mapped = mapping[event.type];
+    await telemetry.record({
+      scope: event.principalId,
+      idempotencyKey: `runtime:${event.type}:${event.at}`,
+      type: mapped.type,
+      outcome: mapped.outcome,
+      occurredAt: event.at,
+      ...(event.cycleCount !== undefined ? { resource: { cycles: event.cycleCount } } : {}),
+    });
+  };
 }
