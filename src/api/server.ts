@@ -443,6 +443,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
+      if (isCronRequest && config.resolvePrincipalDependencies && !config.resolvePrincipalCronScheduler) {
+        return json(res, 503, { error: "principal_cron_runtime_unavailable" }, origin, config);
+      }
       if (isCronRequest && !requestDeps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       const requestCronScheduler = isCronRequest
         ? await resolveCronScheduler(auth.keyId, requestDeps)
