@@ -470,6 +470,39 @@ export class DurableJobRuntime implements JobRuntime {
     this.state = new FileJobStateStore(namespace);
   }
 
+  /**
+   * Re-dispatch durable jobs that were persisted as queued before a process
+   * stopped. Claiming remains inside execute()/FileJobStateStore so concurrent
+   * workers can race safely: only the worker that acquires the lease runs Brain.
+   *
+   * Call once after the tenant-scoped runtime and its Brain dependencies are ready.
+   * This is deliberately at-least-once dispatch, not exactly-once side effects.
+   */
+  async recoverQueued(): Promise<number> {
+    this.beginAdmission();
+    try {
+      const persisted = await this.state.list();
+      let dispatched = 0;
+      for (const record of persisted) {
+        if (this.closed) break;
+        if (record.status !== "queued" || this.controllers.has(record.id) || this.starting.has(record.id)) continue;
+        const canonical = this.jobs.get(record.id) ?? record;
+        Object.assign(canonical, record);
+        this.jobs.set(record.id, canonical);
+        // execute() atomically claims the persisted record before constructing
+        // the Brain. A competing dispatcher will fail that same durable claim.
+        void this.trackExecution(canonical, {
+          task: canonical.task,
+          ...(canonical.modelRouteId ? { modelRouteId: canonical.modelRouteId } : {}),
+        });
+        dispatched += 1;
+      }
+      return dispatched;
+    } finally {
+      this.endAdmission();
+    }
+  }
+
   async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyId?: string; requestFingerprint?: string }): Promise<JobRecord> {
     this.beginAdmission();
     try {
