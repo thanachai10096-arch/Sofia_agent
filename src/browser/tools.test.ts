@@ -68,6 +68,53 @@ test("parallel browser.open calls share one session and create distinct pages", 
   assert.deepEqual(harness.counts(), { launchCount: 1, sessionCloseCount: 0, pageCloseCount: 0 });
 });
 
+test("run cleanup drains an in-flight page action before closing its session", async () => {
+  let finishClick!: () => void;
+  let cleanup: (() => Promise<void>) | undefined;
+  let sessionClosed = false;
+  const runtime: BrowserRuntime = {
+    launch: async () => ({
+      id: "drain-session",
+      newPage: async () => ({
+        id: "drain-page",
+        url: async () => "https://example.com/",
+        title: async () => "Example",
+        content: async () => "",
+        goto: async () => {},
+        click: async () => new Promise<void>((resolve) => { finishClick = resolve; }),
+        type: async () => {},
+        select: async () => {},
+        scroll: async () => {},
+        wait: async () => {},
+        press: async () => {},
+        back: async () => {},
+        forward: async () => {},
+        reload: async () => {},
+        screenshot: async () => "",
+        close: async () => {},
+      }),
+      close: async () => { sessionClosed = true; },
+    }),
+  };
+  const tools = createBrowserTools(runtime, (dispose) => { cleanup = dispose; });
+  const open = tools.find((item) => item.name === "browser.open")!;
+  const click = tools.find((item) => item.name === "browser.click")!;
+  const opened = await open.execute({}, {} as never) as { pageId: string };
+  const clicking = click.execute({ pageId: opened.pageId, selector: "button" }, {} as never);
+  await Promise.resolve();
+  const cleaning = cleanup!();
+  await Promise.resolve();
+  assert.equal(sessionClosed, false, "session must remain alive while a page action is in flight");
+  await assert.rejects(
+    click.execute({ pageId: opened.pageId, selector: "a" }, {} as never),
+    /closing/,
+  );
+  finishClick();
+  await clicking;
+  await cleaning;
+  assert.equal(sessionClosed, true);
+});
+
 test("browser.navigate remains compatible with plans using the navigate tool name", async () => {
   const harness = setup();
   const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
