@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
+import { PrincipalWorkspaceResolver } from "../platform/principal-workspace.js";
 import { createSofiaAgentDependenciesWithSessions, createSofiaPrincipalDependencyRegistry } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
@@ -22,6 +23,9 @@ const runStoreDirectory = path.resolve(
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 const deps = await createSofiaAgentDependenciesWithSessions(workspace);
 const principalDependencies = createSofiaPrincipalDependencyRegistry(
+  path.resolve(process.env.SOFIA_PRINCIPAL_WORKSPACES_DIR ?? path.join(workspace, ".sofia", "principals")),
+);
+const principalRunWorkspace = new PrincipalWorkspaceResolver(
   path.resolve(process.env.SOFIA_PRINCIPAL_WORKSPACES_DIR ?? path.join(workspace, ".sofia", "principals")),
 );
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
@@ -209,6 +213,9 @@ if (discordConfigured) {
 
 const server = createSofiaApi(deps, {
   resolvePrincipalDependencies: (authenticatedPrincipalId) => principalDependencies.forPrincipal(authenticatedPrincipalId),
+  resolvePrincipalRunStore: async (authenticatedPrincipalId) => new FileRunRecordStore(
+    await principalRunWorkspace.resolveStoreDirectory(authenticatedPrincipalId, "api-runs"),
+  ),
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
