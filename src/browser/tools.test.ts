@@ -13,12 +13,15 @@ function setup() {
   let sessionCloseCount = 0;
   let pageCloseCount = 0;
   let pageCounter = 0;
-  const makePage = (id: string) => ({
+  const navigatedUrls: string[] = [];
+  const makePage = (id: string) => {
+    let currentUrl = "about:blank";
+    return ({
     id,
-    url: async () => "about:blank",
+    url: async () => currentUrl,
     title: async () => "",
     content: async () => "",
-    goto: async () => {},
+    goto: async (url: string) => { currentUrl = url; navigatedUrls.push(url); },
     click: async () => {},
     type: async () => {},
     select: async () => {},
@@ -31,6 +34,7 @@ function setup() {
     screenshot: async () => "",
     close: async () => { pageCloseCount++; },
   } satisfies BrowserPage);
+  };
   const runtime = {
     launch: async () => {
       launchCount++;
@@ -50,6 +54,7 @@ function setup() {
   return {
     tool,
     counts: () => ({ launchCount, sessionCloseCount, pageCloseCount }),
+    navigatedUrls,
   };
 }
 
@@ -60,7 +65,8 @@ test("browser.navigate remains compatible with plans using the navigate tool nam
     { pageId: opened.pageId, url: "https://example.com/" },
     {} as never,
   ) as { url: string; title: string };
-  assert.deepEqual(result, { url: "about:blank", title: "" });
+  assert.deepEqual(result, { url: "https://example.com/", title: "" });
+  assert.deepEqual(harness.navigatedUrls, ["https://example.com/"]);
 });
 
 test("browser.close closes only the requested page when pageId is provided", async () => {
