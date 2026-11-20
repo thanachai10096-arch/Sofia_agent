@@ -69,6 +69,17 @@ test("mutating actions are blocked before invoking the embedded package", async 
   assert.equal(calls.length, 0);
 });
 
+test("generic channel actions reject compound mutating verbs before reaching the bridge", async () => {
+  const { calls, runtime, get } = harness();
+  const action = get("internet.reach.action");
+  for (const name of ["delete_post", "create_issue", "purchase_item", "send_message", "upload_file"]) {
+    await assert.rejects(action.execute({
+      channel: "github", action: name, params: {},
+    }, { runtime }), /not enabled/);
+  }
+  assert.equal(calls.length, 0);
+});
+
 test("read rejects non-HTTP schemes, credentials, local and IP-literal destinations", async () => {
   const { calls, runtime, get } = harness();
   const tool = get("internet.reach.read");
