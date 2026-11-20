@@ -336,6 +336,25 @@ class QuotaHelperTests(unittest.TestCase):
             with self.assertRaises(HELPER.HelperError):
                 HELPER.assert_workspace_registry_consistent(root, allocations)
 
+    def test_allocation_state_rejects_hard_linked_registry_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            target = state / "allocations.json"
+            target.write_text("{}", encoding="utf-8")
+            target.chmod(0o600)
+            (state / "registry-alias").hardlink_to(target)
+            with self.assertRaises(HELPER.HelperError):
+                HELPER.load_allocations(state)
+
+    def test_lock_rejects_hard_linked_lock_file(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            lock = state / "allocations.lock"
+            lock.touch(mode=0o600)
+            (state / "lock-alias").hardlink_to(lock)
+            with self.assertRaises(HELPER.HelperError):
+                HELPER.locked_state(state)
+
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
         self.assertEqual(HELPER.PROJECT_ID_MAX, 299999)
