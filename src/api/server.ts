@@ -11,6 +11,7 @@ import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import { safeErrorMessage } from "./error-safety.js";
 
 interface ActiveRun {
   id: string;
@@ -239,7 +240,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           run.error = run.controller.signal.reason instanceof Error ? run.controller.signal.reason.message : "Run cancelled.";
         } else {
           run.status = "failed";
-          run.error = error instanceof Error ? error.message : "Agent failed";
+          run.error = safeErrorMessage(error, "Agent failed");
         }
       } finally {
         clearTimeout(timer);
@@ -515,8 +516,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         } catch (error) {
           run.status = controller.signal.aborted ? "cancelled" : "failed";
           run.error = controller.signal.aborted
-            ? controller.signal.reason instanceof Error ? controller.signal.reason.message : "Run cancelled."
-            : error instanceof Error ? error.message : "Agent failed";
+            ? safeErrorMessage(controller.signal.reason, "Run cancelled.")
+            : safeErrorMessage(error, "Agent failed");
           send({ type: "error", runId, status: run.status, error: run.error });
         }
         send({ type: "done", runId });
@@ -574,7 +575,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
           }
           try { usage.consume(auth.keyId); } catch (error) {
-            return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+            return json(res, 429, { error: "quota_exceeded", message: safeErrorMessage(error, "Quota exceeded") }, origin, config);
           }
           const runId = randomUUID();
           const run: ActiveRun = {
@@ -609,7 +610,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
 
         try { usage.consume(auth.keyId); } catch (error) {
-          return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
+          return json(res, 429, { error: "quota_exceeded", message: safeErrorMessage(error, "Quota exceeded") }, origin, config);
         }
 
         const controller = new AbortController();
@@ -637,7 +638,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 502, {
             id: runId,
             status: "failed",
-            error: controller.signal.aborted ? "Request timed out or was cancelled." : error instanceof Error ? error.message : "Agent failed",
+            error: controller.signal.aborted ? safeErrorMessage(controller.signal.reason, "Request timed out or was cancelled.") : safeErrorMessage(error, "Agent failed"),
           }, origin, config);
         } finally {
           clearTimeout(timer);
@@ -687,7 +688,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             const created = await cronScheduler.create(scheduleInput, auth.keyId);
             return json(res, 201, created, origin, config);
           } catch (error) {
-            const message = error instanceof Error ? error.message : "Invalid cron schedule";
+            const message = safeErrorMessage(error, "Invalid cron schedule");
             return json(res, message.startsWith("Schedule quota exceeded") ? 429 : 400, { error: message.startsWith("Schedule quota exceeded") ? "quota_exceeded" : "invalid_cron_schedule", message }, origin, config);
           }
         }
@@ -695,7 +696,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           try {
             return json(res, 200, { history: await cronScheduler.history(historyMatch[1]!, auth.keyId) }, origin, config);
           } catch (error) {
-            const message = error instanceof Error ? error.message : "Cron history unavailable";
+            const message = safeErrorMessage(error, "Cron history unavailable");
             const status = message === "Unknown cron schedule" ? 404 : message.startsWith("Not authorized") ? 403 : 400;
             return json(res, status, { error: "cron_history_unavailable", message }, origin, config);
           }
@@ -705,7 +706,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             const updated = await cronScheduler.setEnabled(actionMatch[1]!, actionMatch[2] === "enable", auth.keyId);
             return json(res, 200, updated, origin, config);
           } catch (error) {
-            const message = error instanceof Error ? error.message : "Cron schedule update failed";
+            const message = safeErrorMessage(error, "Cron schedule update failed");
             const status = message === "Unknown cron schedule" ? 404 : message.startsWith("Not authorized") ? 403 : 400;
             return json(res, status, { error: "cron_schedule_update_failed", message }, origin, config);
           }
@@ -718,7 +719,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               ? json(res, 200, { id: cancelMatch[1], status: "disabled" }, origin, config)
               : json(res, 404, { error: "cron_schedule_not_found" }, origin, config);
           } catch (error) {
-            const message = error instanceof Error ? error.message : "Cron schedule cancellation failed";
+            const message = safeErrorMessage(error, "Cron schedule cancellation failed");
             const status = message.startsWith("Not authorized") ? 403 : 400;
             return json(res, status, { error: "cron_schedule_cancel_failed", message }, origin, config);
           }
@@ -741,7 +742,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (req.method === "POST" && action === "resume") {
           try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
-          catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
+          catch (error) { return json(res, 409, { error: "job_resume_failed", message: safeErrorMessage(error, "Resume failed") }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
           const cancelled = await deps.jobRuntime.cancel(jobId);
@@ -773,7 +774,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           });
           return json(res, 202, job, origin, config);
         } catch (error) {
-          return json(res, 502, { error: "job_submit_failed", message: error instanceof Error ? error.message : "Job submission failed" }, origin, config);
+          return json(res, 502, { error: "job_submit_failed", message: safeErrorMessage(error, "Job submission failed") }, origin, config);
         }
       }
 
