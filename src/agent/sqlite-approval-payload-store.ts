@@ -108,7 +108,7 @@ export class SqliteApprovalPayloadStore {
         FROM approval_payloads p
         JOIN approvals a ON a.id = p.approval_id
         WHERE a.id = ? AND a.principal_id = ? AND a.run_id = ? AND a.tool_name = ?
-          AND a.action_hash = ? AND a.expires_at = ? AND a.status = 'pending' AND a.expires_at > ?
+          AND a.action_hash = ? AND a.expires_at = ? AND a.status IN ('pending', 'approved') AND a.expires_at > ?
       `).get(context.approvalId, context.principalId, context.runId, context.toolName,
         context.actionHash, context.expiresAt, now) as { envelope_json: string } | undefined;
       if (!row || Buffer.byteLength(row.envelope_json, "utf8") > MAX_ENVELOPE_BYTES) return null;
