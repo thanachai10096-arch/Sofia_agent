@@ -272,6 +272,51 @@ class QuotaHelperTests(unittest.TestCase):
             reset_calls = [call for call in run_mock.call_args_list if "limit -p bhard=0 ihard=0" in " ".join(call.args[0])]
             self.assertEqual(len(reset_calls), 1)
 
+
+    def test_atomic_state_write_failure_preserves_previous_registry(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp) / "state"
+            state.mkdir()
+            original = {"run-a": {"project_id": HELPER.PROJECT_ID_MIN}}
+            target = state / "allocations.json"
+            target.write_text('{"previous":true}', encoding="utf-8")
+
+            with patch.object(HELPER.os, "replace", side_effect=OSError("simulated crash before replace")):
+                with self.assertRaises(OSError):
+                    HELPER.save_allocations(state, original)
+
+            self.assertEqual(target.read_text(encoding="utf-8"), '{"previous":true}')
+            self.assertEqual(list(state.glob("allocations.*.tmp")), [])
+
+    def test_allocation_state_rejects_duplicate_project_ids_and_unknown_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp)
+            duplicate = {
+                "123e4567-e89b-42d3-a456-426614174010": {
+                    "project_id": HELPER.PROJECT_ID_MIN,
+                    "workspace": "/mnt/work/run-a",
+                    "bytes": 8 * 1024 * 1024,
+                    "inodes": HELPER.INODE_LIMIT,
+                    "status": "active",
+                },
+                "123e4567-e89b-42d3-a456-426614174011": {
+                    "project_id": HELPER.PROJECT_ID_MIN,
+                    "workspace": "/mnt/work/run-b",
+                    "bytes": 8 * 1024 * 1024,
+                    "inodes": HELPER.INODE_LIMIT,
+                    "status": "active",
+                },
+            }
+            (state / "allocations.json").write_text(__import__("json").dumps(duplicate), encoding="utf-8")
+            with self.assertRaises(HELPER.HelperError):
+                HELPER.load_allocations(state)
+
+            duplicate.pop("123e4567-e89b-42d3-a456-426614174011")
+            duplicate["123e4567-e89b-42d3-a456-426614174010"]["status"] = "finished"
+            (state / "allocations.json").write_text(__import__("json").dumps(duplicate), encoding="utf-8")
+            with self.assertRaises(HELPER.HelperError):
+                HELPER.load_allocations(state)
+
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
         self.assertEqual(HELPER.PROJECT_ID_MAX, 299999)
