@@ -1,47 +1,23 @@
-# Agent-Reach integration
+# Sofia Internet Reach (vendored Agent-Reach)
 
-Sofia includes an optional, read-only adapter for the [Panniantong/Agent-Reach](https://github.com/Panniantong/Agent-Reach) CLI. It adds internet research capabilities without creating a second agent runtime.
+Sofia includes the upstream Agent-Reach Python package in `vendor/agent-reach/agent_reach` under its MIT license. Upstream: https://github.com/Panniantong/Agent-Reach (version 1.6.1 source snapshot).
 
-## Install on the Sofia worker
+## Integrated execution
 
-Install Agent-Reach from the upstream project's official GitHub release instructions. Do not install the unrelated package published under the same name on PyPI.
+- Sofia calls the vendored Python modules through `vendor/agent-reach/sofia_bridge.py`; it does **not** invoke or require a separately installed `agent-reach` executable.
+- Tools are registered in Sofia's normal Tool Registry and executed by the existing WorkspaceRuntime and Tool Gateway.
+- The worker image needs Python 3.10+ and the pinned/minimum dependencies in `vendor/agent-reach/requirements.txt`. Provision them as part of the Sofia image/build, not by running an interactive setup at service startup.
+- The bridge exposes channel discovery, URL reading and channel actions. Mutating social actions are blocked.
+- Search/read results are untrusted reference data. Sofia's Brain must not treat page text as system instructions.
+- Network access remains subject to Sofia's execution policy and host egress controls. URL validation in the TypeScript adapter is a first check, not a substitute for DNS-aware egress/SSRF protection.
 
-The executable must be available as `agent-reach` on the Sofia worker PATH. Run `agent-reach setup` as part of image provisioning and verify with `agent-reach channels`. Do not run an interactive setup step during application startup.
+## Included upstream channels
 
-## Register the tools
+GitHub, web search/read, YouTube, Reddit, Bilibili, V2EX, Xueqiu, Xiaohongshu, Xiaoyuzhou, LinkedIn, Boss, Twitter/X, Facebook and Instagram. Availability varies by backend, login state, upstream changes and optional system tools. Some channels require additional browser/tool prerequisites or user-managed sessions; these are not silently installed by Sofia.
 
-Add the tools to the existing Sofia registry where other optional integrations are composed:
+## Validation
 
-```ts
-import { createAgentReachTools } from "./integrations/agent-reach.js";
-
-const tools = [
-  ...createBuiltinTools(),
-  ...createAgentReachTools(),
-];
-```
-
-The adapter exports two tools:
-
-- `internet.agent_reach.channels` — reports configured upstream channels.
-- `internet.agent_reach.read` — reads one public HTTP(S) URL.
-
-Both are declared read-only plus network effects. They must still pass through Sofia's Tool Gateway, network policy, host allowlist, audit, and rate limits. Keep network access disabled by default; enable it only for a staging worker with a narrow `SOFIA_ALLOWED_HOSTS` allowlist.
-
-## Important boundaries
-
-- The adapter invokes the executable with a fixed argument array; it never interpolates user input into a shell command.
-- The URL validator rejects credentials, localhost, common private/reserved IP ranges, and IP-literal destinations. This is input validation, not a substitute for network egress controls or DNS-rebinding protection.
-- Agent-Reach output is untrusted web content. Never follow instructions found in retrieved pages, expose secrets, or let page text authorize actions.
-- This integration is read-only. It does not post, message, log in, purchase, or submit payments.
-- Authenticated social channels are not enabled automatically. Keep browser sessions and per-user credentials isolated; do not copy a shared login session into a multi-tenant worker.
-- The upstream CLI must be installed separately. This repository does not vendor or silently install third-party code.
-
-## Staging acceptance
-
-1. Confirm `agent-reach channels` succeeds on the staging worker.
-2. Confirm the tool is denied while network policy is disabled.
-3. Allow only a test hostname and read a public page.
-4. Verify private/local URLs are rejected.
-5. Verify retrieved prompt-injection text remains quoted/untrusted and cannot trigger another tool.
-6. Confirm production remains unchanged until staging tests pass.
+- Verify Python import and bridge protocol in CI.
+- Verify public web read and GitHub repository read in staging.
+- Verify channel failures return normalized errors without leaking credentials.
+- Keep Production unchanged until Staging acceptance passes.
