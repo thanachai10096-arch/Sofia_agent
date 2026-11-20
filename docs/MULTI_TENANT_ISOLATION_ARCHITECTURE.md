@@ -175,3 +175,12 @@ Do not enable self-service multi-tenant access until:
 - a security review confirms no cross-tenant read/write path remains.
 
 A green typecheck or unit suite alone is not sufficient evidence of tenant isolation.
+
+
+## Tenant-owned conversation sessions
+
+API run requests with a `sessionId` require the selected tenant dependency bundle to expose its own `sessionStore`; the API fails closed with `tenant_session_store_required` when a tenant registry or owner resolver returns a bundle without one. This prevents a tenant-aware API run from silently falling back to the process-wide dependency bundle's transcript store.
+
+Hosts can construct the registry factory with `createSofiaAgentDependenciesForTenantWithSessions(resolver, context, approval)`. It validates the resolver-issued context and opens the durable SQLite transcript database partitioned by the server-derived 32-character API owner ID. Existing legacy transcripts for that owner are copied before use by the existing retry-safe migration. The helper is exported from the package entrypoint.
+
+The API integration test sends the same conversation ID for two authenticated API owners and verifies distinct tenant session stores and owner-prefixed session records. This covers the API routing contract; hosts must still configure the tenant registry factory to use the tenant session helper rather than an in-memory or shared store.
