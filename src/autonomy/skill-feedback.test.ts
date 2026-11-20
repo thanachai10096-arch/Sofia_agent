@@ -121,3 +121,21 @@ test("feedback rejects idempotency-key reuse with altered outcome", async () => 
     /reused with different feedback/,
   );
 });
+
+
+test("feedback refuses to draft revisions when evidence digests conflict", async () => {
+  const ledger = new SkillFeedbackLedger(new InMemorySkillFeedbackStore());
+  await ledger.record(base);
+  await ledger.record({ ...base, candidateDigest: "b".repeat(64), idempotencyKey: "different-digest" });
+  const summary = await ledger.summarize("project-a", "repair-build", "v1");
+  assert.equal(summary?.integrityValid, false);
+  assert.equal(summary?.recommendation, "review");
+  let called = false;
+  const proposal = await proposeSkillImprovement(
+    { name: "repair-build", trigger: "Build fails", category: "runtime_error", strategy: "fix-implementation", procedure: ["inspect"], verification: ["test"], evidenceIds: [] },
+    summary!,
+    async () => { called = true; throw new Error("must not run"); },
+  );
+  assert.equal(proposal, null);
+  assert.equal(called, false);
+});
