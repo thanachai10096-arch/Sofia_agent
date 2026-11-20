@@ -3,7 +3,7 @@ export type SofiaPlatform="windows"|"macos"|"linux";
 export interface WorkspaceRuntime {
   readonly platform:SofiaPlatform; cwd():Promise<string>; readFile(path:string):Promise<string>; writeFile(path:string,content:string):Promise<void>;
   listFiles(path?:string):Promise<string[]>; search(query:string,path?:string):Promise<string[]>;
-  run(command:string,args?:string[],options?:{cwd?:string;timeoutMs?:number;allowNetwork?:boolean}):Promise<{stdout:string;stderr:string;code:number}>;
+  run(command:string,args?:string[],options?:{cwd?:string;timeoutMs?:number;allowNetwork?:boolean;allowedEnvironmentVariables?:readonly string[]}):Promise<{stdout:string;stderr:string;code:number}>;
   git(args:string[],options?:{cwd?:string;timeoutMs?:number}):Promise<{stdout:string;stderr:string;code:number}>;
 }
 export function detectPlatform():SofiaPlatform{switch(process.platform){case"win32":return"windows";case"darwin":return"macos";default:return"linux";}}
