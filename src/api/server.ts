@@ -329,7 +329,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           try {
             const entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
             await requestDeps.userMemoryStore!.save(auth.keyId, entry);
-            const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
+            const saved = (await requestDeps.userMemoryStore!.list(auth.keyId)).find((item) => item.id === entry.id);
             if (!saved) return json(res, 500, { error: "memory_write_failed" }, origin, config);
             return json(res, 201, { memory: saved }, origin, config);
           } catch {
@@ -394,7 +394,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const adminScope = config.securityAdminScope ?? "security:admin";
       const isSecurityAdmin = auth.scopes.includes(adminScope);
       if (req.method === "GET" && req.url === "/v1/models") {
-        const routes = deps.router.listRoutes?.();
+        const routes = requestDeps.router.listRoutes?.();
         if (!routes) return json(res, 503, { error: "model_selection_unavailable" }, origin, config);
         return json(res, 200, {
           automaticSelection: true,
@@ -768,7 +768,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       if (req.method === "POST" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+        if (!requestDeps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
