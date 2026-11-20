@@ -28,7 +28,7 @@ function validEnvelope(value: unknown): value is EncryptedApprovalPayload {
  * This is a same-host SQLite primitive, not a multi-host coordination layer.
  */
 export class SqliteApprovalPayloadStore {
-  private constructor(private readonly db: SqliteDatabase, private readonly filePath: string) {}
+  private constructor(private readonly db: SqliteDatabase) {}
 
   static async open(filePath: string): Promise<SqliteApprovalPayloadStore> {
     if (!filePath.trim() || filePath === ":memory:") {
@@ -67,7 +67,7 @@ export class SqliteApprovalPayloadStore {
         db.exec("ROLLBACK;");
         throw error;
       }
-      return new SqliteApprovalPayloadStore(db, absolutePath);
+      return new SqliteApprovalPayloadStore(db);
     } catch (error) {
       db.close();
       throw error;
