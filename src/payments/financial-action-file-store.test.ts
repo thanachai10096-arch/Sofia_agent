@@ -23,6 +23,22 @@ test("atomically updates a reserved action and rejects unknown records", async (
     await assert.rejects(store.update({ ...updated, id: "123e4567-e89b-12d3-a456-426614174001" }));
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+test("rejects changes to transaction terms after reservation", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sofia-financial-"));
+  try { const store = new FileFinancialActionStore(dir); await store.reserve(record());
+    await assert.rejects(store.update({ ...record(), amountMinor: 999 }), /immutable/);
+    assert.equal((await store.find("acct-a", "a".repeat(64)))?.amountMinor, 100);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+test("prevents terminal payment status from being downgraded", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "sofia-financial-"));
+  try { const store = new FileFinancialActionStore(dir); await store.reserve(record());
+    const succeeded = { ...record(), status: "succeeded" as const, updatedAt: "2026-11-20T10:01:00.000Z" };
+    await store.update(succeeded);
+    await assert.rejects(store.update({ ...succeeded, status: "processing", updatedAt: "2026-11-20T10:02:00.000Z" }), /Terminal/);
+    assert.equal((await store.find("acct-a", "a".repeat(64)))?.status, "succeeded");
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
 test("appends immutable JSONL audit events", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "sofia-ledger-")), filename = path.join(dir, "audit", "payments.jsonl");
   try { const ledger = new FileFinancialLedger(filename); const event = { id: "123e4567-e89b-12d3-a456-426614174000", actionId: "123e4567-e89b-12d3-a456-426614174001", type: "prepared" as const, occurredAt: "2026-11-20T10:00:00.000Z", details: { amountMinor: 100 } };
