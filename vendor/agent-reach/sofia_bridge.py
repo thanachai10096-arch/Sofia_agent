@@ -4,6 +4,7 @@ import base64
 import json
 import re
 import sys
+import time
 from typing import Any
 from agent_reach.channels import get_all_channels, get_channel
 from agent_reach.runtime.dispatch import run_action
@@ -48,21 +49,31 @@ def _read_youtube(target: str, timeout: float) -> dict[str, Any]:
     channel = get_channel("youtube")
     if channel is None:
         raise ValueError("YouTube channel is not bundled")
-    metadata = run_action(channel, "read", {"target": target}, timeout=timeout)
+    deadline = time.monotonic() + timeout
+    metadata = run_action(channel, "read", {"target": target}, timeout=min(timeout, 20))
     if not metadata.get("ok"):
         return metadata
 
     # Agent-Reach's upstream default subtitle languages omit Thai. Prefer Thai first.
-    captions = run_action(
-        channel,
-        "subtitle",
-        {"target": target, "lang": "th,th-TH,en,en-US,en-GB,en-orig,zh-Hans"},
-        timeout=timeout,
-    )
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        captions = {"ok": False, "error": {"message": "YouTube read time budget exhausted before captions."}}
+    else:
+        captions = run_action(
+            channel,
+            "subtitle",
+            {"target": target, "lang": "th,th-TH,en,en-US,en-GB,en-orig,zh-Hans"},
+            timeout=min(40, remaining),
+        )
     source = "youtube_subtitles"
     if not captions.get("ok"):
         # Audio transcription is optional and only runs when the user configured a provider.
-        transcript = run_action(channel, "transcribe", {"target": target}, timeout=min(timeout, 1800))
+        remaining = deadline - time.monotonic()
+        transcript = (
+            run_action(channel, "transcribe", {"target": target}, timeout=remaining)
+            if remaining > 1
+            else {"ok": False, "error": {"message": "YouTube read time budget exhausted before speech transcription."}}
+        )
         if transcript.get("ok"):
             captions = transcript
             source = "speech_transcription"
