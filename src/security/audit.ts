@@ -53,20 +53,30 @@ export class CompositeSecurityAudit implements SecurityAuditSink {
  * These records are indeterminate, not safe to replay automatically.
  */
 export function findIndeterminateExecutions(events: readonly SecurityAuditEvent[]): SecurityAuditEvent[] {
-  const startsById = new Map(
-    events.filter((event) => event.decision === "execution_started").map((event) => [event.id, event]),
-  );
+  const startsById = new Map<string, SecurityAuditEvent[]>();
+  for (const event of events) {
+    if (event.decision !== "execution_started") continue;
+    const matches = startsById.get(event.id) ?? [];
+    matches.push(event);
+    startsById.set(event.id, matches);
+  }
   const resolved = new Set<string>();
   for (const event of events) {
     if ((event.decision !== "completed" && event.decision !== "failed") || !event.relatedEventId) continue;
-    const start = startsById.get(event.relatedEventId);
-    if (start && start.runId === event.runId &&
+    const matches = startsById.get(event.relatedEventId);
+    // A duplicate receipt ID makes the journal ambiguous. Never let a terminal
+    // event resolve one of several starts that share the same identifier.
+    if (!matches || matches.length !== 1) continue;
+    const start = matches[0]!;
+    if (start.runId === event.runId &&
         start.principalId === event.principalId && start.toolName === event.toolName &&
         start.actionHash === event.actionHash) {
       resolved.add(start.id);
     }
   }
-  return [...startsById.values()].filter((event) => !resolved.has(event.id));
+  return [...startsById.values()].flat().filter((event) =>
+    (startsById.get(event.id)?.length ?? 0) !== 1 || !resolved.has(event.id),
+  );
 }
 
 /**
