@@ -7,11 +7,16 @@ from agent_reach.channels import get_all_channels, get_channel
 from agent_reach.runtime.dispatch import run_action
 
 READ_ONLY_ACTION_PREFIXES = ("search", "read", "get", "list", "fetch", "retrieve", "show", "view", "info", "metadata", "subtitle", "transcript", "query", "status")
+MUTATING_ACTION_WORDS = {"create", "delete", "update", "edit", "post", "publish", "comment", "like", "follow", "unfollow", "send", "dm", "upload", "buy", "purchase", "subscribe", "unsubscribe", "join", "leave", "react", "vote", "star", "fork", "merge", "push", "commit", "reply", "share", "bookmark", "save", "report"}
 
 
 def _is_read_only_action(name: str) -> bool:
     normalized = name.strip().lower()
-    return bool(normalized) and any(normalized == prefix or normalized.startswith(prefix + "_") for prefix in READ_ONLY_ACTION_PREFIXES)
+    words = set(normalized.replace("-", "_").split("_"))
+    return bool(normalized) and not words.intersection(MUTATING_ACTION_WORDS) and any(
+        normalized == prefix or normalized.startswith(prefix + "_")
+        for prefix in READ_ONLY_ACTION_PREFIXES
+    )
 
 def _channels() -> dict[str, Any]:
     items = []
