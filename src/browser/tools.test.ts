@@ -13,12 +13,14 @@ function setup() {
   let sessionCloseCount = 0;
   let pageCloseCount = 0;
   let pageCounter = 0;
-  const makePage = (id: string) => ({
+  const makePage = (id: string) => {
+    let currentUrl = "about:blank";
+    return {
     id,
-    url: async () => "about:blank",
+    url: async () => currentUrl,
     title: async () => "",
     content: async () => "",
-    goto: async () => {},
+    goto: async (url: string) => { currentUrl = url; },
     click: async () => {},
     type: async () => {},
     select: async () => {},
@@ -30,7 +32,8 @@ function setup() {
     reload: async () => {},
     screenshot: async () => "",
     close: async () => { pageCloseCount++; },
-  } satisfies BrowserPage);
+  } satisfies BrowserPage;
+  };
   const runtime = {
     launch: async () => {
       launchCount++;
@@ -59,7 +62,7 @@ test("browser.navigate creates a page when pageId is omitted", async () => {
     pageId: string; url: string; title: string;
   };
   assert.equal(result.pageId, "page-1");
-  assert.equal(result.url, "about:blank");
+  assert.equal(result.url, "https://example.com");
   assert.equal(result.title, "");
   assert.equal(harness.counts().launchCount, 1);
   await harness.tool("browser.observe").execute({ pageId: result.pageId }, {} as never);
