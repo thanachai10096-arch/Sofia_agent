@@ -16,7 +16,8 @@ async function setup() {
     evidenceIds: ["evaluation-run-1"],
   };
   const digest = digestSkillCandidate(candidate);
-  const registry = new ControlledSkillRegistry(new InMemorySkillRegistryStore());
+  const registryStore = new InMemorySkillRegistryStore();
+  const registry = new ControlledSkillRegistry(registryStore);
   const promoted = await registry.promote({
     identity: { actor: "owner-1", scope: "project-1" },
     candidate,
@@ -28,13 +29,13 @@ async function setup() {
     expectedActiveVersion: null,
   });
   assert.equal(promoted.ok, true);
-  return { candidate, registry, ledger: new SkillFeedbackLedger(new InMemorySkillFeedbackStore()) };
+  return { candidate, registryStore, ledger: new SkillFeedbackLedger(new InMemorySkillFeedbackStore()) };
 }
 
 test("Brain skill execution events record feedback for the active registered version", async () => {
-  const { registry, ledger } = await setup();
+  const { registryStore, ledger } = await setup();
   const recorder = createBrainSkillFeedbackRecorder({
-    registry: registry["store"] as never,
+    registry: registryStore,
     ledger,
     resolveScope: async (principalId) => principalId === "user-1" ? "project-1" : "",
     resolveSafetyIncidentCount: async () => 0,
