@@ -57,10 +57,13 @@ export async function verifyPayment(
     return { ...base, status: "unknown", verified: false, provider: adapter.provider, reason: "Provider response is missing or was not authenticated." };
   }
   const provider = payment.provider.trim();
+  const validStatus = payment.status === "succeeded" || payment.status === "processing" || payment.status === "failed";
   const identityMatches = provider.length > 0 && payment.provider === adapter.provider &&
-    payment.orderReference === expected.orderReference && payment.amountMinor === expected.amountMinor &&
-    payment.currency === expected.currency && Number.isSafeInteger(payment.amountMinor) &&
-    payment.providerPaymentId.trim().length > 0 && Number.isFinite(Date.parse(payment.observedAt));
+    typeof payment.orderReference === "string" && payment.orderReference === expected.orderReference &&
+    Number.isSafeInteger(payment.amountMinor) && payment.amountMinor === expected.amountMinor &&
+    typeof payment.currency === "string" && payment.currency === expected.currency &&
+    typeof payment.providerPaymentId === "string" && payment.providerPaymentId.trim().length > 0 &&
+    typeof payment.observedAt === "string" && Number.isFinite(Date.parse(payment.observedAt)) && validStatus;
   if (!identityMatches) {
     return { ...base, status: "mismatch", verified: false, provider: provider || adapter.provider, reason: "Authenticated provider data does not match the expected order, amount, currency, or identity." };
   }
