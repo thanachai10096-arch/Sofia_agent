@@ -818,3 +818,43 @@ test("API close drains active cron execution before its close callback", async (
     await rm(cronStoreRoot, { recursive: true, force: true });
   }
 });
+
+
+test("cached owner dependencies cannot bypass the tenant session-store requirement", async () => {
+  let factoryCalls = 0;
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "shared fallback must not run" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { "tenant-no-session-store": ["agent:run", "agent:read"] },
+    dependenciesForOwner: async () => {
+      factoryCalls += 1;
+      return {
+        provider: { generate: async () => ({ text: "owner dependency" }) },
+        router: { select: () => route, markUnhealthy: () => undefined },
+        reviewer: { review: async () => ({ approved: true, reason: "owner scoped" }) },
+      };
+    },
+  });
+
+  try {
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address !== "string");
+    const url = "http://127.0.0.1:" + address.port + "/v1/agent/runs";
+    const request = async (sessionId?: string) => fetch(url, {
+      method: "POST",
+      headers: { authorization: "Bearer tenant-no-session-store", "content-type": "application/json" },
+      body: JSON.stringify({ task: "verify session isolation", ...(sessionId ? { sessionId } : {}) }),
+    });
+    const withoutSession = await request();
+    assert.equal(withoutSession.status, 200);
+    const withSession = await request("must-not-fall-back-to-shared-store");
+    assert.equal(withSession.status, 502);
+    assert.match((await withSession.json() as { error: string }).error, /tenant_session_store_required/u);
+    assert.equal(factoryCalls, 1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
