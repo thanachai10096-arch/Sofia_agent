@@ -674,7 +674,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             res.setHeader("retry-after", "2");
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
           }
-          try { usage.consume(auth.keyId); } catch (error) {
+          try { requestUsage.consume(auth.keyId); } catch (error) {
             return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
           }
           const runId = randomUUID();
@@ -709,7 +709,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 202, publicResponse(run), origin, config);
         }
 
-        try { usage.consume(auth.keyId); } catch (error) {
+        try { requestUsage.consume(auth.keyId); } catch (error) {
           return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
         }
 
@@ -727,7 +727,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
-            onEvent: (event) => { countToolCall(auth.keyId, controller, event); },
+            onEvent: (event) => { countToolCall(requestUsage, auth.keyId, controller, event); },
           });
           if (controller.signal.aborted) {
             const reason = controller.signal.reason instanceof Error ? controller.signal.reason.message : "Request timed out or was cancelled.";
@@ -864,7 +864,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const selectionError = modelSelectionError(input, requestDeps);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
-        try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
+        try { requestUsage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
           const job = await requestDeps.jobRuntime!.submit({
             task: input.task,
