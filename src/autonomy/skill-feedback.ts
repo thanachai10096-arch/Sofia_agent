@@ -86,18 +86,11 @@ export class SkillFeedbackLedger {
         if (!existing) throw new Error("Skill feedback idempotency index is inconsistent.");
         const samePayload = existing.skillName === input.skillName && existing.skillVersion === input.skillVersion &&
           existing.candidateDigest === input.candidateDigest && existing.outcome === input.outcome &&
-          existing.safetyIncidentCount === input.safetyIncidentCount &&
-          existing.recordedBy === input.actor &&
-          JSON.stringify(existing.evidenceIds) === JSON.stringify([...new Set(input.evidenceIds)]);
-        if (!samePayload) throw new Error("Idempotency key was reused with different feedback.");
-        const samePayload = existing.skillName === input.skillName && existing.skillVersion === input.skillVersion &&
-          existing.candidateDigest === input.candidateDigest && existing.outcome === input.outcome &&
           existing.safetyIncidentCount === input.safetyIncidentCount && existing.recordedBy === input.actor &&
           JSON.stringify(existing.evidenceIds) === JSON.stringify([...new Set(input.evidenceIds)]);
         if (!samePayload) throw new Error("Idempotency key was reused with different feedback.");
         return { recorded: false, feedback: existing };
       }
-      if (state.entries.length >= 10000) throw new Error("Skill feedback retention limit reached for this scope.");
       if (state.entries.length >= 10000) throw new Error("Skill feedback retention limit reached for this scope.");
       const id = createHash("sha256")
         .update([input.scope, input.idempotencyKey, input.skillName, input.skillVersion].join("\n"))
