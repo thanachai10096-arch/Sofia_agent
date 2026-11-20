@@ -19,6 +19,7 @@ agent, a second server, or a child CLI.
 - Service injection is restricted to the provider plugin and explicitly declared dependents.
 - Plugin install/uninstall lifecycle events are bridged into the active Sofia Agent run event stream.
 - Hosts declare an immutable lifetime/ownership scope: process, run, or principal. Principal-scoped hosts require an authenticated `principalId`, and installed plugins receive that binding in their context.
+- Reading tools, plugin IDs, or manifests from a principal-scoped host requires the matching `principalId`; missing or mismatched identities are rejected.
 - Stateful browser/desktop adapters are composed in a fresh run host; authenticated runs bind that host to the current principal, while anonymous local runs use run scope.
 - Manifest metadata is snapshotted at install time; registered tool objects and declared effects are frozen after capability validation.
 - Capability validation uses Sofia's effective effect classifier, including reserved tool namespaces and the destructive-by-default fallback for undeclared custom tools. Omitting `effects` cannot downgrade a privileged tool.
