@@ -879,6 +879,11 @@ export class SofiaBrain {
       previousPlan,
       diagnosis,
       strategy,
+      // Give the replanner the live registry snapshot so it can recover from stale
+      // model/tool names instead of guessing from the previous plan alone.
+      availableTools: (this.dependencies.tools.listTools?.() ?? [])
+        .slice(0, 200)
+        .map(({ name, description, effects }) => ({ name, description, effects })),
       matchedSkills: compactSkillContext(skills),
       repository: this.repositoryMap ? compactRepositoryMap(this.repositoryMap) : undefined,
     });
