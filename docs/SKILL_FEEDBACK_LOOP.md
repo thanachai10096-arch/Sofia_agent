@@ -26,3 +26,11 @@ Execution feedback is an evidence stream for review, not a self-approval mechani
 ## PostgreSQL adapter
 
 `PostgresSkillFeedbackStore` implements the transactional store contract with a tenant-scoped JSONB row and `SELECT ... FOR UPDATE`. Run `ensureSchema()` from an explicit host migration/startup path before accepting feedback. The adapter is not wired into the production API or worker by this change. The reference in-memory store remains test/development-only.
+
+## Brain integration hook
+
+`SofiaBrainDependencies.onSkillExecutionResult` emits a minimal outcome event only when a learned skill informed the active plan and the ToolGateway returned an evidence ID. The event contains the run/step IDs, learned-skill ID, tool name, outcome, principal, and evidence reference; raw tool input/output is not forwarded.
+
+Use `createBrainSkillFeedbackRecorder()` to bridge those events to the active Skill Registry version and `SkillFeedbackLedger`. The adapter resolves project scope from the authenticated principal and obtains safety-incident counts from a host safety monitor. Built-in or unregistered skills are ignored. Do not supply a model-generated scope, principal, evidence ID, or incident count.
+
+The callback is optional and best-effort. The default model factory is not yet wired to a production PostgreSQL pool, so production feedback collection remains inactive until the host injects the adapter and provisions the durable store.
