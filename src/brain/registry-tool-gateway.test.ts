@@ -966,6 +966,59 @@ test("production effectful tools fail closed when no audit sink is configured", 
 });
 
 
+
+
+test("durable completion readback rejects a receipt for a different principal or tool", async () => {
+  let executions = 0;
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    const persisted = new Map<string, SecurityAuditEvent>();
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record(event) {
+        persisted.set(event.id, event.decision === "completed"
+          ? { ...event, principalId: "different-principal" }
+          : event);
+      },
+      read(id) { return persisted.get(id); },
+      list() { return [...persisted.values()]; },
+    };
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Write with deliberately mismatched completion evidence",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; return { committed: true }; },
+    }]);
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "completion-readback-mismatch-test-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { value: "commit" } },
+      {
+        runId: "completion-readback-mismatch",
+        principalId: "authenticated-owner",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(executions, 1, "the side effect already completed and must not be retried");
+    assert.equal(result.ok, true);
+    assert.equal(result.evidenceId, "", "mismatched evidence must not be exposed as verified");
+    assert.match(result.warnings?.[0] ?? "", /completion audit event could not be persisted and read back/i);
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
 test("tool evidence ID is the exact completion event confirmed by durable readback", async () => {
   const persisted = new Map<string, SecurityAuditEvent>();
   const audit: SecurityAuditSink = {
