@@ -8,6 +8,14 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
   let session: Awaited<ReturnType<BrowserRuntime["launch"]>> | undefined;
   let activeProfileId: string | undefined;
   const pages = new Map<string, Awaited<ReturnType<NonNullable<typeof session>["newPage"]>>>();
+  // Serialize session mutations: parallel browser.open/login/close calls must
+  // not launch competing sessions or attach pages to a session being replaced.
+  let sessionOperation: Promise<void> = Promise.resolve();
+  const withSessionLock = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = sessionOperation.then(operation, operation);
+    sessionOperation = result.then(() => undefined, () => undefined);
+    return result;
+  };
 
   const dispose = async (): Promise<void> => {
     const closing = session;
@@ -37,20 +45,24 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       description: "Launch an isolated browser page. Optionally use this user's saved profileId.",
       inputSchema: { type: "object", properties: { profileId: { type: "string" } }, additionalProperties: false },
       async execute(input) {
-        if (typeof input.profileId === "string") {
-          if (!options.profileSessions || !options.ownerId) throw new Error("Saved browser profiles are unavailable on this host.");
-          if (session && activeProfileId !== input.profileId) await dispose();
-          if (!session) {
-            session = await options.profileSessions.acquire(options.ownerId, input.profileId);
-            activeProfileId = input.profileId;
+        return withSessionLock(async () => {
+          if (typeof input.profileId === "string") {
+            if (!options.profileSessions || !options.ownerId) throw new Error("Saved browser profiles are unavailable on this host.");
+            if (session && activeProfileId !== input.profileId) await dispose();
+            if (!session) {
+              session = await options.profileSessions.acquire(options.ownerId, input.profileId);
+              activeProfileId = input.profileId;
+            }
+          } else {
+            if (session && activeProfileId) await dispose();
+            session ??= await runtime.launch();
           }
-        } else {
-          if (session && activeProfileId) await dispose();
-          session ??= await runtime.launch();
-        }
-        const value = await session.newPage();
-        pages.set(value.id, value);
-        return { pageId: value.id, url: await value.url() };
+          const current = session;
+          if (!current) throw new Error("Browser session failed to initialize.");
+          const value = await current.newPage();
+          pages.set(value.id, value);
+          return { pageId: value.id, url: await value.url() };
+        });
       },
     },
     {
@@ -122,11 +134,13 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
           }
           return { ok: true, closed: "page", pageId: id };
         }
-        const managedProfileSession = activeProfileId !== undefined;
-        await dispose();
-        return managedProfileSession
-          ? { ok: true, closed: "run-attachment", profileStillOpen: true }
-          : { ok: true, closed: "session" };
+        return withSessionLock(async () => {
+          const managedProfileSession = activeProfileId !== undefined;
+          await dispose();
+          return managedProfileSession
+            ? { ok: true, closed: "run-attachment", profileStillOpen: true }
+            : { ok: true, closed: "session" };
+        });
       },
     },
   ];
@@ -136,20 +150,22 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       description: "Open a visible local browser with a new private profile. The user completes sign-in directly in that browser; never request passwords, OTPs, cookies, or tokens in chat.",
       inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
       async execute(input) {
-        if (session) await dispose();
-        const { profile, session: persistentSession } = await options.profileSessions!.create(options.ownerId!);
-        try {
-          session = persistentSession;
-          activeProfileId = profile.id;
-          const value = await session.newPage();
-          pages.set(value.id, value);
-          await value.goto(String(input.url));
-          return { profileId: profile.id, pageId: value.id, url: await value.url(), loginHandoff: "Complete sign-in in the visible browser window. Do not paste credentials into Sofia chat." };
-        } catch (error) {
-          await dispose().catch(() => undefined);
-          await options.profileSessions!.revoke(options.ownerId!, profile.id).catch(() => undefined);
-          throw error;
-        }
+        return withSessionLock(async () => {
+          if (session) await dispose();
+          const { profile, session: persistentSession } = await options.profileSessions!.create(options.ownerId!);
+          try {
+            session = persistentSession;
+            activeProfileId = profile.id;
+            const value = await persistentSession.newPage();
+            pages.set(value.id, value);
+            await value.goto(String(input.url));
+            return { profileId: profile.id, pageId: value.id, url: await value.url(), loginHandoff: "Complete sign-in in the visible browser window. Do not paste credentials into Sofia chat." };
+          } catch (error) {
+            await dispose().catch(() => undefined);
+            await options.profileSessions!.revoke(options.ownerId!, profile.id).catch(() => undefined);
+            throw error;
+          }
+        });
       },
     });
     tools.unshift({
@@ -166,9 +182,11 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       description: "Close the current browser session and permanently revoke one of this user's saved browser profiles.",
       inputSchema: { type: "object", properties: { profileId: { type: "string" } }, required: ["profileId"], additionalProperties: false },
       async execute(input) {
-        if (activeProfileId === String(input.profileId)) await dispose();
-        await options.profileSessions!.revoke(options.ownerId!, String(input.profileId));
-        return { ok: true, revoked: true };
+        return withSessionLock(async () => {
+          if (activeProfileId === String(input.profileId)) await dispose();
+          await options.profileSessions!.revoke(options.ownerId!, String(input.profileId));
+          return { ok: true, revoked: true };
+        });
       },
     });
   }
