@@ -1,0 +1,103 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { SofiaPluginHost } from "./plugin-host.js";
+import type { SofiaTool } from "../../tools/types.js";
+
+function tool(name: string): SofiaTool {
+  return {
+    name,
+    description: name,
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    async execute() { return { ok: true }; },
+  };
+}
+
+test("plugin host installs tools and exposes registered services", () => {
+  const host = new SofiaPluginHost();
+  const counter = { value: 7 };
+  host.use({
+    id: "test.plugin",
+    install(ctx) {
+      ctx.registerTool(tool("test.read"));
+      ctx.provideService("test.counter", counter);
+      assert.equal(ctx.getService<typeof counter>("test.counter"), counter);
+    },
+  });
+
+  assert.deepEqual(host.listPlugins(), ["test.plugin"]);
+  assert.equal(host.listTools()[0]?.name, "test.read");
+  assert.equal(host.listTools().length, 1);
+});
+
+test("plugin host rejects duplicate plugin and tool identities", () => {
+  const host = new SofiaPluginHost();
+  host.use({ id: "one", install: (ctx) => ctx.registerTool(tool("shared.tool")) });
+  assert.throws(() => host.use({ id: "one", install() {} }), /already installed/);
+  assert.throws(() => host.use({ id: "two", install: (ctx) => ctx.registerTool(tool("shared.tool")) }), /already registered/);
+});
+
+test("failed plugin installation rolls back registrations", () => {
+  const host = new SofiaPluginHost();
+  assert.throws(() => host.use({
+    id: "broken",
+    install(ctx) {
+      ctx.registerTool(tool("temporary.tool"));
+      ctx.provideService("temporary.service", true);
+      throw new Error("installation failed");
+    },
+  }), /installation failed/);
+  assert.deepEqual(host.listTools(), []);
+  assert.deepEqual(host.listPlugins(), []);
+  host.use({ id: "recovered", install: (ctx) => ctx.registerTool(tool("temporary.tool")) });
+  assert.deepEqual(host.listPlugins(), ["recovered"]);
+});
+
+test("lifecycle events fire on install and unload", () => {
+  const host = new SofiaPluginHost();
+  const events: string[] = [];
+  host.on("plugin:installed", ({ pluginId }) => events.push(`installed:${pluginId}`));
+  const stop = host.on("plugin:uninstalled", ({ pluginId }) => events.push(`uninstalled:${pluginId}`));
+  host.use({ id: "events.plugin", install() {} });
+  assert.equal(host.unuse("events.plugin"), true);
+  assert.equal(host.unuse("events.plugin"), false);
+  stop();
+  assert.deepEqual(events, ["installed:events.plugin", "uninstalled:events.plugin"]);
+});
+
+test("disposing runs every cleanup in reverse plugin order and is idempotent", () => {
+  const host = new SofiaPluginHost();
+  const disposed: string[] = [];
+  host.use({ id: "first", install(ctx) { ctx.onDispose(() => disposed.push("first")); } });
+  host.use({ id: "second", install(ctx) { ctx.onDispose(() => disposed.push("second")); } });
+  host.dispose();
+  host.dispose();
+  assert.deepEqual(disposed, ["second", "first"]);
+  assert.throws(() => host.listTools(), /disposed/);
+});
+
+test("a failing cleanup does not prevent other plugins from being disposed", () => {
+  const host = new SofiaPluginHost();
+  const disposed: string[] = [];
+  host.use({ id: "first", install(ctx) { ctx.onDispose(() => disposed.push("first")); } });
+  host.use({ id: "second", install(ctx) {
+    ctx.onDispose(() => disposed.push("second"));
+    ctx.onDispose(() => { throw new Error("cleanup failed"); });
+  } });
+  assert.throws(() => host.dispose(), /failed to dispose/);
+  assert.deepEqual(disposed, ["second", "first"]);
+  assert.throws(() => host.listTools(), /disposed/);
+});
+
+test("host cannot be repopulated from a disposal callback", () => {
+  const host = new SofiaPluginHost();
+  host.use({
+    id: "reentrant",
+    install(ctx) {
+      ctx.onDispose(() => {
+        assert.throws(() => host.use({ id: "late", install() {} }), /disposed/);
+      });
+    },
+  });
+  host.dispose();
+  assert.throws(() => host.listPlugins(), /disposed/);
+});
