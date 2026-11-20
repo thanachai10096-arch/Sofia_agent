@@ -872,7 +872,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             return json(res, 400, { error: "retry_requires_no_side_effect_confirmation" }, origin, config);
           }
           try {
-            const reconciled = await requestDeps.jobRuntime!.reconcile(jobId, stepId, outcome, auth.keyId, note);
+            const reconciled = await requestDeps.jobRuntime!.reconcile(jobId, stepId, outcome, auth.keyId, note, outcome === "retry" ? { noSideEffect: true } : undefined);
             return json(res, 200, reconciled, origin, config);
           } catch (error) {
             return json(res, 409, { error: "job_reconciliation_failed", message: error instanceof Error ? error.message : "Reconciliation failed" }, origin, config);
