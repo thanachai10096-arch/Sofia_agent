@@ -135,7 +135,7 @@ class QuotaHelperTests(unittest.TestCase):
             state.mkdir()
             def report_existing(argv, timeout=HELPER.COMMAND_TIMEOUT):
                 if "report -p -n" in " ".join(argv):
-                    return "#200000 0 0 0 00\\n"
+                    return "#200000 0 0 0 00\n"
                 return ""
             with patch.object(HELPER, "run", side_effect=report_existing):
                 with self.assertRaises(HELPER.HelperError):
