@@ -7,6 +7,23 @@ import type { AgentResult } from "../agent/types.js";
 
 export interface RunRecord { id:string; status:AgentRunStatus; result?:AgentResult; error?:string; createdAt:number; updatedAt:number; ownerKeyId:string; desktopCapabilities:string[]; /** SHA-256 of owner-scoped idempotency key; never store the raw key. */ idempotencyId?:string; requestFingerprint?:string; }
 export interface RunRecordStore { save(record:RunRecord):Promise<void>; remove(id:string):Promise<void>; loadAllSync():RunRecord[]; load?(id:string):RunRecord|undefined; }
+
+/**
+ * Contract required before RunRecord persistence can be shared by multiple API
+ * instances. Implementations MUST compare the current lease generation and
+ * commit the record mutation in the SAME atomic storage transaction (for
+ * example, one Redis Lua script or a database conditional write).
+ *
+ * A separate assertCurrent() followed by save()/remove() is NOT sufficient:
+ * ownership can change between those operations. Returning false means the
+ * caller's fencing generation is stale and the mutation was not applied.
+ *
+ * FileRunRecordStore intentionally does not implement this contract.
+ */
+export interface FencedRunRecordStore extends RunRecordStore {
+ saveFenced(record:RunRecord, lease:import("./run-ownership-store.js").RunOwnershipLease):Promise<boolean>;
+ removeFenced(id:string, lease:import("./run-ownership-store.js").RunOwnershipLease):Promise<boolean>;
+}
 const SAFE_ID=/^[A-Za-z0-9-]{8,64}$/;
 const STATUSES=new Set(["queued","running","completed","failed","cancelled"]);
 const KINDS=new Set(["coding","debugging","research","analysis","vision","general"]);
