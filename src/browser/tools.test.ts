@@ -504,3 +504,67 @@ test("browser.login keeps the authenticated session available across Brain runs"
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("concurrent runs acquiring one saved profile share a single browser context", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-profile-concurrent-"));
+  let launchCount = 0;
+  let finishLaunch!: (session: BrowserSession) => void;
+  let closeCount = 0;
+  try {
+    const store = new BrowserProfileStore(root);
+    const profile = await store.create("principal-concurrent");
+    const manager = new BrowserProfileSessionManager(store, () => ({
+      launch: async () => {
+        launchCount++;
+        return new Promise<BrowserSession>((resolve) => { finishLaunch = resolve; });
+      },
+    }));
+    const first = manager.acquire("principal-concurrent", profile.id);
+    const second = manager.acquire("principal-concurrent", profile.id);
+    await Promise.resolve();
+    finishLaunch({
+      id: "shared-context",
+      newPage: async () => { throw new Error("not used"); },
+      close: async () => { closeCount++; },
+    });
+    const [one, two] = await Promise.all([first, second]);
+    assert.equal(one, two);
+    assert.equal(launchCount, 1);
+    await manager.closeAll();
+    assert.equal(closeCount, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("revoking a profile waits for an in-flight acquire before closing and deleting it", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-profile-revoke-race-"));
+  let finishLaunch!: (session: BrowserSession) => void;
+  let closeCount = 0;
+  try {
+    const store = new BrowserProfileStore(root);
+    const profile = await store.create("principal-revoke");
+    const manager = new BrowserProfileSessionManager(store, () => ({
+      launch: async () => new Promise<BrowserSession>((resolve) => { finishLaunch = resolve; }),
+    }));
+    const acquiring = manager.acquire("principal-revoke", profile.id);
+    await Promise.resolve();
+    let revoked = false;
+    const revoking = manager.revoke("principal-revoke", profile.id).then(() => { revoked = true; });
+    await Promise.resolve();
+    assert.equal(revoked, false, "revoke must wait until the pending browser launch is registered");
+    finishLaunch({
+      id: "revoked-context",
+      newPage: async () => { throw new Error("not used"); },
+      close: async () => { closeCount++; },
+    });
+    await acquiring;
+    await revoking;
+    assert.equal(revoked, true);
+    assert.equal(closeCount, 1);
+    await assert.rejects(store.get("principal-revoke", profile.id));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
