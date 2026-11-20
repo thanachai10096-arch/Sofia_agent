@@ -9,7 +9,8 @@ const stringField = (description: string) => ({ type: "string", description });
  * The host must inject owner-scoped approvals, durable stores, and a real provider adapter.
  * Payment execution is destructive + network and therefore requires the existing policy/approval path.
  */
-export function createFinancialActionTools(dependencies: FinancialActionDependencies): SofiaTool[] {
+export function createFinancialActionTools(dependencies: FinancialActionDependencies, authenticatedOwnerId: string): SofiaTool[] {
+  if (!authenticatedOwnerId.trim()) throw new Error("An authenticated owner ID is required to expose financial tools.");
   return [
     {
       name: "finance.payment.execute",
@@ -18,24 +19,23 @@ export function createFinancialActionTools(dependencies: FinancialActionDependen
       inputSchema: {
         type: "object",
         properties: {
-          ownerId: stringField("Authenticated principal ID; must match the approval owner."),
           orderReference: stringField("Merchant order reference."),
           amountMinor: { type: "integer", description: "Positive amount in currency minor units (THB uses satang)." },
           currency: { type: "string", description: "Uppercase ISO 4217 currency code." },
           idempotencyKey: stringField("Stable unique key for this exact payment intent; reuse it for retries."),
           approvalId: stringField("Approval ID bound to this owner, order, amount, and currency."),
         },
-        required: ["ownerId", "orderReference", "amountMinor", "currency", "idempotencyKey", "approvalId"],
+        required: ["orderReference", "amountMinor", "currency", "idempotencyKey", "approvalId"],
         additionalProperties: false,
       },
       async execute(input) {
-        if (typeof input.ownerId !== "string" || typeof input.orderReference !== "string" ||
+        if (typeof input.orderReference !== "string" ||
             typeof input.amountMinor !== "number" || typeof input.currency !== "string" ||
             typeof input.idempotencyKey !== "string" || typeof input.approvalId !== "string") {
           throw new Error("Invalid financial payment tool input.");
         }
         return executeFinancialAction({
-          ownerId: input.ownerId, orderReference: input.orderReference, amountMinor: input.amountMinor,
+          ownerId: authenticatedOwnerId, orderReference: input.orderReference, amountMinor: input.amountMinor,
           currency: input.currency, idempotencyKey: input.idempotencyKey, approvalId: input.approvalId,
         }, dependencies);
       },
@@ -47,17 +47,16 @@ export function createFinancialActionTools(dependencies: FinancialActionDependen
       inputSchema: {
         type: "object",
         properties: {
-          ownerId: stringField("Authenticated principal ID that owns the payment."),
           idempotencyKey: stringField("Original payment idempotency key."),
         },
-        required: ["ownerId", "idempotencyKey"],
+        required: ["idempotencyKey"],
         additionalProperties: false,
       },
       async execute(input) {
-        if (typeof input.ownerId !== "string" || typeof input.idempotencyKey !== "string") {
+        if (typeof input.idempotencyKey !== "string") {
           throw new Error("Invalid financial reconciliation tool input.");
         }
-        return reconcileFinancialAction({ ownerId: input.ownerId, idempotencyKey: input.idempotencyKey }, dependencies);
+        return reconcileFinancialAction({ ownerId: authenticatedOwnerId, idempotencyKey: input.idempotencyKey }, dependencies);
       },
     },
   ];
