@@ -903,6 +903,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       return json(res, 500, { error: "internal_error" }, origin, config);
     }
   });
+  const closeTenantDependencies = async (): Promise<void> => {
+    const settled = await Promise.allSettled([...tenantAgents.values()]);
+    for (const item of settled) {
+      if (item.status !== "fulfilled") continue;
+      try { await item.value.dependencies.close?.(); } catch { /* continue closing remaining tenants */ }
+    }
+    tenantAgents.clear();
+    try { await config.tenantDependencyRegistry?.close(); } catch { /* continue closing remaining tenants */ }
+  };
   if (jobRuntime) {
     server.on("listening", () => {
       void (async () => {
@@ -924,8 +933,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       cronTimer = undefined;
     });
     // Stop the timer as soon as shutdown is requested. Once HTTP connections
-    // have drained, await startup recovery and every tenant scheduler before
-    // invoking the caller's close callback (which may close JobRuntime).
+    // have drained, await startup recovery, schedulers, and tenant dependencies
+    // before notifying the host that shutdown has completed.
     const closeHttpServer = server.close.bind(server);
     server.close = ((callback?: Parameters<typeof server.close>[0]) => {
       cronClosed = true;
@@ -936,21 +945,17 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           await cronInitialization.catch(() => undefined);
           await Promise.allSettled([...cronSchedulers.values()].map(scheduler => scheduler.close()));
           try { await jobRuntime?.close?.(); } catch { /* tenant registry owns dependency cleanup */ }
+          await closeTenantDependencies();
           callback?.(error);
         })();
       });
     }) as typeof server.close;
+  } else {
+    const closeHttpServer = server.close.bind(server);
+    server.close = ((callback?: Parameters<typeof server.close>[0]) =>
+      closeHttpServer((error?: Error) => {
+        void closeTenantDependencies().finally(() => callback?.(error));
+      })) as typeof server.close;
   }
-  server.on("close", () => {
-    void (async () => {
-      const settled = await Promise.allSettled([...tenantAgents.values()]);
-      for (const item of settled) {
-        if (item.status !== "fulfilled") continue;
-        try { await item.value.dependencies.close?.(); } catch { /* continue closing remaining tenants */ }
-      }
-      tenantAgents.clear();
-      try { await config.tenantDependencyRegistry?.close(); } catch { /* registry owns tenant bundle cleanup */ }
-    })();
-  });
   return server;
 }
