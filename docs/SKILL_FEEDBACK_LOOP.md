@@ -62,7 +62,7 @@ const dependencies = await createSofiaAgentDependenciesWithPostgresSkillFeedback
 }, workspace, approval);
 ```
 
-Set `initializeSchema: false` when an operator-managed migration has already created both tables. This allows the runtime role to operate without DDL privileges; the default remains `true` for explicit development/bootstrap workflows. Keep migration credentials separate from the normal Agent process.
+Apply `migrations/20261120_skill_feedback.sql` with the migration role before starting the runtime with `initializeSchema: false`. The migration creates `sofia_skill_registry` and `sofia_skill_feedback` with JSON-object checks and tenant-scope length constraints; these names match the default PostgreSQL store table names. The migration is idempotent for fresh installs and does not alter existing tables. Set `initializeSchema: false` when an operator-managed migration has already created both tables. This allows the runtime role to operate without DDL privileges; the default remains `true` for explicit development/bootstrap workflows. Keep migration credentials separate from the normal Agent process.
 
 The function deliberately accepts a pool rather than importing a database driver. The host owns driver selection, connection lifecycle, TLS, pool sizing, credential rotation, and shutdown. The database role used for schema initialization needs DDL privileges; runtime-only deployments should run migrations separately and use a least-privilege role. The helper does not create or connect a live database, and it does not wire the API entrypoint automatically.
 
