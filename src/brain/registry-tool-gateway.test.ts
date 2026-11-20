@@ -449,3 +449,45 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
 });
+
+
+test("registered browser.navigate reports a policy denial instead of Unknown tool when network access is disabled", async () => {
+  let navigated = false;
+  const registry = new MapToolRegistry([{
+    name: "browser.navigate",
+    description: "Navigate to a public page",
+    inputSchema: {
+      type: "object",
+      properties: { url: { type: "string" }, pageId: { type: "string" } },
+      required: ["url"],
+      additionalProperties: false,
+    },
+    async execute() {
+      navigated = true;
+      return { url: "https://example.com/" };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: false, allowBrowser: false },
+  );
+
+  assert.ok(gateway.listTools().some((tool) => tool.name === "browser.navigate"));
+  assert.deepEqual(gateway.describe("browser.navigate")?.effects, ["network", "read"]);
+
+  const result = await gateway.execute(
+    { tool: "browser.navigate", input: { url: "https://example.com/" } },
+    {
+      runId: "browser-navigate-policy-denial",
+      principalId: "test-principal",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.category, "permission_error");
+  assert.match(result.error?.message ?? "", /disabled by policy: browser\.navigate/i);
+  assert.equal(navigated, false, "navigation must not execute when network access is disabled");
+});
