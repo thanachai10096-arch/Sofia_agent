@@ -76,7 +76,8 @@ export class SqliteApprovalPayloadStore {
   }
 
   save(plaintext: string, context: ApprovalPayloadContext, cipher: ApprovalPayloadCipher, now = Date.now()): boolean {
-    if (typeof plaintext !== "string" || Buffer.byteLength(plaintext, "utf8") > MAX_PLAINTEXT_BYTES ||\n        !validContext(context) || !Number.isSafeInteger(now)) return false;
+    if (typeof plaintext !== "string" || Buffer.byteLength(plaintext, "utf8") > MAX_PLAINTEXT_BYTES ||
+        !validContext(context) || !Number.isSafeInteger(now)) return false;
     try {
       const envelope = cipher.encrypt(plaintext, context);
       if (!validEnvelope(envelope)) return false;
