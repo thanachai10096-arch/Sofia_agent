@@ -1075,3 +1075,67 @@ test("Brain autonomy gate allows a tool without weakening gateway approval", asy
   assert.equal(executions, 2); // write action plus verification probe
   assert.equal(approvalRequired, false); // final probe remains read-only
 });
+
+
+test("Brain emits a trusted evidence event when an approved learned skill informs a recovery step", async () => {
+  const ledger = new InMemorySkillLedger();
+  ledger.record({
+    name: "repair-incomplete_solution",
+    trigger: "Acceptance criteria failed",
+    category: "incomplete_solution",
+    strategy: "fix-implementation",
+    procedure: ["inspect the failed acceptance evidence", "repair the implementation"],
+    verification: ["test"],
+    evidenceIds: ["prior-verified-run"],
+  });
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  let listCalls = 0;
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.list_files") {
+      listCalls += 1;
+      if (listCalls === 1) return {
+        ok: true, data: [], evidenceId: "empty-first-probe",
+      };
+    }
+    return originalExecute(call, context);
+  };
+  const feedbackEvents: Array<{
+    runId: string; principalId?: string; skillId: string; stepId: string;
+    tool: string; outcome: "succeeded" | "failed"; evidenceId: string;
+  }> = [];
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      skillLedger: ledger,
+      onSkillExecutionResult: async (event) => { feedbackEvents.push(event); },
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 8, maxToolCalls: 20, maxReplans: 1, maxModelCalls: 6,
+      maxTokens: 2_000, maxContextTokens: 800, maxOutputTokens: 150, timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({
+    task: "Create hello.txt",
+    principalId: "tenant-a",
+    acceptanceCriteria: [{
+      id: "file-exists", description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+  assert.equal(report.completed, true, report.summary);
+  assert.ok(feedbackEvents.length > 0);
+  assert.equal(feedbackEvents[0]?.principalId, "tenant-a");
+  assert.equal(feedbackEvents[0]?.skillId, "learned:repair-incomplete_solution:incomplete_solution");
+  assert.equal(feedbackEvents[0]?.outcome, "succeeded");
+  assert.ok(feedbackEvents[0]?.evidenceId);
+});
