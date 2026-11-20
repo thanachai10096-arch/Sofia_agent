@@ -74,9 +74,9 @@ test("Brain skill feedback uses the host safety monitor count", async () => {
 });
 
 test("Brain skill feedback ignores built-in skills and events without a principal", async () => {
-  const { registry, ledger } = await setup();
+  const { registryStore, ledger } = await setup();
   const recorder = createBrainSkillFeedbackRecorder({
-    registry: registry["store"] as never,
+    registry: registryStore,
     ledger,
     resolveScope: () => "project-1",
     resolveSafetyIncidentCount: () => 0,
