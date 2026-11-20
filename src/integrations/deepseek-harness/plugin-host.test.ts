@@ -164,3 +164,18 @@ test("plugin services are visible only to the provider and declared dependents",
     install(ctx) { assert.deepEqual(ctx.getService("private.counter"), { value: 3 }); },
   });
 });
+
+test("registered tool effects cannot be mutated after manifest validation", () => {
+  const host = new SofiaPluginHost();
+  const effects: ("read" | "network")[] = ["read"];
+  host.use({
+    id: "immutable.tool",
+    manifest: { version: "1.0.0", capabilities: ["read"] },
+    install(ctx) { ctx.registerTool({ ...tool("immutable.read"), effects }); },
+  });
+  effects.push("network");
+  const registered = host.listTools()[0]!;
+  assert.deepEqual(registered.effects, ["read"]);
+  assert.equal(Object.isFrozen(registered), true);
+  assert.equal(Object.isFrozen(registered.effects), true);
+});
