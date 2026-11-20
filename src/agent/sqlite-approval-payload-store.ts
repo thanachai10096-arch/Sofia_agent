@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ApprovalPayloadCipher, ApprovalPayloadContext, EncryptedApprovalPayload } from "./approval-payload-cipher.js";
+import type { ApprovalAuditRecord } from "./approval.js";
 
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
@@ -72,6 +73,52 @@ export class SqliteApprovalPayloadStore {
     } catch (error) {
       db.close();
       throw error;
+    }
+  }
+
+  /**
+   * Atomically creates approval metadata and its encrypted proposal using this
+   * connection. A crash cannot leave a visible pending row without its payload.
+   */
+  createPendingWithPayload(
+    record: ApprovalAuditRecord,
+    plaintext: string,
+    context: ApprovalPayloadContext,
+    cipher: ApprovalPayloadCipher,
+    now = Date.now(),
+  ): boolean {
+    if (record.status !== "pending" || !record.id || !record.principalId || !record.runId ||
+        !record.toolName || !record.actionHash || !Number.isSafeInteger(record.createdAt) ||
+        !Number.isSafeInteger(record.expiresAt) || record.expiresAt <= now ||
+        !validContext(context) || context.approvalId !== record.id ||
+        context.principalId !== record.principalId || context.runId !== record.runId ||
+        context.toolName !== record.toolName || context.actionHash !== record.actionHash ||
+        context.expiresAt !== record.expiresAt || typeof plaintext !== "string" ||
+        Buffer.byteLength(plaintext, "utf8") > MAX_PLAINTEXT_BYTES || !Number.isSafeInteger(now)) return false;
+    try {
+      const envelope = cipher.encrypt(plaintext, context);
+      if (!validEnvelope(envelope)) return false;
+      const serialized = JSON.stringify(envelope);
+      if (Buffer.byteLength(serialized, "utf8") > MAX_ENVELOPE_BYTES) return false;
+      this.db.exec("BEGIN IMMEDIATE;");
+      try {
+        this.db.prepare(`
+          INSERT INTO approvals(id, run_id, principal_id, tool_name, action_hash, risk, status, created_at, expires_at, settled_at)
+          VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL)
+        `).run(record.id, record.runId, record.principalId, record.toolName, record.actionHash,
+          record.risk, record.createdAt, record.expiresAt);
+        this.db.prepare(`
+          INSERT INTO approval_payloads(approval_id, envelope_json, created_at)
+          VALUES (?, ?, ?)
+        `).run(record.id, serialized, now);
+        this.db.exec("COMMIT;");
+        return true;
+      } catch (error) {
+        this.db.exec("ROLLBACK;");
+        throw error;
+      }
+    } catch {
+      return false;
     }
   }
 
