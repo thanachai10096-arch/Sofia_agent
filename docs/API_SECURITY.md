@@ -74,3 +74,14 @@ The library also exposes `Aes256GcmApprovalPayloadCipher` and `SqliteApprovalPay
 ## Current limitations
 
 API keys are configured through a static key-to-scope map; automated key management and distributed quota storage remain deployment responsibilities until a dedicated implementation is merged. Approval behavior depends on the configured approval handler and tool gateway. The standard API entrypoint uses a file-backed owner-scoped approval journal; custom hosts must configure the same broker for the API and agent dependencies. Audit the exact composition used by your deployment rather than assuming every adapter has identical controls.
+
+
+## Durable SQLite approval handoff
+
+`DurableApprovalCoordinator` composes `SqliteApprovalStore`, `SqliteApprovalPayloadStore`, and a server-held `ApprovalPayloadCipher` for a same-host worker handoff. The originating worker creates the ticket and remains the only worker that should resume and execute the approved action. A reviewer can read the proposed input through the owner-scoped coordinator method, then settle the metadata row using the exact owner and action hash. The origin polls the committed state and receives the decrypted input only after an `approved` decision.
+
+The metadata and encrypted payload stores currently use separate SQLite connections, so creation is not a single cross-table transaction. If payload serialization or persistence fails, the coordinator conditionally moves the metadata row to `interrupted`; callers must treat a null ticket as a failed creation and must never expose it for approval. This compensation prevents an incomplete record from being actionable, but it is not equivalent to atomic insertion under abrupt process termination.
+
+The coordinator uses bounded polling and a bounded approval TTL. An abort returns `interrupted`. A missing row, mismatched owner/context, unavailable payload, or failed authentication also fails closed. Do not pass tickets or server-held cipher instances to untrusted clients, and do not return encrypted envelopes or encryption keys from API routes.
+
+This is still a local SQLite/WAL design for processes sharing one host filesystem. It is not a multi-host broker, worker lease, pub/sub notification system, or distributed execution guarantee. The existing API routes and `ApprovalBroker` are not yet replaced by this coordinator; integration requires a host-owned key provider, lifecycle/shutdown handling, and API-level authorization tests.
