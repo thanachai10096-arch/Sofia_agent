@@ -23,3 +23,5 @@ export * from "./brain-skill-feedback-adapter.js";
 
 export { createPostgresSkillFeedbackHostConfig } from "./postgres-skill-feedback-runtime.js";
 export type { PostgresSkillFeedbackRuntimeOptions } from "./postgres-skill-feedback-runtime.js";
+
+export * from "./observability.js";
