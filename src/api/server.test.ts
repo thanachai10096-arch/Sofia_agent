@@ -376,6 +376,7 @@ test("API routes runs through resolver-issued tenant dependency contexts", async
     assert.equal(new Set(createdTenants).size, 2);
   } finally {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    await registry.close();
     await rm(root, { recursive: true, force: true });
   }
   assert.deepEqual(closedOwners.sort(), [
