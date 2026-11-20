@@ -8,6 +8,8 @@ agent, a second server, or a child CLI.
 ## What is integrated now
 
 - In-process plugin identity and duplicate protection.
+- A live Tool Registry backed by the plugin host, so plugins installed after startup are visible to subsequent Sofia runs.
+- The host is exposed on `AgentDependencies.pluginHost` for trusted host-side plugin installation and unloading.
 - Tool and service registration through a plugin-scoped context.
 - Reversible registration effects and reverse-order teardown.
 - Rollback of partial registrations when plugin installation fails.
