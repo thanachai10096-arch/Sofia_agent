@@ -575,7 +575,10 @@ export class DurableJobRuntime implements JobRuntime {
       void this.state.heartbeat(record.id, leaseToken, leaseMs).then((ok) => {
         if (!ok) controller.abort(new Error("Job execution lease was lost"));
       }).catch(() => {
-        // A transient store error is not proof of lease loss; a later heartbeat retries.
+        // Without a successful renewal the worker cannot prove it still owns the
+        // lease. Fail closed: continuing could duplicate external side effects if
+        // another process reclaims the expired job while this worker is offline.
+        controller.abort(new Error("Unable to renew job execution lease"));
       });
     }, Math.floor(leaseMs / 3));
     heartbeat.unref?.();
