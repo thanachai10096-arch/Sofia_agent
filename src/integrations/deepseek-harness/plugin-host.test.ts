@@ -40,6 +40,33 @@ test("plugin identifiers reject surrounding whitespace", () => {
   assert.deepEqual(host.listTools(), []);
 });
 
+test("host disposal during plugin installation aborts and rolls back the installation", () => {
+  const host = new SofiaPluginHost();
+  assert.throws(() => host.use({
+    id: "dispose.during.install",
+    install(ctx) {
+      ctx.registerTool(tool("temporary.during.install"));
+      host.dispose();
+    },
+  }), /Cannot dispose Sofia plugin host while a plugin installation is in progress/);
+  assert.deepEqual(host.listTools(), []);
+  assert.deepEqual(host.listPlugins(), []);
+  assert.equal(host.unuse("dispose.during.install"), false);
+});
+
+test("a dependency cannot be uninstalled while its dependent is installing", () => {
+  const host = new SofiaPluginHost();
+  host.use({ id: "provider", manifest: { version: "1.0.0", capabilities: [] }, install() {} });
+  host.use({
+    id: "consumer",
+    manifest: { version: "1.0.0", capabilities: [], dependencies: ["provider"] },
+    install() {
+      assert.throws(() => host.unuse("provider"), /while "consumer" depends on it/);
+    },
+  });
+  assert.deepEqual(host.listPlugins(), ["provider", "consumer"]);
+});
+
 test("plugin host installs tools and exposes registered services", () => {
   const host = new SofiaPluginHost();
   const counter = { value: 7 };
