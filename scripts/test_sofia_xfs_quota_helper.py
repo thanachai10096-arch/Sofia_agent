@@ -74,6 +74,13 @@ class QuotaHelperTests(unittest.TestCase):
                 self.assertFalse(workspace.exists())
                 self.assertNotIn(run_id, HELPER.load_allocations(state))
 
+    def test_untracked_workspace_root_entry_blocks_allocation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            root.mkdir()
+            (root / "unexpected").mkdir()
+            with self.assertRaises(HELPER.HelperError):
+                HELPER.assert_workspace_registry_consistent(root, {})
     def test_create_refuses_preexisting_workspace_without_claiming_it(self):
         run_id = "123e4567-e89b-42d3-a456-426614174002"
         with tempfile.TemporaryDirectory() as temp:
