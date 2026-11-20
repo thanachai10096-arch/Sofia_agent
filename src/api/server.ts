@@ -147,7 +147,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
-  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStorePath);
+  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.resolvePrincipalUsageStorePath ? undefined : config.usageStorePath);
   const principalUsageLimiters = new Map<string, Promise<UsageLimiter>>();
   const resolveUsageLimiter = async (principalId: string): Promise<UsageLimiter> => {
     if (!config.resolvePrincipalUsageStorePath) return usage;
