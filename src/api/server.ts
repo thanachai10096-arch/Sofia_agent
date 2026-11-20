@@ -123,9 +123,8 @@ function pathId(url: string): string | null {
 }
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
-  // A process-global JobRuntime executes against one configured workspace. Owner-scoped
-  // job IDs do not isolate that execution environment, so reject multi-key use until
-  // a tenant-aware JobRuntime factory is available.
+  // Multi-owner background jobs must resolve the exact same tenant dependency
+  // bundle as interactive runs. Never fall back to a process-global JobRuntime.
   const configuredApiOwners = Object.keys(config.apiKeys);
   const hasMultiOwnerBackgroundJobAccess = configuredApiOwners.length > 1 &&
     Object.values(config.apiKeys).some(scopes =>
@@ -936,7 +935,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         void (async () => {
           await cronInitialization.catch(() => undefined);
           await Promise.allSettled([...cronSchedulers.values()].map(scheduler => scheduler.close()));
-          await jobRuntime?.close?.().catch(() => undefined);
+          try { await jobRuntime?.close?.(); } catch { /* tenant registry owns dependency cleanup */ }
           callback?.(error);
         })();
       });
