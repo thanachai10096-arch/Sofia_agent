@@ -16,8 +16,8 @@ def _channels() -> dict[str, Any]:
             "description": channel.description,
             "level": channel.level,
             "actions": [
-                {"name": action.name, "description": action.description,
-                 "params": [{"name": p.name, "description": p.description,
+                {"name": action.name, "description": action.help,
+                 "params": [{"name": p.name, "description": p.help,
                              "required": p.required, "type": getattr(p.type, "__name__", "string")}
                             for p in action.params]}
                 for action in channel.actions if action.name.lower() not in READ_ONLY_BLOCKED
