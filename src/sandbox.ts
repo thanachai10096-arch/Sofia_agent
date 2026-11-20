@@ -327,6 +327,7 @@ export class ContainerSandbox implements Sandbox {
     const dockerArgs = [
       "run", "--rm", "--pull=never", "--name", containerName,
       ...containerUserArgs,
+      ...((limits.allowedEnvironmentVariables ?? []).filter((name) => Boolean(process.env[name])).flatMap((name) => ["--env", name])),
       "--network", limits.allowNetwork ? "bridge" : "none",
       "--read-only",
       "--cap-drop=ALL",
