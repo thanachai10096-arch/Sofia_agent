@@ -13,7 +13,8 @@
         "/opt/venv/bin/pip install --disable-pip-version-check -r vendor/agent-reach/requirements.txt",
         {
           "path": "/opt/venv/bin"
-        }
+        },
+        "python vendor/agent-reach/sofia_bridge.py --request-json '{\"operation\":\"channels\"}'"
       ]
     }
   },
