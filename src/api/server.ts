@@ -12,6 +12,7 @@ import { validateAgentRunInput } from "./validation.js";
 import { FileRunRecordStore, type RunRecord, type RunRecordStore } from "./run-record-store.js";
 import { CronScheduler, FileCronStore, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
+import { createRegistryBackedTenantJobRuntimeRouter } from "../brain/tenant-job-runtime.js";
 
 interface ActiveRun {
   id: string;
@@ -130,12 +131,18 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     Object.values(config.apiKeys).some(scopes =>
       scopes.some(scope => scope === "jobs:read" || scope === "jobs:manage" || scope === "cron:read" || scope === "cron:manage"),
     );
-  if (hasMultiOwnerBackgroundJobAccess) {
-    throw new Error("tenant_job_runtime_required: multi-owner jobs and cron require an API-routed tenant JobRuntime factory; owner-partitioned records alone are insufficient.");
+  if (hasMultiOwnerBackgroundJobAccess && !config.tenantDependencyRegistry) {
+    throw new Error("tenant_job_runtime_required: multi-owner jobs and cron require a resolver-backed TenantDependencyRegistry.");
   }
   if (deps.jobRuntime && configuredApiOwners.length > 1) {
     throw new Error("tenant_job_runtime_required: multi-key APIs cannot share a process-global JobRuntime.");
   }
+  const jobRuntime = hasMultiOwnerBackgroundJobAccess
+    ? createRegistryBackedTenantJobRuntimeRouter(
+        configuredApiOwners.map(token => createHash("sha256").update(token).digest("hex").slice(0, 32)),
+        config.tenantDependencyRegistry!,
+      )
+    : jobRuntime;
   const agent = new SofiaAgent(deps);
   // Per-owner agents are created only through a server-side resolver after authentication.
   const tenantAgents = new Map<string, Promise<{ agent: SofiaAgent; dependencies: AgentDependencies }>>();
@@ -190,14 +197,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   // Migrate each owner's records from the legacy shared file before serving cron
   // requests or recovering jobs; never accept a client-supplied namespace.
   const cronSchedulers = new Map<string, CronScheduler>();
-  const legacyCronStore = deps.jobRuntime ? new FileCronStore(undefined, config.cronStoreRoot) : undefined;
+  const legacyCronStore = jobRuntime ? new FileCronStore(undefined, config.cronStoreRoot) : undefined;
   const cronInitialization = (async () => {
-    if (!deps.jobRuntime || !legacyCronStore) return;
+    if (!jobRuntime || !legacyCronStore) return;
     for (const token of Object.keys(config.apiKeys)) {
       const ownerKeyId = createHash("sha256").update(token).digest("hex").slice(0, 32);
       const store = new FileCronStore(ownerKeyId, config.cronStoreRoot);
       await store.migrateOwnerFrom(legacyCronStore, ownerKeyId);
-      cronSchedulers.set(ownerKeyId, new CronScheduler(deps.jobRuntime, { store, maxConcurrent: 1 }));
+      cronSchedulers.set(ownerKeyId, new CronScheduler(jobRuntime, { store, maxConcurrent: 1 }));
     }
   })();
   // Keep an initialization failure observable to awaited requests without
@@ -444,7 +451,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
-      if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
+      if (isCronRequest && !jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       if (isCronRequest) {
         try { await cronInitialization; }
         catch { return json(res, 503, { error: "cron_store_initialization_failed" }, origin, config); }
@@ -832,36 +839,36 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
 
       const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
-      if (jobMatch && deps.jobRuntime) {
+      if (jobMatch && jobRuntime) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
-        if (!deps.jobRuntime.getForOwner || !deps.jobRuntime.resumeForOwner || !deps.jobRuntime.cancelForOwner) {
+        if (!jobRuntime.getForOwner || !jobRuntime.resumeForOwner || !jobRuntime.cancelForOwner) {
           return json(res, 503, { error: "owner_scoped_job_access_unavailable" }, origin, config);
         }
-        const job = await deps.jobRuntime.getForOwner(jobId, auth.keyId);
+        const job = await jobRuntime.getForOwner(jobId, auth.keyId);
         if (!job) return json(res, 404, { error: "job_not_found" }, origin, config);
         if (req.method === "GET" && !action) {
           return json(res, 200, job, origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resumeForOwner(jobId, auth.keyId), origin, config); }
+          try { return json(res, 202, await jobRuntime.resumeForOwner(jobId, auth.keyId), origin, config); }
           catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
-          const cancelled = await deps.jobRuntime.cancelForOwner(jobId, auth.keyId);
+          const cancelled = await jobRuntime.cancelForOwner(jobId, auth.keyId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
         }
       }
 
       if (req.method === "GET" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
+        if (!jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+        const jobs = (await jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
         return json(res, 200, { jobs }, origin, config);
       }
 
       if (req.method === "POST" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+        if (!jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
@@ -870,7 +877,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
-          const job = await deps.jobRuntime.submit({
+          const job = await jobRuntime.submit({
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
@@ -897,7 +904,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       return json(res, 500, { error: "internal_error" }, origin, config);
     }
   });
-  if (deps.jobRuntime) {
+  if (jobRuntime) {
     server.on("listening", () => {
       void (async () => {
         try {
@@ -929,6 +936,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         void (async () => {
           await cronInitialization.catch(() => undefined);
           await Promise.allSettled([...cronSchedulers.values()].map(scheduler => scheduler.close()));
+          await jobRuntime?.close?.().catch(() => undefined);
           callback?.(error);
         })();
       });
