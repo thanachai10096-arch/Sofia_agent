@@ -894,13 +894,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       })();
     });
-    server.on("close", () => {
-      cronClosed = true;
-      if (cronTimer) clearInterval(cronTimer);
-      cronTimer = undefined;
-      for (const timer of principalCronTimers.values()) clearInterval(timer);
-      principalCronTimers.clear();
-    });
   }
+  server.on("close", () => {
+    cronClosed = true;
+    if (cronTimer) clearInterval(cronTimer);
+    cronTimer = undefined;
+    for (const timer of principalCronTimers.values()) clearInterval(timer);
+    principalCronTimers.clear();
+  });
   return server;
 }
