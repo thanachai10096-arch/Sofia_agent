@@ -21,6 +21,25 @@ const route: ModelRoute = {
   healthy: true,
 };
 
+test("API refuses a process-global JobRuntime when multiple API owners are configured", () => {
+  const runtime = {
+    async submit() { throw new Error("unused"); },
+    async getForOwner() { return undefined; },
+    async cancelForOwner() { return true; },
+  };
+  assert.throws(() => createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    jobRuntime: runtime as never,
+  }, {
+    apiKeys: {
+      "owner-one": ["cron:read", "cron:manage"],
+      "owner-two": ["cron:read", "cron:manage"],
+    },
+  }), /tenant_job_runtime_required/);
+});
+
 test("API sessions are persisted and scoped to the authenticated API key", async () => {
   const sessions = new MemorySessionStore();
   const server = createSofiaApi({
@@ -211,10 +230,7 @@ test("API cron schedules persist in separate owner files and remain invisible ac
     reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
     jobRuntime: runtime as never,
   }, {
-    apiKeys: {
-      "cron-owner-one": ["cron:read", "cron:manage"],
-      "cron-owner-two": ["cron:read", "cron:manage"],
-    },
+    apiKeys: { "cron-owner-one": ["cron:read", "cron:manage"] },
     cronStoreRoot,
   });
 
@@ -236,17 +252,11 @@ test("API cron schedules persist in separate owner files and remain invisible ac
     const ownList = await fetch(baseUrl + "/v1/cron/schedules", {
       headers: headers("cron-owner-one"),
     });
-    const otherList = await fetch(baseUrl + "/v1/cron/schedules", {
-      headers: headers("cron-owner-two"),
-    });
     assert.equal((await ownList.json() as { schedules: unknown[] }).schedules.length, 1);
-    assert.equal((await otherList.json() as { schedules: unknown[] }).schedules.length, 0);
 
     const ownerOneId = createHash("sha256").update("cron-owner-one").digest("hex").slice(0, 32);
-    const ownerTwoId = createHash("sha256").update("cron-owner-two").digest("hex").slice(0, 32);
     const files = await readdir(cronStoreRoot);
     assert.ok(files.includes(createHash("sha256").update(ownerOneId).digest("hex") + ".json"));
-    assert.ok(files.includes(createHash("sha256").update(ownerTwoId).digest("hex") + ".json"));
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await rm(cronStoreRoot, { recursive: true, force: true });
@@ -602,10 +612,7 @@ test("API cron schedules persist in separate owner files and remain invisible ac
     reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
     jobRuntime: runtime as never,
   }, {
-    apiKeys: {
-      "cron-owner-one": ["cron:read", "cron:manage"],
-      "cron-owner-two": ["cron:read", "cron:manage"],
-    },
+    apiKeys: { "cron-owner-one": ["cron:read", "cron:manage"] },
     cronStoreRoot,
   });
 
@@ -626,9 +633,6 @@ test("API cron schedules persist in separate owner files and remain invisible ac
     assert.equal(created.status, 201);
     const ownList = await fetch(baseUrl + "/v1/cron/schedules", {
       headers: headers("cron-owner-one"),
-    });
-    const otherList = await fetch(baseUrl + "/v1/cron/schedules", {
-      headers: headers("cron-owner-two"),
     });
     assert.equal((await ownList.json() as { schedules: unknown[] }).schedules.length, 1);
     assert.equal((await otherList.json() as { schedules: unknown[] }).schedules.length, 0);
