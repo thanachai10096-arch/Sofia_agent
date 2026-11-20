@@ -279,6 +279,16 @@ class YouTubeUrlValidationTests(unittest.TestCase):
                 "https://www.youtube.com/watch?v=jNQXAC9IVRw",
             )
 
+    def test_video_id_still_runs_public_dns_preflight(self):
+        from agent_reach.channels.youtube import _video_url
+
+        with patch("agent_reach.utils.url.assert_public_http_url", side_effect=lambda value: value) as guard:
+            self.assertEqual(
+                _video_url("jNQXAC9IVRw"),
+                "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            )
+        guard.assert_called_once_with("https://www.youtube.com/watch?v=jNQXAC9IVRw")
+
     def test_video_url_rejects_non_public_and_malformed_targets(self):
         from agent_reach.channels.youtube import _video_url
         from agent_reach.runtime.result import ReachError
