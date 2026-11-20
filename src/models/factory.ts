@@ -16,6 +16,7 @@ import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
+import { createAgentReachTools } from "../integrations/agent-reach.js";
 import { createBrowserTools } from "../browser/tools.js";
 import { BrowserProfileStore } from "../browser/profile-store.js";
 import { BrowserProfileSessionManager } from "../browser/profile-sessions.js";
@@ -122,7 +123,10 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
-  const tools=createToolRegistry(createBuiltinTools());
+  const tools=createToolRegistry([
+    ...createBuiltinTools(),
+    ...(process.env.SOFIA_ENABLE_AGENT_REACH === "true" ? createAgentReachTools() : []),
+  ]);
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
