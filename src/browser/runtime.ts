@@ -118,7 +118,10 @@ export function assertSafeBrowserUrl(input: string): URL {
   return url;
 }
 
-export async function resolvePublicHostAddress(host: string): Promise<string> {
+export async function resolvePublicHostAddress(
+  host: string,
+  resolve: typeof lookup = lookup,
+): Promise<string> {
   const normalized = host.replace(/^\[|\]$/g, "");
   const literalFamily = isIP(normalized);
   if (literalFamily === 4 && isPrivateIpv4(normalized)) throw new Error("Browser egress to private or non-public IP addresses is blocked.");
@@ -126,7 +129,7 @@ export async function resolvePublicHostAddress(host: string): Promise<string> {
   if (literalFamily !== 0) return normalized;
   let addresses: Array<{ address: string; family: number }>;
   try {
-    addresses = await lookup(normalized, { all: true, verbatim: true });
+    addresses = await resolve(normalized, { all: true, verbatim: true });
   } catch {
     throw new Error("Browser navigation host could not be resolved safely.");
   }
