@@ -23,6 +23,8 @@ export interface BrainRunSnapshot {
   plan: ExecutionPlan;
   acceptanceCriteria: AcceptanceCriterion[];
   completedStepIds: string[];
+  /** A tool call may have produced external side effects before a crash. */
+  inFlightStepId?: string;
   checkpointId: string;
   baselineSnapshotId?: string;
   usage: BrainRunUsageSnapshot;
