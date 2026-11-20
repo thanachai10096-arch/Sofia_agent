@@ -121,6 +121,79 @@ test("unknown tool diagnostics suggest exact registered names in the same namesp
   assert.match(message, /exact registered tool names/);
 });
 
+test("Brain recovery replans receive the live registered tool catalog", async () => {
+  let replanCatalog: Array<{ name: string }> = [];
+  const reasoner: BrainReasoner = {
+    async prepare(request) {
+      const parsed = JSON.parse(request) as {
+        phase: string;
+        payload?: { availableTools?: Array<{ name: string }> };
+      };
+      if (parsed.phase === "replan") {
+        replanCatalog = parsed.payload?.availableTools ?? [];
+      }
+      const value = parsed.phase === "understand"
+        ? {
+            objective: "Inspect the workspace",
+            constraints: [],
+            assumptions: [],
+            requiredCapabilities: ["file-read"],
+            requiredTools: ["workspace.list_files"],
+            risk: "low",
+            successCriteria: ["hello.txt is listed"],
+            ambiguities: [],
+          }
+        : parsed.phase === "replan"
+          ? {
+              strategy: "alternative-tool",
+              reason: "Use the exact registered file listing tool.",
+              steps: [{
+                id: "inspect",
+                objective: "List workspace files",
+                dependencies: [],
+                call: { tool: "workspace.list_files", input: { path: "." } },
+              }],
+            }
+          : {
+              strategy: "initial",
+              reason: "The model used a stale tool name.",
+              steps: [{
+                id: "inspect-stale",
+                objective: "List workspace files",
+                dependencies: [],
+                call: { tool: "workspace.list_file", input: { path: "." } },
+              }],
+            };
+      return {
+        inputTokens: 10,
+        async invoke() {
+          return { value, usage: { inputTokens: 10, outputTokens: 20 } };
+        },
+      };
+    },
+  };
+  const brain = createSofiaBrain({
+    dependencies: { reasoner, tools: makeTools(), allowShell: false, allowNetwork: false },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 2, maxModelCalls: 6,
+      maxTokens: 2_000, maxContextTokens: 1_000, maxOutputTokens: 200, timeoutMs: 5_000,
+    },
+  });
+  const report = await brain.run({
+    task: "Inspect the workspace files",
+    acceptanceCriteria: [{
+      id: "file-listed",
+      description: "hello.txt is listed",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt is listed" };
+      },
+    }],
+  });
+  assert.ok(replanCatalog.some((tool) => tool.name === "workspace.list_files"));
+  assert.equal(report.completed, true, report.summary);
+});
+
 test("Brain retries one malformed plan with the strict call schema before failing", async () => {
   let planCalls = 0;
   const reasoner: BrainReasoner = {
