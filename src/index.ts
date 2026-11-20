@@ -22,6 +22,7 @@ export type { DesktopAction, DesktopAdapterConfig, DesktopHostDriver } from "./d
 export { DesktopRuntime, createDesktopPrincipal } from "./desktop/runtime.js";
 export type { DesktopCapability, DesktopPrincipal, DesktopRuntimeConfig } from "./desktop/types.js";
 export { createBuiltinTools } from "./tools/builtin.js";
+export { createFinancialActionTools } from "./payments/financial-tools.js";
 export { buildRepositoryMap, compactRepositoryMap } from "./brain/repository-intelligence.js";
 export { createEditPatch, applyEditPatch, unifiedDiff } from "./brain/edit-engine.js";
 export { reviewCodeChange } from "./review/code-review.js";
