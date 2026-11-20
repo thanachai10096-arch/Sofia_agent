@@ -1,0 +1,12 @@
+[phases.setup]
+nixPkgs = ["python312"]
+
+[phases.install]
+cmds = [
+  "npm ci --no-audit --no-fund",
+  "python -m venv /opt/venv",
+  "/opt/venv/bin/pip install --disable-pip-version-check -r vendor/agent-reach/requirements.txt"
+]
+
+[variables]
+PATH = "/opt/venv/bin:$PATH"
