@@ -110,18 +110,24 @@ def load_config():
     return root, state
 
 
+def project_quota_is_enforced(state):
+    section = re.search(
+        r"Project quota state:[\\s\\S]*?(?=\\n(?:User|Group) quota state:|\\Z)",
+        state,
+        re.IGNORECASE,
+    )
+    if not section:
+        return False
+    body = section.group(0)
+    return bool(re.search(r"Accounting:\\s*ON", body, re.IGNORECASE) and re.search(r"Enforcement:\\s*ON", body, re.IGNORECASE))
+
 def check_xfs(root):
     fs_type = run(["findmnt", "-n", "-o", "FSTYPE", "--target", str(root)]).strip()
     options = run(["findmnt", "-n", "-o", "OPTIONS", "--target", str(root)]).strip().split(",")
     if fs_type != "xfs" or not ({"prjquota", "pquota"} & set(options)):
         fail("workspace root must be on XFS mounted with project quota enabled")
     state = run(["xfs_quota", "-x", "-c", "state", str(root)])
-    project_section = re.search(
-        r"Project quota state:[\\s\\S]*?(?=\\n(?:User|Group) quota state:|\\Z)",
-        state,
-        re.IGNORECASE,
-    )
-    if not project_section or not re.search(r"Accounting:\\s*ON", project_section.group(0), re.IGNORECASE) or not re.search(r"Enforcement:\\s*ON", project_section.group(0), re.IGNORECASE):
+    if not project_quota_is_enforced(state):
         fail("XFS project quota accounting and enforcement are not both ON")
 
 
