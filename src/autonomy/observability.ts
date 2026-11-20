@@ -6,7 +6,7 @@ export type AutonomyEventType =
   | "research.cycle.completed" | "research.cycle.failed" | "research.cycle.denied"
   | "skill.feedback.recorded" | "skill.promoted" | "skill.rolled_back";
 
-export type AutonomyEventOutcome = "succeeded" | "failed" | "denied" | "cancelled";
+export type AutonomyEventOutcome = "running" | "succeeded" | "failed" | "denied" | "cancelled";
 
 export interface AutonomyEventInput {
   /** Host-resolved tenant/project scope; never accept this from model output. */
@@ -58,7 +58,7 @@ const eventTypes = new Set<AutonomyEventType>([
   "research.cycle.completed", "research.cycle.failed", "research.cycle.denied",
   "skill.feedback.recorded", "skill.promoted", "skill.rolled_back",
 ]);
-const outcomes = new Set<AutonomyEventOutcome>(["succeeded", "failed", "denied", "cancelled"]);
+const outcomes = new Set<AutonomyEventOutcome>(["running", "succeeded", "failed", "denied", "cancelled"]);
 const MAX_EVENTS_PER_SCOPE = 20_000;
 const MAX_PAGE_SIZE = 500;
 
@@ -155,7 +155,7 @@ export class AutonomyObservability {
     return this.store.transact(scope, (state) => {
       const summary: AutonomyObservabilitySummary = {
         total: state.events.length, byType: {},
-        byOutcome: { succeeded: 0, failed: 0, denied: 0, cancelled: 0 },
+        byOutcome: { running: 0, succeeded: 0, failed: 0, denied: 0, cancelled: 0 },
         duration: { samples: 0, averageMs: 0, maxMs: 0 },
         resources: { cycles: 0, steps: 0, toolCalls: 0, spendUsd: 0 },
         latestEventAt: null,
@@ -229,7 +229,7 @@ export function createAutonomyRuntimeAuditRecorder(
 ): (event: AutonomyRuntimeAuditEvent) => Promise<void> {
   return async (event) => {
     const mapping = {
-      "autonomy.research.started": { type: "research.started", outcome: "succeeded" },
+      "autonomy.research.started": { type: "research.started", outcome: "running" },
       "autonomy.research.completed": { type: "research.completed", outcome: "succeeded" },
       "autonomy.research.failed": { type: "research.failed", outcome: "failed" },
     } as const;
