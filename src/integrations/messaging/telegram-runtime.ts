@@ -176,6 +176,7 @@ export function createTelegramMessagingRuntime(
     const completionAbort = new AbortController();
     const completionTasks = new Set<Promise<void>>();
     let stopping = false;
+    let stopPromise: Promise<void> | undefined;
     const trackCompletion = (task: Promise<void>): void => {
       completionTasks.add(task);
       void task.finally(() => completionTasks.delete(task)).catch(() => undefined);
@@ -222,15 +223,15 @@ export function createTelegramMessagingRuntime(
     });
     return {
       start: () => gateway.start(),
-      stop: async () => {
-        if (stopping) {
-          await Promise.allSettled([...completionTasks]);
-          return;
-        }
+      stop: () => {
+        if (stopPromise) return stopPromise;
         stopping = true;
         completionAbort.abort(new Error("Telegram messaging runtime is stopping"));
-        await gateway.stop();
-        await Promise.allSettled([...completionTasks]);
+        stopPromise = (async () => {
+          await gateway.stop();
+          await Promise.allSettled([...completionTasks]);
+        })();
+        return stopPromise;
       },
     };
   } catch (error) {
