@@ -42,8 +42,8 @@ class QuotaHelperTests(unittest.TestCase):
         self.assertFalse(HELPER.project_quota_is_enforced(other_quotas_only))
 
     def test_project_quota_state_stops_before_following_quota_sections(self):
-        state = ("Project quota state on /mnt\\nAccounting: ON\\nEnforcement: ON\\n"
-                 "User quota state on /mnt\\nAccounting: OFF\\nEnforcement: OFF\\n")
+        state = ("Project quota state on /mnt\nAccounting: ON\nEnforcement: ON\n"
+                 "User quota state on /mnt\nAccounting: OFF\nEnforcement: OFF\n")
         self.assertTrue(HELPER.project_quota_is_enforced(state))
     def test_strict_json_rejects_duplicate_keys_and_non_finite_numbers(self):
         with self.assertRaises(HELPER.HelperError):
@@ -125,6 +125,26 @@ class QuotaHelperTests(unittest.TestCase):
             allocation = HELPER.load_allocations(state)[run_id]
             self.assertEqual(allocation["status"], "needs_recovery")
             self.assertEqual(allocation["project_id"], HELPER.PROJECT_ID_MIN)
+
+    def test_project_id_collision_detects_hash_prefixed_report_rows(self):
+        run_id = "123e4567-e89b-42d3-a456-426614174003"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            state = Path(temp) / "state"
+            root.mkdir()
+            state.mkdir()
+            def report_existing(argv, timeout=HELPER.COMMAND_TIMEOUT):
+                if "report -p -n" in " ".join(argv):
+                    return "#200000 0 0 0 00\\n"
+                return ""
+            with patch.object(HELPER, "run", side_effect=report_existing):
+                with self.assertRaises(HELPER.HelperError):
+                    HELPER.create(root, state, {
+                        "runId": run_id,
+                        "hardQuotaBytes": 8 * 1024 * 1024,
+                        "hardQuotaInodes": HELPER.INODE_LIMIT,
+                    })
+            self.assertEqual(HELPER.load_allocations(state), {})
 
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
