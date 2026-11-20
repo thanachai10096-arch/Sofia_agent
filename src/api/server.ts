@@ -862,7 +862,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       if (req.method === "GET" && req.url === "/v1/jobs") {
         if (!jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        const jobs = (await jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
+        const jobs = jobRuntime.listForOwner
+          ? await jobRuntime.listForOwner(auth.keyId)
+          : (await jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
         return json(res, 200, { jobs }, origin, config);
       }
 
