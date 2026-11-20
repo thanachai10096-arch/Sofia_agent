@@ -93,6 +93,16 @@ export interface AutonomyToolAuthorizationDecision {
   reason: string;
 }
 
+export interface SkillExecutionResultEvent {
+  runId: string;
+  principalId?: string;
+  skillId: string;
+  stepId: string;
+  tool: string;
+  outcome: "succeeded" | "failed";
+  evidenceId: string;
+}
+
 interface Dependencies {
   /**
    * Optional host-owned autonomy policy gate. The host must derive sandbox
@@ -107,6 +117,8 @@ interface Dependencies {
   allowShell?: boolean;
   allowNetwork?: boolean;
   onEvent?: (event: BrainEvent) => void;
+  /** Best-effort host bridge for outcomes of the learned skill that informed this plan. */
+  onSkillExecutionResult?: (event: SkillExecutionResultEvent) => Promise<void>;
   skillLedger?: SkillLedger;
   onSkillCandidate?: (candidate: LearnedSkillCandidate, runId: string, principalId?: string) => Promise<boolean>;
   projectContext?: ProjectContext;
@@ -747,6 +759,22 @@ export class SofiaBrain {
     } catch (error) {
       if (this.signal.aborted) throw error;
       throw new RecoverableFailure(failureCategory(error), errorMessage(error));
+    }
+
+    if (this.activeSkillId && result.evidenceId && this.dependencies.onSkillExecutionResult) {
+      try {
+        await this.dependencies.onSkillExecutionResult({
+          runId: this.runId,
+          ...(principalId ? { principalId } : {}),
+          skillId: this.activeSkillId,
+          stepId: step.id,
+          tool: step.call.tool,
+          outcome: result.ok ? "succeeded" : "failed",
+          evidenceId: result.evidenceId,
+        });
+      } catch {
+        // Learning telemetry must never change the result of a tool execution.
+      }
     }
 
     const p = preview(result.data);
