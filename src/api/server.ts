@@ -125,7 +125,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   // A process-global JobRuntime executes against one configured workspace. Owner-scoped
   // job IDs do not isolate that execution environment, so reject multi-key use until
   // a tenant-aware JobRuntime factory is available.
-  if (deps.jobRuntime && Object.keys(config.apiKeys).length > 1) {
+  const configuredApiOwners = Object.keys(config.apiKeys);
+  const hasMultiOwnerBackgroundJobAccess = configuredApiOwners.length > 1 &&
+    Object.values(config.apiKeys).some(scopes =>
+      scopes.some(scope => scope === "jobs:read" || scope === "jobs:manage" || scope === "cron:read" || scope === "cron:manage"),
+    );
+  if (hasMultiOwnerBackgroundJobAccess) {
+    throw new Error("tenant_job_runtime_required: multi-owner jobs and cron require an API-routed tenant JobRuntime factory; owner-partitioned records alone are insufficient.");
+  }
+  if (deps.jobRuntime && configuredApiOwners.length > 1) {
     throw new Error("tenant_job_runtime_required: multi-key APIs cannot share a process-global JobRuntime.");
   }
   const agent = new SofiaAgent(deps);
