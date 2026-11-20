@@ -40,7 +40,7 @@ The branch now contains `src/platform/tenant-workspace.ts` with `createTenantWor
 
 Regression coverage is in `src/platform/tenant-workspace.test.ts` for deterministic separation, invalid inputs, and symlink escapes.
 
-**The workspace allocator and tenant dependency factory are foundations, not complete tenant routing.** The optional `dependenciesForOwner` hook can route Agent run requests when a host supplies a secure resolver-backed factory. The repository entrypoint does not yet wire that hook to `createSofiaAgentDependenciesForTenant`; queued-job submission/recovery, cron, shared API resources, messaging adapters, and multi-replica lifecycle still require separate tenant-aware routing and immutable tenant identity.
+**The workspace allocator and tenant dependency factory are foundations, not complete tenant routing.** The preferred `tenantDependencyRegistry` API option accepts a `TenantDependencyRegistry` directly. The API passes only the owner ID derived from the authenticated API key to `getForPrincipal`, so the registry resolves and validates its own context before returning tenant dependencies; the API closes the registry during server shutdown. A regression test covers this resolver-backed path. The legacy `dependenciesForOwner` callback remains as a lower-level host hook, but hosts must implement equivalent trusted resolution themselves. The repository entrypoint does not yet wire that hook to `createSofiaAgentDependenciesForTenant`; queued-job submission/recovery, cron, shared API resources, messaging adapters, and multi-replica lifecycle still require separate tenant-aware routing and immutable tenant identity.
 
 ### Safe interim operating mode
 
