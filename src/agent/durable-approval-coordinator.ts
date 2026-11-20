@@ -50,9 +50,8 @@ function defaultSleep(milliseconds: number, signal?: AbortSignal): Promise<void>
  * this class only persists the encrypted proposal, observes a terminal decision,
  * and returns the authenticated input to that original worker.
  *
- * The metadata and payload stores currently use separate SQLite connections, so
- * creation is compensated (never left actionable) if encrypted-payload storage
- * fails. This is not a cross-host broker or a distributed worker lease.
+ * Creation uses one SQLite transaction in the payload store for metadata plus
+ * encrypted proposal. This is not a cross-host broker or a distributed worker lease.
  */
 export class DurableApprovalCoordinator {
   private readonly ttlMs: number;
@@ -98,18 +97,15 @@ export class DurableApprovalCoordinator {
       actionHash: request.actionHash, expiresAt,
     };
 
-    if (!this.approvals.createPending(record)) return null;
     let serialized: string;
     try {
       serialized = JSON.stringify(request.input);
-      if (typeof serialized !== "string") throw new Error("Approval input is not serializable.");
+      if (typeof serialized !== "string") return null;
     } catch {
-      this.approvals.settlePending(id, principalId, request.actionHash, "interrupted", this.now());
       return null;
     }
-    if (!this.payloads.save(serialized, context, this.cipher, this.now())) {
-      // A metadata-only pending row must never be presented as an actionable approval.
-      this.approvals.settlePending(id, principalId, request.actionHash, "interrupted", this.now());
+    // Metadata and encrypted proposal are inserted in one SQLite transaction.
+    if (!this.payloads.createPendingWithPayload(record, serialized, context, this.cipher, this.now())) {
       return null;
     }
     return { id, context };
