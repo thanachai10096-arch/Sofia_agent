@@ -58,6 +58,32 @@ test("receipt reconciliation flags orphaned and mismatched executions without re
   );
 });
 
+test("receipt reconciliation keeps duplicate start IDs indeterminate even with a matching terminal event", () => {
+  const started = (actionHash: string): SecurityAuditEvent => ({
+    id: "duplicated-start-id",
+    at: "2026-11-20T00:00:00.000Z",
+    runId: "run-duplicate",
+    principalId: "owner-duplicate",
+    toolName: "external.purchase",
+    actionHash,
+    risk: "high",
+    decision: "execution_started",
+  });
+  const first = started("action-one");
+  const second = started("action-two");
+  const terminal: SecurityAuditEvent = {
+    ...first,
+    id: "terminal-one",
+    relatedEventId: first.id,
+    decision: "completed",
+  };
+  assert.deepEqual(
+    findIndeterminateExecutions([first, second, terminal]).map((event) => event.actionHash).sort(),
+    ["action-one", "action-two"],
+    "ambiguous duplicate receipt IDs must never be treated as safely resolved",
+  );
+});
+
 test("durable receipt reconciliation reads journal state and never replays actions", async () => {
   const events: SecurityAuditEvent[] = [{
     id: "orphaned-start",
