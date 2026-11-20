@@ -46,6 +46,28 @@ test("pinned browser resolver rejects private literals and preserves public IP l
   assert.equal(await resolvePublicHostAddress("8.8.8.8"), "8.8.8.8");
 });
 
+test("pinned browser resolver rejects a hostname with any private DNS answer", async () => {
+  const mixedAnswers = async () => [
+    { address: "93.184.216.34", family: 4 },
+    { address: "127.0.0.1", family: 4 },
+  ];
+  await assert.rejects(
+    () => resolvePublicHostAddress("rebinding.example", mixedAnswers as never),
+    /host resolving to private or non-public IP/,
+  );
+});
+
+test("pinned browser resolver selects a numeric address from validated DNS answers", async () => {
+  const publicAnswers = async () => [
+    { address: "2606:4700:4700::1111", family: 6 },
+    { address: "93.184.216.34", family: 4 },
+  ];
+  assert.equal(
+    await resolvePublicHostAddress("public.example", publicAnswers as never),
+    "93.184.216.34",
+  );
+});
+
 test("browser egress proxy blocks HTTP requests to private IP literals", async () => {
   const proxy = await createBrowserEgressProxy();
   const address = new URL(proxy.url);
