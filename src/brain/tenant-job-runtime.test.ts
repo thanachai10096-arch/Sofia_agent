@@ -239,3 +239,24 @@ test("registry-backed tenant job router restores persisted jobs without crossing
     await restartedRouter.close();
   }
 });
+
+test("TenantJobRuntimeRouter recovers queued work independently for every configured tenant", async () => {
+  const recovered: string[] = [];
+  const router = new TenantJobRuntimeRouter([ownerOne, ownerTwo], (owner) => ({
+    async submit() { throw new Error("unused"); },
+    async get() { return undefined; },
+    async getForOwner() { return undefined; },
+    async resume() { throw new Error("unused"); },
+    async resumeForOwner() { throw new Error("unused"); },
+    async cancel() { return false; },
+    async cancelForOwner() { return false; },
+    async list() { return []; },
+    async recoverQueued() { recovered.push(owner); return owner === ownerOne ? 2 : 3; },
+  }));
+  try {
+    assert.equal(await router.recoverQueued(), 5);
+    assert.deepEqual(recovered.sort(), [ownerOne, ownerTwo]);
+  } finally {
+    await router.close();
+  }
+});
