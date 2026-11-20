@@ -126,6 +126,52 @@ test("Anthropic adapter adds JSON-only instructions for structured Brain request
   }
 });
 
+test("DeepSeek structured Brain calls use OpenAI-compatible JSON Output even when Anthropic is configured", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let requestedHeaders: Record<string, string> = {};
+  let requestedBody: Record<string, unknown> = {};
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input);
+    requestedHeaders = init?.headers as Record<string, string>;
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ mode: "conversation", response: "Hello", objective: "Reply", constraints: [], assumptions: [], requiredCapabilities: [], requiredTools: [], risk: "low", successCriteria: [], ambiguities: [] }) }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 25, completion_tokens: 30 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+
+  try {
+    const gateway = new SofiaModelGateway({
+      fast: {
+        baseUrl: "https://api.deepseek.com/anthropic",
+        apiKey: "deepseek-test-key",
+        model: "deepseek-flash",
+        protocol: "anthropic-messages",
+      },
+    });
+    const result = await gateway.generate({
+      task: "Say hello",
+      kind: "general",
+      step: 1,
+      context: JSON.stringify({
+        phase: "understand",
+        instructions: "Return one JSON object",
+        acceptanceCriteria: [],
+      }),
+    }, { ...route, id: "fast", providerId: "fast", capabilities: ["fast"] }, { maxOutputTokens: 700 });
+
+    assert.equal(requestedUrl, "https://api.deepseek.com/chat/completions");
+    assert.equal(requestedHeaders.authorization, "Bearer deepseek-test-key");
+    assert.deepEqual(requestedBody.response_format, { type: "json_object" });
+    assert.equal(requestedBody.model, "deepseek-flash");
+    assert.equal(result.usage?.inputTokens, 25);
+    assert.match(result.text, /"mode":"conversation"/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("OpenAI-compatible structured Brain requests explicitly instruct JSON-only output", async () => {
   const originalFetch = globalThis.fetch;
   let requestedBody: Record<string, unknown> = {};
@@ -296,4 +342,39 @@ test("Anthropic thinking-only recovery explicitly disables provider-default thin
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test("OpenAI-compatible gateway preserves length finish reason for non-empty output", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: "{\"partial\":true}" }, finish_reason: "length" }],
+    usage: { prompt_tokens: 10, completion_tokens: 20 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const gateway = new SofiaModelGateway({ coding: {
+      baseUrl: "https://api.example.com/v1", apiKey: "test", model: "test-model",
+    } });
+    const result = await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route);
+    assert.equal(result.text, "{\"partial\":true}");
+    assert.equal(result.finishReason, "length");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("Anthropic max_tokens stop reason is normalized to length", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    content: [{ type: "text", text: "{\"partial\":true}" }],
+    stop_reason: "max_tokens",
+    usage: { input_tokens: 10, output_tokens: 20 },
+  }), { status: 200, headers: { "content-type": "application/json" } });
+  try {
+    const gateway = new SofiaModelGateway({ coding: {
+      baseUrl: "https://api.anthropic.com/v1", apiKey: "test", model: "claude-test-model",
+      protocol: "anthropic-messages",
+    } });
+    const result = await gateway.generate({ task: "test", kind: "analysis", step: 1 }, route);
+    assert.equal(result.text, "{\"partial\":true}");
+    assert.equal(result.finishReason, "length");
+  } finally { globalThis.fetch = originalFetch; }
 });

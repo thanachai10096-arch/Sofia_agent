@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { SofiaApiError } from "../../sdk/client.js";
+import { SqliteApprovalQueue, createQueuedApprovalHandler } from "../../agent/approval-queue.js";
 import {
   createTelegramMessagingRuntime,
   reportTelegramRunCompletion,
   parseTelegramChatAllowlist,
   parseTelegramUserAllowlist,
+  parseTelegramUserApiKeys,
 } from "./telegram-runtime.js";
 
 test("Telegram allowlists accept numeric user IDs and signed chat IDs", () => {
@@ -18,6 +21,21 @@ test("Telegram allowlists reject empty, malformed and duplicate IDs", () => {
   assert.throws(() => parseTelegramUserAllowlist("123,abc"), /valid numeric IDs/);
   assert.throws(() => parseTelegramUserAllowlist("123,123"), /duplicate IDs/);
   assert.throws(() => parseTelegramChatAllowlist("-1, -1"), /duplicate IDs/);
+});
+
+test("Telegram API credentials are unique and scoped to every allowed sender", () => {
+  const allowed = parseTelegramUserAllowlist("123,456");
+  const keys = parseTelegramUserApiKeys('{"123":"key-one","456":"key-two"}', allowed);
+  assert.equal(keys.get("123"), "key-one");
+  assert.equal(keys.get("456"), "key-two");
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"same","456":"same"}', allowed), /unique non-empty API key/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one"}', allowed), /every allowed Telegram user ID/);
+  assert.throws(() => parseTelegramUserApiKeys('{"123":"key-one","999":"key-two"}', allowed), /every allowed Telegram user ID/);
+  assert.throws(
+    () => parseTelegramUserApiKeys('{"123":"master-key","456":"key-two"}', allowed, new Set(["master-key"])),
+    /not shared with another Sofia identity/,
+  );
+  assert.throws(() => parseTelegramUserApiKeys('not-json', allowed), /every allowed Telegram user ID/);
 });
 
 test("Telegram integration remains disabled unless explicitly enabled", () => {
@@ -52,6 +70,36 @@ test("complete Telegram configuration constructs a runtime without starting netw
     TELEGRAM_ALLOWED_USER_IDS: "123",
     TELEGRAM_ALLOWED_CHAT_IDS: "123",
     SOFIA_API_KEY: "test-key",
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.ok(runtime);
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
+});
+
+test("Telegram refuses a shared API key when multiple users are allowed", () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    SOFIA_API_KEY: "shared-key",
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.equal(runtime, undefined);
+  assert.match(warnings[0] ?? "", /Per-user Telegram API keys are required/);
+  assert.doesNotMatch(warnings.join(" "), /shared-key/);
+});
+
+test("Telegram accepts distinct per-user API keys without a shared fallback key", async () => {
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123,456",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"key-one","456":"key-two"}',
     SOFIA_API_BASE_URL: "https://sofia.example.invalid",
   }, "/tmp/sofia-test", (message) => warnings.push(message));
   assert.ok(runtime);
@@ -149,4 +197,156 @@ test("Telegram run completion records timeout and failed delivery separately", a
     "telegram_run_wait_failed run_id=run-timeout kind=timeout",
     "telegram_completion_delivery_failed run_id=run-timeout",
   ]);
+});
+
+test("Telegram approval commands list only the sender API key's pending approvals", async () => {
+  const { handleTelegramApprovalCommand } = await import("./telegram-runtime.js");
+  let listed = 0;
+  const reply = await handleTelegramApprovalCommand({
+    listApprovals: async () => {
+      listed += 1;
+      return { approvals: [{
+        id: "123e4567-e89b-12d3-a456-426614174000",
+        runId: "run-1", toolName: "workspace.write", input: { path: "notes.txt" },
+        actionHash: "a".repeat(64), risk: "high", status: "pending", expiresAt: 1_900_000_000_000,
+      }] };
+    },
+    decideApproval: async () => ({}),
+  }, "/approvals");
+  assert.equal(listed, 1);
+  assert.match(reply ?? "", /workspace.write/);
+  assert.match(reply ?? "", /Action hash: a{64}/);
+});
+
+test("Telegram approve and reject require the exact approval ID and action hash", async () => {
+  const { handleTelegramApprovalCommand } = await import("./telegram-runtime.js");
+  const decisions: Array<{ id: string; hash: string; approved: boolean }> = [];
+  const client = {
+    listApprovals: async () => ({ approvals: [] }),
+    decideApproval: async (id: string, hash: string, approved: boolean) => {
+      decisions.push({ id, hash, approved });
+      return {};
+    },
+  };
+  const id = "123e4567-e89b-12d3-a456-426614174000";
+  const hash = "b".repeat(64);
+  assert.match(await handleTelegramApprovalCommand(client, "/approve") ?? "", /Usage/);
+  assert.match(await handleTelegramApprovalCommand(client, "/approve " + id + " " + hash) ?? "", /อนุมัติแล้ว/);
+  assert.match(await handleTelegramApprovalCommand(client, "/reject " + id + " " + hash) ?? "", /ปฏิเสธ/);
+  assert.deepEqual(decisions, [
+    { id, hash, approved: true },
+    { id, hash, approved: false },
+  ]);
+});
+
+
+test("Telegram approval notices require the API-key-bound user and an allowlisted private chat", async () => {
+  const key = "private-user-key";
+  const ownerKeyId = createHash("sha256").update(key).digest("hex").slice(0, 32);
+  const warnings: string[] = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "-100999",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"private-user-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message));
+  assert.ok(runtime);
+  assert.equal(await runtime.notifyApproval(ownerKeyId, "approval"), false);
+  assert.equal(await runtime.notifyApproval("another-owner-key-id", "approval"), false);
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
+});
+
+test("Telegram approval notices do not use an untrusted group chat as a destination", async () => {
+  const key = "private-user-key";
+  const ownerKeyId = createHash("sha256").update(key).digest("hex").slice(0, 32);
+  const warnings: string[] = [];
+  const sent: Array<{ url: string; body: string }> = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"private-user-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", (message) => warnings.push(message), {
+    fetchImpl: async (input, init) => {
+      sent.push({ url: String(input), body: String(init?.body ?? "") });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 7 } }), { status: 200 });
+    },
+  });
+  assert.ok(runtime);
+  assert.equal(await runtime.notifyApproval(ownerKeyId, "approval"), true);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0]!.url, /\/sendMessage$/);
+  assert.equal(JSON.parse(sent[0]!.body).chat_id, "123");
+  assert.equal(JSON.parse(sent[0]!.body).text, "approval");
+  await runtime.stop();
+  assert.deepEqual(warnings, []);
+});
+
+
+test("Telegram approval flow persists, notifies the key-bound private chat, and resumes only after owner approval", async () => {
+  const key = "private-user-key";
+  const ownerKeyId = createHash("sha256").update(key).digest("hex").slice(0, 32);
+  const sent: Array<{ url: string; body: string }> = [];
+  const runtime = createTelegramMessagingRuntime({
+    SOFIA_MESSAGING_ENABLED: "true",
+    TELEGRAM_BOT_TOKEN: "1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghi",
+    TELEGRAM_ALLOWED_USER_IDS: "123",
+    TELEGRAM_ALLOWED_CHAT_IDS: "123",
+    TELEGRAM_USER_API_KEYS_JSON: '{"123":"private-user-key"}',
+    SOFIA_API_BASE_URL: "https://sofia.example.invalid",
+  }, "/tmp/sofia-test", () => undefined, {
+    fetchImpl: async (input, init) => {
+      sent.push({ url: String(input), body: String(init?.body ?? "") });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 8 } }), { status: 200 });
+    },
+  });
+  assert.ok(runtime);
+  const queue = await SqliteApprovalQueue.open(":memory:");
+  try {
+    const handler = createQueuedApprovalHandler(queue, {
+      pollMs: 100,
+      ttlMs: 5_000,
+      onCreated: async (record) => {
+        assert.equal(record.ownerId, ownerKeyId);
+        assert.equal(await runtime.notifyApproval(
+          record.ownerId,
+          "Sofia has an action waiting for your approval. Use /approvals in this private chat to review the exact action.",
+        ), true);
+      },
+    });
+    const waiting = handler({
+      runId: "telegram-run-1",
+      principalId: ownerKeyId,
+      toolName: "terminal.run",
+      input: { command: "npm test" },
+      actionHash: "a".repeat(64),
+      risk: "high",
+    });
+    for (let attempt = 0; attempt < 20 && sent.length === 0; attempt++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(sent.length, 1);
+    assert.match(sent[0]!.url, /\/sendMessage$/);
+    assert.equal(JSON.parse(sent[0]!.body).chat_id, "123");
+    assert.match(JSON.parse(sent[0]!.body).text, /Use \/approvals/);
+    const pending = queue.list(ownerKeyId)[0];
+    assert.ok(pending);
+    const approved = queue.decide({
+      id: pending.id,
+      ownerId: ownerKeyId,
+      decidedBy: ownerKeyId,
+      actionHash: pending.actionHash,
+      approved: true,
+    });
+    assert.equal(approved?.status, "approved");
+    assert.equal(await waiting, true);
+  } finally {
+    queue.close();
+    await runtime.stop();
+  }
 });

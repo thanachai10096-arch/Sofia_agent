@@ -68,6 +68,8 @@ export interface InferenceRequest {
   phase: BrainPhase;
   minimumQualityTier: number;
   requiredCapabilities: readonly string[];
+  /** Explicit user-selected route; when set, phase routing constraints do not override the user's choice. */
+  preferredRouteId?: string;
   core: PromptCore;
   evidence: readonly EvidenceChunk[];
 }
@@ -324,11 +326,12 @@ export class TokenAwareGateway {
         rejected.outputCap += 1;
         continue;
       }
-      if (route.qualityTier < input.minimumQualityTier) {
+      const explicitlySelected = input.preferredRouteId === route.id;
+      if (!explicitlySelected && route.qualityTier < input.minimumQualityTier) {
         rejected.qualityTier += 1;
         continue;
       }
-      if (!input.requiredCapabilities.every((capability) =>
+      if (!explicitlySelected && !input.requiredCapabilities.every((capability) =>
         route.capabilities.includes(capability),
       )) {
         rejected.capabilities += 1;

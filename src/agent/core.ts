@@ -147,6 +147,7 @@ export class SofiaAgent {
       task: request.task,
       ...(request.context !== undefined ? { context: request.context } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
+      ...(request.notificationChannelId ? { notificationChannelId: request.notificationChannelId } : {}),
       ...(request.acceptanceCriteria
         ? { acceptanceCriteria: request.acceptanceCriteria }
         : {}),
@@ -310,10 +311,12 @@ export class SofiaAgent {
               const approved = await this.deps.approval({
                 runId,
                 principalId: request.principalId,
+                ...(request.notificationChannelId ? { notificationChannelId: request.notificationChannelId } : {}),
                 toolName: call.name,
                 input: structuredClone(actionInput),
                 actionHash: actionHash(runId, call.name, actionInput, request.principalId),
                 risk,
+                ...(request.signal ? { signal: request.signal } : {}),
               });
 
               if (!approved) {

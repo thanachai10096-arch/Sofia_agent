@@ -29,9 +29,9 @@ const token = "a".repeat(60);
 
 test("Discord Gateway identifies with minimum guild/message-content intents and routes ordinary guild messages", async () => {
   const controller = new AbortController();
-  const received: Array<{ id: string; content: string }> = [];
+  const received: Array<{ id: string; content: string; source?: string }> = [];
   const transport = createDiscordGatewayTransport({ botToken: token, WebSocketImpl: WebSocketFake });
-  await transport.start(controller.signal, async (message) => { received.push({ id: message.id, content: message.content }); });
+  await transport.start(controller.signal, async (message) => { received.push({ id: message.id, content: message.content, source: message.source }); });
   const socket = FakeSocket.latest!;
   await new Promise((resolve) => setImmediate(resolve));
   socket.server({ op: 10, d: { heartbeat_interval: 60_000 } });
@@ -44,7 +44,7 @@ test("Discord Gateway identifies with minimum guild/message-content intents and 
     content: "สวัสดี Sofia", timestamp: "2026-11-07T10:00:00.000Z", attachments: [],
   } });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(received, [{ id: "123456789", content: "สวัสดี Sofia" }]);
+  assert.deepEqual(received, [{ id: "123456789", content: "สวัสดี Sofia", source: "gateway" }]);
   controller.abort();
   await transport.stop();
 });

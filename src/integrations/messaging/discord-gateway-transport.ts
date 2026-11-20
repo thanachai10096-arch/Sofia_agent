@@ -166,6 +166,7 @@ export function createDiscordGatewayTransport(options: DiscordGatewayTransportOp
         }) : [];
         const message: VerifiedDiscordMessage = {
           signatureVerified: true,
+          source: "gateway",
           id: String(data.id),
           channelId: String(data.channel_id),
           author: { id: String(author.id), ...(typeof author.username === "string" ? { username: author.username.slice(0, 128) } : {}), bot: false },

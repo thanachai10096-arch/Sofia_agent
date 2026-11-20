@@ -33,7 +33,95 @@ export class RegistryToolGateway implements ToolGateway {
     private readonly security:SecurityController=new SecurityController(),
     private readonly audit?:SecurityAuditSink,
   ){this.checkpoints=checkpoints??new RuntimeCheckpointManager(dependencies.runtime);}
-  listTools(){return this.dependencies.tools.list().map((tool)=>({name:tool.name,description:tool.description,effects:effectiveToolEffects(tool.name,tool.effects)}));}
+  listTools(){return this.dependencies.tools.list().map((tool)=>{
+    const effects=effectiveToolEffects(tool.name,tool.effects);
+    const permission=toolPermission(this.policy,tool.name,effects);
+    let status:"allowed"|"approval_required"|"blocked"="allowed";
+    let reason:string|undefined;
+    if(this.security.isKilled()){status="blocked";reason="Sofia security kill switch is active.";}
+    else if(!this.policy.allowTools){status="blocked";reason="Tool execution is disabled by policy."; }
+    else if(effects.includes("network")&&!this.policy.allowNetwork){status="blocked";reason="Network access is disabled by execution policy.";}
+    else if(permission.allow===false){status="blocked";reason="Disabled by execution policy: "+tool.name;}
+    else if(effects.includes("network")&&this.policy.allowedHosts.length===0){status="blocked";reason="Network tool has no configured allowed-host list.";}
+    else if(permission.requireApproval===true||effects.some(effect=>effect==="write"||effect==="shell"||effect==="destructive"||effect==="browser")){
+      status="approval_required";
+      reason=this.approval?"Approval is required before execution.":"Approval is required but no approval handler is configured.";
+      if(!this.approval)status="blocked";
+    }
+    return{name:tool.name,description:tool.description,effects,registered:true,policy:{status,reason},runtimeReadiness:"not_probed" as "ready"|"not_probed"|"unavailable",runtimeReason:undefined as string|undefined};
+  });}
+  /**
+   * Probe runtime readiness without executing user tools or making network requests.
+   * Workspace checks are read-only. Shell and browser remain not_probed because a
+   * real probe would execute code or create a browser session outside this gateway.
+   */
+  async probeReadiness(){
+    const catalog=this.listTools();
+    let workspaceReady:{ok:boolean;reason:string}|undefined;
+    const browserProbeResults=new Map<() => Promise<{ok:boolean;reason:string}>,Promise<{ok:boolean;reason:string}>>();
+    for(const item of catalog){
+      if(item.name.startsWith("workspace.")||item.name==="project.verify"){
+        // Discovery must not touch workspace state when policy has already
+        // blocked the capability (including the global tools kill switch).
+        if(item.policy?.status==="blocked"){
+          item.runtimeReadiness="not_probed";
+          item.runtimeReason="Workspace probe skipped because execution policy blocks this tool.";
+          continue;
+        }
+        if(!workspaceReady){
+          try{
+            const root=await this.dependencies.runtime.cwd();
+            if(typeof root!=="string"||!root.trim())throw new Error("Workspace runtime returned an empty working directory.");
+            await this.dependencies.runtime.listFiles(".");
+            workspaceReady={ok:true,reason:"Read-only workspace root and directory listing checks passed."};
+          }catch(error){
+            workspaceReady={ok:false,reason:error instanceof Error?error.message:"Workspace runtime probe failed."};
+          }
+        }
+        item.runtimeReadiness=workspaceReady.ok?"ready":"unavailable";
+        item.runtimeReason=workspaceReady.reason;
+      }else if(item.effects.includes("browser")||item.name.startsWith("browser.")){
+        if(item.policy?.status==="blocked"){
+          item.runtimeReadiness="not_probed";
+          item.runtimeReason="Browser runtime probe skipped because execution policy blocks this tool.";
+        }else{
+          const registered=this.dependencies.tools.get(item.name);
+          const probe=registered?.probeReadiness;
+          if(!probe){
+            item.runtimeReadiness="not_probed";
+            item.runtimeReason="No safe browser-session probe is registered for this tool.";
+          }else{
+            let pending=browserProbeResults.get(probe);
+            if(!pending){
+              pending=probe().catch(error=>({ok:false,reason:error instanceof Error?error.message:"Browser runtime probe failed."}));
+              browserProbeResults.set(probe,pending);
+            }
+            const result=await pending;
+            item.runtimeReadiness=result.ok?"ready":"unavailable";
+            item.runtimeReason=result.reason;
+          }
+        }
+      }else if(item.effects.includes("shell")){
+        item.runtimeReadiness="not_probed";
+        item.runtimeReason="Terminal execution was not invoked during discovery to avoid running a command outside an approved task.";
+      }else if(item.effects.includes("network")){
+        if(!this.policy.allowNetwork||this.policy.allowedHosts.length===0){
+          item.runtimeReadiness="unavailable";
+          item.runtimeReason="Network access is disabled or no host allowlist is configured.";
+        }else if((item.name==="web.search"||item.name==="web.search_news")&&!process.env.BRAVE_SEARCH_API_KEY?.trim()){
+          item.runtimeReadiness="unavailable";
+          item.runtimeReason="BRAVE_SEARCH_API_KEY is not configured.";
+        }else{
+          item.runtimeReadiness="not_probed";
+          item.runtimeReason="Network credentials and policy are configured, but no external request was sent during discovery.";
+        }
+      }else{
+        item.runtimeReadiness="not_probed";
+        item.runtimeReason="No safe runtime-specific probe is registered for this tool.";
+      }
+    }
+    return catalog;
+  }
   describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:effectiveToolEffects(name,tool.effects)};}
 
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
@@ -56,7 +144,10 @@ export class RegistryToolGateway implements ToolGateway {
     if(!this.policy.allowTools)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution is disabled by policy."}};
     const permission=toolPermission(this.policy,call.tool,descriptor.effects);
     if(permission.allow===false)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:`Tool execution is disabled by policy: ${call.tool}`}};
-    const assessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:input,effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
+    const securityInput = registeredTool.networkUrl
+      ? { ...input, ...(Object.prototype.hasOwnProperty.call(input, "url") ? { requestedUrl: input.url } : {}), url: registeredTool.networkUrl }
+      : input;
+    const assessment=assessAction({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:securityInput,effects:descriptor.effects},this.policy.blockedPaths,this.policy.allowedHosts);
     if(!assessment.allowed){
       await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"deny",reason:assessment.reason,input:redactSecrets(input)});
       return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:assessment.reason??"Security policy denied the action."}};
@@ -74,7 +165,7 @@ export class RegistryToolGateway implements ToolGateway {
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
       context.notifyApproval(true);
       try{
-        const approved=await this.approval({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk});
+        const approved=await this.approval({runId:context.runId,principalId:context.principalId,notificationChannelId:context.notificationChannelId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk,signal:context.signal});
         if(!approved){
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
@@ -82,6 +173,8 @@ export class RegistryToolGateway implements ToolGateway {
       }finally{context.notifyApproval(false);}
     }
     try{
+      // Approval can take arbitrarily long; never trust the lease state observed before waiting.
+      await context.assertExecutionLease?.();
       this.security.assertRunning();
       context.signal.throwIfAborted();
       if(capabilitySecret && (!capability || !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret))) {
@@ -93,6 +186,9 @@ export class RegistryToolGateway implements ToolGateway {
       const boundSignal=this.security.bindSignal(context.signal);
       let data:unknown;
       try {
+        // Revalidate at the last gateway boundary before dispatching the side effect.
+        await context.assertExecutionLease?.();
+        context.signal.throwIfAborted();
         data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
       } finally {
         boundSignal.dispose();

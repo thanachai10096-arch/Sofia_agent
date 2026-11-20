@@ -77,8 +77,8 @@ export class McpStdioTransport implements McpTransport {
       }
     });
   }
-  async notify(method: string, params?: unknown): Promise<void> {
-    this.assertOpen();
+  async notify(method: string, params?: unknown, signal?: AbortSignal): Promise<void> {
+    this.assertOpen(); signal?.throwIfAborted();
     this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) }) + "\n");
   }
   async close(): Promise<void> {
@@ -97,6 +97,7 @@ export class McpHttpTransport implements McpTransport {
   private readonly endpoint: URL;
   private readonly fetchImpl: typeof fetch;
   private sessionId: string | undefined;
+  private protocolVersion: string | undefined;
   private closed = false;
   constructor(private readonly options: McpHttpTransportOptions) {
     this.endpoint = new URL(options.endpoint);
@@ -128,12 +129,16 @@ export class McpHttpTransport implements McpTransport {
     if (!parsed || parsed.id !== id) throw new Error("MCP HTTP response id did not match the request");
     return responseValue(parsed);
   }
-  async notify(method: string, params?: unknown): Promise<void> {
-    this.assertOpen();
-    const response = await this.fetchImpl(this.endpoint, { method: "POST", headers: this.headers(), body: JSON.stringify({ jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) }), redirect: "error" });
+  async notify(method: string, params?: unknown, signal?: AbortSignal): Promise<void> {
+    this.assertOpen(); signal?.throwIfAborted();
+    const response = await this.fetchImpl(this.endpoint, { method: "POST", headers: this.headers(), body: JSON.stringify({ jsonrpc: "2.0", method, ...(params === undefined ? {} : { params }) }), signal, redirect: "error" });
     this.captureSession(response);
     if (!response.ok && response.status !== 202) throw new Error("MCP HTTP notification failed with status " + response.status);
     if (response.status !== 202) await response.body?.cancel();
+  }
+  setProtocolVersion(version: string): void {
+    if (!version.trim() || /[\\r\\n]/.test(version)) throw new Error("Invalid negotiated MCP protocol version");
+    this.protocolVersion = version;
   }
   async close(): Promise<void> {
     if (this.closed) return;
@@ -144,7 +149,13 @@ export class McpHttpTransport implements McpTransport {
     finally { this.sessionId = undefined; }
   }
   private headers(): Record<string, string> {
-    return { accept: "application/json, text/event-stream", "content-type": "application/json", ...this.options.headers, ...(this.sessionId ? { "mcp-session-id": this.sessionId } : {}) };
+    return {
+      accept: "application/json, text/event-stream",
+      "content-type": "application/json",
+      ...this.options.headers,
+      ...(this.sessionId ? { "mcp-session-id": this.sessionId } : {}),
+      ...(this.protocolVersion ? { "mcp-protocol-version": this.protocolVersion } : {}),
+    };
   }
   private captureSession(response: Response): void { const value = response.headers.get("mcp-session-id"); if (value) this.sessionId = value; }
   private assertOpen(): void { if (this.closed) throw new Error("MCP HTTP transport is closed"); }

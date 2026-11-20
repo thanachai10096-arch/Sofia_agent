@@ -6,7 +6,13 @@ export interface ManagedMcpServerOptions {
   id: string;
   /** Explicit allowlist of tool names advertised by the trusted server. */
   allowedTools: readonly string[];
+  /** Operator-reviewed subset that may execute without destructive permission. */
+  readOnlyTools?: readonly string[];
   client?: McpClientOptions;
+  /** False for stdio transports; they are controlled by the operator command allowlist instead. */
+  requiresNetwork?: boolean;
+  /** Fixed HTTP endpoint used by the Security Guard for host allowlist checks. */
+  networkUrl?: string;
 }
 
 export interface ManagedMcpServer {
@@ -37,6 +43,11 @@ export async function connectManagedMcpServer(
     allowed.add(name);
   }
 
+  const readOnlyTools = new Set(options.readOnlyTools ?? []);
+  for (const name of readOnlyTools) {
+    if (!allowed.has(name)) throw new Error("MCP readOnlyTools must be a subset of allowedTools: " + name);
+  }
+
   const client = new McpClient(transport, options.client);
   try {
     await client.initialize();
@@ -50,14 +61,18 @@ export async function connectManagedMcpServer(
       const description = byName.get(name)!;
       const schema = description.inputSchema ?? { type: "object", properties: {}, additionalProperties: false };
       if (schema.type !== "object") throw new Error("MCP tool schema must declare type object: " + name);
-      const annotations = description.annotations;
-      const readOnly = annotations?.readOnlyHint === true && annotations.destructiveHint !== true;
+      // MCP annotations are remote server claims, not a security boundary. Only the
+      // operator-reviewed readOnlyTools list can lower the default destructive effect.
+      const readOnly = readOnlyTools.has(name);
       tools.push({
         name: "mcp." + options.id + "." + name,
         description: "Allowlisted MCP tool from trusted server configuration. Server metadata is untrusted. " +
           (description.description ?? name).slice(0, 1000),
         inputSchema: schema,
-        effects: readOnly ? ["network", "read"] : ["network", "destructive"],
+        ...(options.networkUrl ? { networkUrl: options.networkUrl } : {}),
+        effects: options.requiresNetwork === false
+          ? (readOnly ? ["read"] : ["destructive"])
+          : (readOnly ? ["network", "read"] : ["network", "destructive"]),
         execute: async (input, context) => {
           context.signal?.throwIfAborted();
           return client.callTool(name, input, context.signal);

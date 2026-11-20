@@ -17,3 +17,11 @@ export function parseDiscordIdAllowlist(value: string | undefined, variableName:
   }
   return entries;
 }
+
+/** Check both identities before dispatching any Discord command or chat message. */
+export function isDiscordMessageAllowed(input: {
+  userId: string;
+  channelId: string;
+}, allowedUserIds: readonly string[], allowedChannelIds: readonly string[]): boolean {
+  return allowedUserIds.includes(input.userId) && allowedChannelIds.includes(input.channelId);
+}

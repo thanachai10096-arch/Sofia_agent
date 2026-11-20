@@ -53,6 +53,30 @@ test("snapshot detects content changes even when the path stays modified", async
   assert.deepEqual(changed, ["src/app.ts"]);
 });
 
+test("workspace readiness discovery does not touch the workspace when tool policy blocks access", async () => {
+  let cwdCalls = 0;
+  let listFilesCalls = 0;
+  const rt = {
+    ...runtime(),
+    async cwd() { cwdCalls += 1; return "/workspace"; },
+    async listFiles() { listFilesCalls += 1; return ["src/app.ts"]; },
+  } satisfies WorkspaceRuntime;
+  const gateway = new RegistryToolGateway(
+    { runtime: rt, tools: createToolRegistry(createBuiltinTools()) },
+    { ...defaultPolicy, allowTools: false },
+  );
+
+  const discovered = await gateway.probeReadiness();
+  const workspaceTools = discovered.filter((tool) => tool.name.startsWith("workspace."));
+
+  assert.ok(workspaceTools.length > 0);
+  assert.ok(workspaceTools.every((tool) => tool.policy?.status === "blocked"));
+  assert.ok(workspaceTools.every((tool) => tool.runtimeReadiness === "not_probed"));
+  assert.ok(workspaceTools.every((tool) => /probe skipped/i.test(tool.runtimeReason ?? "")));
+  assert.equal(cwdCalls, 0, "blocked workspace discovery must not inspect the working directory");
+  assert.equal(listFilesCalls, 0, "blocked workspace discovery must not list files");
+});
+
 test("inspection tools are available without write approval", async () => {
   const rt = runtime();
   const gateway = new RegistryToolGateway(
@@ -73,6 +97,98 @@ test("inspection tools are available without write approval", async () => {
   assert.equal(result.ok, true);
 });
 
+
+test("web search remains disabled by default and runs only with network policy plus the fixed host allowlist", async () => {
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "web.search",
+    description: "Fixed-endpoint search test double",
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+      additionalProperties: false,
+    },
+    effects: ["network", "read"] as const,
+    async execute(input) {
+      executions += 1;
+      return { query: input.query, sources: [] };
+    },
+  }]);
+  const context = {
+    runId: "web-search-policy-test",
+    principalId: "test-user",
+    signal: new AbortController().signal,
+    requireApproval: false,
+    notifyApproval() {},
+  };
+  const disabled = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: false, allowedHosts: ["api.search.brave.com"] },
+  );
+  const denied = await disabled.execute({ tool: "web.search", input: { query: "latest news" } }, context);
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error?.category, "permission_error");
+  assert.equal(executions, 0);
+
+  const wrongHost = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: ["example.com"] },
+  );
+  const hostDenied = await wrongHost.execute({ tool: "web.search", input: { query: "latest news" } }, context);
+  assert.equal(hostDenied.ok, false);
+  assert.match(hostDenied.error?.message ?? "", /allowlisted/i);
+  assert.equal(executions, 0);
+
+  const enabled = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: ["api.search.brave.com"] },
+  );
+  const allowed = await enabled.execute({ tool: "web.search", input: { query: "latest news" } }, context);
+  assert.equal(allowed.ok, true);
+  assert.equal(executions, 1);
+});
+
+
+test("HTTP MCP tools validate both fixed endpoint and model-supplied URLs", async () => {
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "mcp.docs.lookup",
+    description: "Fixed endpoint MCP lookup",
+    inputSchema: { type: "object", properties: { query: { type: "string" }, url: { type: "string" } }, required: ["query"], additionalProperties: false },
+    effects: ["network", "read"] as const,
+    networkUrl: "https://mcp.example.com/mcp",
+    async execute() { executions += 1; return { ok: true }; },
+  }]);
+  const context = {
+    runId: "mcp-fixed-endpoint-test",
+    signal: new AbortController().signal,
+    requireApproval: false,
+    notifyApproval() {},
+  };
+  const blocked = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: ["attacker.example"] },
+  );
+  const denied = await blocked.execute({ tool: "mcp.docs.lookup", input: { query: "hello", url: "https://attacker.example" } }, context);
+  assert.equal(denied.ok, false);
+  assert.match(denied.error?.message ?? "", /allowlisted/i);
+  assert.equal(executions, 0);
+
+  const allowed = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: ["mcp.example.com"] },
+    async () => true,
+  );
+  const modelUrlDenied = await allowed.execute({ tool: "mcp.docs.lookup", input: { query: "hello", url: "https://attacker.example" } }, context);
+  assert.equal(modelUrlDenied.ok, false);
+  assert.match(modelUrlDenied.error?.message ?? "", /allowlisted/i);
+  assert.equal(executions, 0);
+
+  const result = await allowed.execute({ tool: "mcp.docs.lookup", input: { query: "hello" } }, context);
+  assert.equal(result.ok, true);
+  assert.equal(executions, 1);
+});
 
 test("security kill switch aborts an active tool execution", async () => {
   const rt = runtime();
@@ -313,6 +429,12 @@ test("reserved tool names cannot downgrade inferred security effects", async () 
     inputSchema: { type: "object" },
     effects: ["read"] as const,
     async execute() { executed = true; return { ok: true }; },
+  }, {
+    name: "web.search",
+    description: "Misconfigured search tool that claims read-only effects",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() { return { ok: true }; },
   }]);
   const gateway = new RegistryToolGateway(
     { runtime: runtime(), tools: registry },
@@ -320,6 +442,7 @@ test("reserved tool names cannot downgrade inferred security effects", async () 
   );
 
   assert.deepEqual(gateway.describe("terminal.run")?.effects, ["shell", "network", "read"]);
+  assert.deepEqual(gateway.describe("web.search")?.effects, ["network", "read"]);
   const result = await gateway.execute(
     { tool: "terminal.run", input: { command: "node", args: ["--version"] } },
     {
@@ -448,4 +571,246 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
   for (const secret of ["sk-live-secret-value", "sk-input-secret-value", "sk-error-secret-value", "hunter2", "private material"]) {
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
+});
+
+
+test("capability discovery reports policy availability instead of exposing every registered tool as ready", () => {
+  const registry = new MapToolRegistry([
+    { name: "workspace.search", description: "Search workspace", inputSchema: { type: "object" }, effects: ["read"] as const, async execute() { return {}; } },
+    { name: "web.search", description: "Search web", inputSchema: { type: "object" }, effects: ["network", "read"] as const, async execute() { return {}; } },
+    { name: "workspace.write_file", description: "Write file", inputSchema: { type: "object" }, effects: ["write"] as const, async execute() { return {}; } },
+    { name: "terminal.run", description: "Run terminal", inputSchema: { type: "object" }, effects: ["shell"] as const, async execute() { return {}; } },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowShell: true, allowFileWrite: true, allowedHosts: ["api.search.brave.com"] },
+    async () => true,
+  );
+  const capabilities = Object.fromEntries(gateway.listTools().map(tool => [tool.name, tool.policy]));
+  assert.deepEqual(capabilities["workspace.search"], { status: "allowed", reason: undefined });
+  assert.deepEqual(capabilities["web.search"], { status: "allowed", reason: undefined });
+  assert.deepEqual(capabilities["workspace.write_file"], { status: "approval_required", reason: "Approval is required before execution." });
+  assert.deepEqual(capabilities["terminal.run"], { status: "approval_required", reason: "Approval is required before execution." });
+
+  const noApproval = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowFileWrite: true },
+  );
+  const write = noApproval.listTools().find(tool => tool.name === "workspace.write_file");
+  assert.equal(write?.policy?.status, "blocked");
+  assert.match(write?.policy?.reason ?? "", /no approval handler/i);
+});
+
+
+test("browser readiness uses a registered safe probe once for all browser tools", async () => {
+  let probeCalls = 0;
+  const probeReadiness = async () => {
+    probeCalls += 1;
+    return { ok: true, reason: "Isolated browser launch passed." };
+  };
+  const registry = new MapToolRegistry([
+    { name: "browser.open", description: "Open browser", inputSchema: { type: "object" }, effects: ["browser"] as const, probeReadiness, async execute() { return {}; } },
+    { name: "browser.goto", description: "Navigate browser", inputSchema: { type: "object" }, effects: ["browser"] as const, probeReadiness, async execute() { return {}; } },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowBrowser: true, allowNetwork: true, allowedHosts: ["example.com"] },
+    async () => true,
+  );
+  const catalog = await gateway.probeReadiness();
+  assert.equal(probeCalls, 1);
+  assert.equal(catalog[0]?.runtimeReadiness, "ready");
+  assert.equal(catalog[1]?.runtimeReadiness, "ready");
+  assert.match(catalog[0]?.runtimeReason ?? "", /isolated browser launch passed/i);
+});
+
+test("browser readiness probe is skipped when execution policy blocks the browser", async () => {
+  let probeCalls = 0;
+  const registry = new MapToolRegistry([
+    {
+      name: "browser.open",
+      description: "Open browser",
+      inputSchema: { type: "object" },
+      effects: ["browser"] as const,
+      async probeReadiness() { probeCalls += 1; return { ok: true, reason: "unexpected probe" }; },
+      async execute() { return {}; },
+    },
+  ]);
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, defaultPolicy);
+  const capability = (await gateway.probeReadiness())[0];
+  assert.equal(probeCalls, 0);
+  assert.equal(capability?.policy?.status, "blocked");
+  assert.equal(capability?.runtimeReadiness, "not_probed");
+  assert.match(capability?.runtimeReason ?? "", /policy blocks/i);
+});
+
+test("network capability discovery explains missing host allowlist", () => {
+  const registry = new MapToolRegistry([
+    { name: "web.search", description: "Search web", inputSchema: { type: "object" }, effects: ["network", "read"] as const, async execute() { return {}; } },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: true, allowedHosts: [] },
+  );
+  const capability = gateway.listTools()[0];
+  assert.equal(capability?.policy?.status, "blocked");
+  assert.match(capability?.policy?.reason ?? "", /allowed-host/i);
+});
+
+test("network capability discovery blocks tools when network access is disabled", () => {
+  const registry = new MapToolRegistry([
+    { name: "web.search", description: "Search web", inputSchema: { type: "object" }, effects: ["network", "read"] as const, async execute() { return {}; } },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowNetwork: false, allowedHosts: ["api.search.brave.com"] },
+  );
+  const capability = gateway.listTools()[0];
+  assert.equal(capability?.policy?.status, "blocked");
+  assert.match(capability?.policy?.reason ?? "", /network access is disabled/i);
+});
+
+
+test("capability discovery never claims runtime readiness and reflects the security kill switch", () => {
+  const registry = new MapToolRegistry([
+    { name: "workspace.search", description: "Search workspace", inputSchema: { type: "object" }, effects: ["read"] as const, async execute() { return {}; } },
+  ]);
+  const security = new SecurityController();
+  const gateway = new RegistryToolGateway({ runtime: runtime(), tools: registry }, defaultPolicy, undefined, undefined, security);
+  const before = gateway.listTools()[0];
+  assert.equal(before?.registered, true);
+  assert.equal(before?.policy?.status, "allowed");
+  assert.equal(before?.runtimeReadiness, "not_probed");
+  security.kill("operator emergency stop");
+  const after = gateway.listTools()[0];
+  assert.equal(after?.policy?.status, "blocked");
+  assert.match(after?.policy?.reason ?? "", /kill switch/i);
+});
+
+test("runtime readiness probe confirms workspace only after read-only runtime checks", async () => {
+  const readyGateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: createToolRegistry(createBuiltinTools()) },
+    defaultPolicy,
+  );
+  const ready = await readyGateway.probeReadiness();
+  const workspace = ready.find((tool) => tool.name === "workspace.read_file");
+  assert.equal(workspace?.registered, true);
+  assert.equal(workspace?.runtimeReadiness, "ready");
+  assert.match(workspace?.runtimeReason ?? "", /read-only/i);
+
+  const unavailableRuntime = {
+    ...runtime(),
+    async listFiles() { throw new Error("workspace mount is unavailable"); },
+  } satisfies WorkspaceRuntime;
+  const unavailableGateway = new RegistryToolGateway(
+    { runtime: unavailableRuntime, tools: createToolRegistry(createBuiltinTools()) },
+    defaultPolicy,
+  );
+  const unavailable = await unavailableGateway.probeReadiness();
+  const failedWorkspace = unavailable.find((tool) => tool.name === "workspace.read_file");
+  assert.equal(failedWorkspace?.runtimeReadiness, "unavailable");
+  assert.match(failedWorkspace?.runtimeReason ?? "", /workspace mount is unavailable/i);
+});
+
+test("runtime readiness never claims browser or terminal is ready without a real safe probe", async () => {
+  const registry = new MapToolRegistry([
+    {
+      name: "browser.observe",
+      description: "Observe an existing browser page",
+      inputSchema: { type: "object" },
+      effects: ["read"] as const,
+      async execute() { return { title: "test" }; },
+    },
+    {
+      name: "terminal.run",
+      description: "Run an approved command",
+      inputSchema: { type: "object" },
+      effects: ["shell"] as const,
+      async execute() { return { code: 0 }; },
+    },
+  ]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, allowShell: true },
+  );
+  const catalog = await gateway.probeReadiness();
+  const browser = catalog.find((tool) => tool.name === "browser.observe");
+  const terminal = catalog.find((tool) => tool.name === "terminal.run");
+  assert.equal(browser?.runtimeReadiness, "not_probed");
+  assert.equal(terminal?.runtimeReadiness, "not_probed");
+  assert.match(browser?.runtimeReason ?? "", /browser-session probe/i);
+  assert.match(terminal?.runtimeReason ?? "", /not invoked/i);
+});
+
+
+test("tool approval receives the authenticated principal and trusted notification destination", async () => {
+  let approval: { principalId?: string; notificationChannelId?: string; signal?: AbortSignal } | undefined;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write a file after explicit approval",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+    async execute() { return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async (request) => {
+      approval = {
+        principalId: request.principalId,
+        notificationChannelId: request.notificationChannelId,
+        signal: request.signal,
+      };
+      return true;
+    },
+  );
+  const controller = new AbortController();
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/approved.txt", content: "approved" } },
+    {
+      runId: "approval-notification-context-test",
+      principalId: "discord:12345",
+      notificationChannelId: "67890",
+      signal: controller.signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(approval?.principalId, "discord:12345");
+  assert.equal(approval?.notificationChannelId, "67890");
+  assert.equal(approval?.signal, controller.signal);
+});
+
+
+test("tool gateway revalidates durable job lease after approval and blocks side effects on lease loss", async () => {
+  let executed = false;
+  let leaseChecks = 0;
+  const registry = new MapToolRegistry([{
+    name: "workspace.write_file",
+    description: "Write a file after explicit approval",
+    inputSchema: { type: "object", properties: { path: { type: "string" }, content: { type: "string" } }, required: ["path", "content"] },
+    async execute() { executed = true; return { written: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    async () => true,
+  );
+  const controller = new AbortController();
+  const result = await gateway.execute(
+    { tool: "workspace.write_file", input: { path: "src/lease-expired.txt", content: "must not write" } },
+    {
+      runId: "lease-expired-after-approval",
+      signal: controller.signal,
+      requireApproval: true,
+      notifyApproval() {},
+      assertExecutionLease: async () => {
+        leaseChecks += 1;
+        if (leaseChecks === 2) throw new Error("Job execution lease was lost");
+      },
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.equal(executed, false, "tool side effect must not start after lease loss");
+  assert.equal(leaseChecks, 2, "lease must be checked after approval and again immediately before dispatch");
 });

@@ -7,6 +7,7 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
+import { sofiaStateDirectory } from "../platform/state-directory.js";
 
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
   const namespace = "job-runtime-restart-" + randomUUID();
@@ -25,7 +26,7 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
     active = await firstRuntime.get(submitted.id);
   }
   assert.equal(active?.status, "running");
-  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const stateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
   const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
   const saved = records.find((item) => item.id === submitted.id);
   assert.ok(saved);
@@ -40,6 +41,100 @@ test("DurableJobRuntime marks an interrupted persisted job recoverable after res
   assert.match(recovered?.error ?? "", /interrupted|lease expired/i);
 });
 
+
+test("DurableJobRuntime rejects a late completion from a worker whose lease expired", async () => {
+  const namespace = "job-runtime-expired-late-result-" + randomUUID();
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  const brain = {
+    run: async () => {
+      await pending;
+      return { completed: true, state: "completed", output: "late result" };
+    },
+  } as unknown as SofiaBrain;
+
+  const firstRuntime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await firstRuntime.submit({ task: "finish after lease expiry" });
+  let active = await firstRuntime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && active?.status !== "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    active = await firstRuntime.get(submitted.id);
+  }
+  assert.equal(active?.status, "running");
+
+  const stateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  saved.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+  // The old process wakes up after its lease has expired, before another worker
+  // has reclaimed the job. Its matching token must not authorize a late commit.
+  release();
+  let oldWorkerSettled = await firstRuntime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && oldWorkerSettled?.status === "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    oldWorkerSettled = await firstRuntime.get(submitted.id);
+  }
+  assert.equal(oldWorkerSettled?.status, "failed");
+  assert.match(oldWorkerSettled?.error ?? "", /lease expired/i);
+
+  const restartedRuntime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const recovered = await restartedRuntime.get(submitted.id);
+  assert.equal(recovered?.status, "failed");
+  assert.match(recovered?.error ?? "", /lease expired/i);
+  await rm(stateFile, { force: true });
+  await rm(stateFile + ".lock", { force: true });
+});
+
+test("DurableJobRuntime expires only the interrupted run owner's pending approvals during recovery", async () => {
+  const namespace = "job-runtime-approval-recovery-" + randomUUID();
+  const runId = "approval-recovery-run-" + randomUUID();
+  const snapshot = {
+    version: 1, runId, task: "wait for approval", understanding: {}, plan: {},
+    acceptanceCriteria: [], completedStepIds: [], checkpointId: "approval-checkpoint",
+    usage: { steps: 0, toolCalls: 0, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [], diagnoses: [], decisions: [], recoveryRounds: 0, trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const firstRuntime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      await onRunSnapshot?.(snapshot);
+      return new Promise(() => undefined);
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+  const submitted = await firstRuntime.submit({ task: snapshot.task, ownerKeyId: "owner-a" });
+  let active = await firstRuntime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && (!active?.snapshot || active.status !== "running"); attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    active = await firstRuntime.get(submitted.id);
+  }
+  assert.equal(active?.status, "running");
+  assert.equal(active?.snapshot?.runId, runId);
+
+  const stateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  saved.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+  const expired: Array<{ runId: string; ownerId: string }> = [];
+  const restartedRuntime = new DurableJobRuntime(() => ({
+    run: async () => ({ completed: false, state: "failed" }),
+  } as unknown as SofiaBrain), undefined, namespace);
+  restartedRuntime.setApprovalRecoveryStore({
+    expirePendingForRun(id, ownerId) { expired.push({ runId: id, ownerId }); return 1; },
+  });
+  const recovered = await restartedRuntime.get(submitted.id);
+  assert.equal(recovered?.status, "failed");
+  assert.deepEqual(expired, [{ runId, ownerId: "owner-a" }]);
+
+  await rm(stateFile, { force: true });
+  await rm(stateFile + ".lock", { force: true });
+});
 
 test("DurableJobRuntime cancels an active run and persists the terminal state", async () => {
   const namespace = "job-runtime-cancel-" + randomUUID();
@@ -357,7 +452,7 @@ test("DurableJobRuntime recovers a persisted running job across an actual Node.j
   const jobId = start.stdout.trim();
   assert.ok(jobId, "first worker should print the persisted job ID");
 
-  const recoveryStateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const recoveryStateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
   const recoveryRecords = JSON.parse(await readFile(recoveryStateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
   const interrupted = recoveryRecords.find((item) => item.id === jobId);
   assert.ok(interrupted);
@@ -454,7 +549,7 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
   const jobId = started.stdout.trim();
   assert.ok(jobId, "checkpoint worker should print its job ID");
 
-  const resumeStateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const resumeStateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
   const resumeRecords = JSON.parse(await readFile(resumeStateFile, "utf8")) as Array<{ id: string; leaseExpiresAt?: string }>;
   const resumable = resumeRecords.find((item) => item.id === jobId);
   assert.ok(resumable);
@@ -658,7 +753,7 @@ test("DurableJobRuntime admits only one resumed execution across separate proces
     assert.equal(results.filter((result) => JSON.parse(result).status === "completed").length, 1);
     assert.equal(results.filter((result) => JSON.parse(result).status !== "completed").length, 1);
   } finally {
-    const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+    const stateFile = path.join(sofiaStateDirectory("jobs"), createHash("sha256").update(namespace).digest("hex") + ".json");
     await rm(stateFile, { force: true });
     await rm(stateFile + ".lock", { force: true });
     await rm(markerFile, { force: true });
@@ -668,7 +763,7 @@ test("DurableJobRuntime admits only one resumed execution across separate proces
 
 test("DurableJobRuntime serializes competing stale-lock reclamation without losing jobs", async () => {
   const namespace = "job-runtime-stale-lock-reclaim-" + randomUUID();
-  const stateDirectory = path.join(os.tmpdir(), "sofia-agents-jobs");
+  const stateDirectory = sofiaStateDirectory("jobs");
   const stateFile = path.join(stateDirectory, createHash("sha256").update(namespace).digest("hex") + ".json");
   const lockFile = stateFile + ".lock";
   const reclaimFile = lockFile + ".reclaim";
@@ -755,10 +850,13 @@ test("DurableJobRuntime redacts credential-shaped values from persisted and relo
     const persisted = await readFile(file, "utf8");
     assert.ok(!persisted.includes(secret), "persisted job file must not contain credential-shaped values");
 
-    const restarted = new DurableJobRuntime(() => brain, undefined, namespace);
+    const restarted = new DurableJobRuntime(() => brain, runStore, namespace);
     const loaded = await restarted.get(submitted.id);
     assert.ok(loaded);
     assert.ok(!JSON.stringify(loaded).includes(secret), "reloaded job data must remain redacted");
+    assert.notEqual(loaded.snapshot?.task, "stale external run-store snapshot", "restart recovery must prefer the canonical job snapshot over a stale RunStore mirror");
+    const reloadedList = await restarted.list();
+    assert.notEqual(reloadedList.find((job) => job.id === submitted.id)?.snapshot?.task, "stale external run-store snapshot", "job listing after restart must also ignore stale RunStore mirrors");
   } finally {
     if (previousRoot === undefined) delete process.env.SOFIA_STATE_DIR;
     else process.env.SOFIA_STATE_DIR = previousRoot;
@@ -905,7 +1003,7 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
   const runStore = {
     save: async (snapshot: import("./run-state.js").BrainRunSnapshot) => { savedSnapshot = snapshot; },
     // Simulate a legacy RunStore file written before snapshot redaction existed.
-    load: async () => snapshot,
+    load: async () => ({ ...snapshot, task: "stale external run-store snapshot" }),
     delete: async () => undefined,
   };
   const snapshot = {
@@ -944,6 +1042,7 @@ test("DurableJobRuntime redacts secrets before writing snapshots to the separate
     assert.ok(savedSnapshot);
     assert.ok(!JSON.stringify(savedSnapshot).includes(secret), "separate checkpoint store must receive redacted data");
     assert.ok(!JSON.stringify(record.snapshot).includes(secret), "job record must not retain the unredacted checkpoint");
+    assert.notEqual(record.snapshot?.task, "stale external run-store snapshot", "stale mirror data must not override the canonical fenced job snapshot");
     const listed = await runtime.list();
     assert.ok(!JSON.stringify(listed).includes(secret), "job listings must redact credential-shaped content");
     assert.ok(listed.every((job) => job.leaseOwnerToken === undefined), "job listings must not expose lease ownership");
@@ -996,4 +1095,69 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(selectedRoute, "coding");
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
+});
+
+
+test("DurableJobRuntime propagates authenticated owner and approval notification channel into Brain", async () => {
+  const namespace = "job-runtime-approval-notification-" + randomUUID();
+  let factoryPrincipal: string | undefined;
+  let factoryChannel: string | undefined;
+  let runPrincipal: string | undefined;
+  let runChannel: string | undefined;
+  const runtime = new DurableJobRuntime((options) => {
+    factoryPrincipal = options.principalId;
+    factoryChannel = options.notificationChannelId;
+    return {
+      run: async (input) => {
+        runPrincipal = input.principalId;
+        runChannel = input.notificationChannelId;
+        return { completed: true, state: "completed" };
+      },
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+  const submitted = await runtime.submit({
+    task: "test approval notification routing",
+    ownerKeyId: "discord:12345",
+    notificationChannelId: "67890",
+  });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt++) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "completed");
+  assert.equal(factoryPrincipal, "discord:12345");
+  assert.equal(factoryChannel, "67890");
+  assert.equal(runPrincipal, "discord:12345");
+  assert.equal(runChannel, "67890");
+});
+
+
+test("DurableJobRuntime supplies a lease assertion that rejects cancelled ownership", async () => {
+  const namespace = "job-runtime-lease-assert-" + randomUUID();
+  let assertLease: (() => Promise<void>) | undefined;
+  let workerSignal: AbortSignal | undefined;
+  const runtime = new DurableJobRuntime((options) => {
+    assertLease = options.assertExecutionLease;
+    workerSignal = options.signal;
+    return {
+      run: async () => new Promise((resolve) => {
+        if (workerSignal?.aborted) {
+          resolve({ completed: false, state: "cancelled" });
+          return;
+        }
+        workerSignal?.addEventListener("abort", () => {
+          resolve({ completed: false, state: "cancelled" });
+        }, { once: true });
+      }),
+    } as unknown as SofiaBrain;
+  }, undefined, namespace);
+  const submitted = await runtime.submit({ task: "check lease before tool dispatch" });
+  for (let attempt = 0; attempt < 100 && !assertLease; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  assert.ok(assertLease, "runtime must pass a lease assertion to the brain factory");
+  await assert.doesNotReject(assertLease!());
+  await runtime.cancel(submitted.id);
+  await assert.rejects(assertLease!(), /lease was lost/i);
 });

@@ -175,6 +175,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
       const argument = typeof optionValue === "string" ? optionValue : "";
       const event: VerifiedDiscordMessage = {
         signatureVerified: true,
+        source: "interaction",
         id: interaction.id,
         channelId: interaction.channel_id,
         author: { id: author.id, ...(author.username ? { username: author.username } : {}), bot: false },
@@ -213,7 +214,7 @@ export function createDiscordInteractionTransport(options: DiscordInteractionTra
         pendingInteractions.delete(event.id);
         notify("inbound_handler_failed");
       });
-      return { status: 200, body: { type: 5 } };
+      return { status: 200, body: { type: 5, ...(incomingCommand === "approvals" || incomingCommand === "approve" || incomingCommand === "reject" ? { data: { flags: 64 } } : {}) } };
     },
     async sendMessage(channelId, text, replyToMessageId, interactionId) {
       if (!active || !controller || controller.signal.aborted) throw new Error("Discord transport is stopped.");

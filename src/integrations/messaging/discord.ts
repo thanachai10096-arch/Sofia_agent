@@ -4,6 +4,8 @@ import { splitMessage } from "./format.js";
 export interface VerifiedDiscordMessage {
   /** Must only be emitted by a transport after validating Discord's signature and timestamp. */
   signatureVerified: true;
+  /** Distinguishes private slash-command responses from public Gateway messages. */
+  source?: "interaction" | "gateway";
   id: string;
   channelId: string;
   author: { id: string; username?: string; bot?: boolean };

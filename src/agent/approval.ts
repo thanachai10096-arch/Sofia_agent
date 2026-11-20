@@ -2,10 +2,14 @@ import type { RiskLevel } from "../security/guard.js";
 export interface ApprovalRequest {
   runId:string;
   principalId?:string;
+  /** Trusted reply destination, carried from the authenticated messaging job. */
+  notificationChannelId?:string;
   toolName:string;
   input:Record<string,unknown>;
   actionHash:string;
   risk:RiskLevel;
+  /** Caller cancellation signal; never persisted with the approval record. */
+  signal?:AbortSignal;
 }
 export type ApprovalHandler=(request:ApprovalRequest)=>Promise<boolean>;
 /**

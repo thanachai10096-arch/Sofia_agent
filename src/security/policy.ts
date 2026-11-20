@@ -54,6 +54,8 @@ export function classifyToolEffects(name: string): ToolEffect[] {
   if (name === "browser.goto") return ["network", "read"];
   if (["browser.open", "browser.observe", "browser.screenshot", "browser.close"].includes(name)) return ["read"];
   if (name.startsWith("browser.")) return ["browser", "network"];
+  if (name === "web.search" || name === "web.search_news") return ["network", "read"];
+  if (name.startsWith("web.")) return ["destructive"];
   if (name === "desktop.system.discover" || name === "desktop.workspace.list_files" ||
       name === "desktop.workspace.read_file" || name === "desktop.screen.capture") return ["read"];
   if (name === "desktop.workspace.write_file" || name === "workspace.write_file" ||
@@ -79,7 +81,7 @@ export function effectiveToolEffects(name: string, declared?: readonly ToolEffec
   const inferred = classifyToolEffects(name);
   if (!declared) return inferred;
   const reserved = name.startsWith("browser.") || name.startsWith("desktop.") ||
-    name.startsWith("workspace.") || name.startsWith("git.") ||
+    name.startsWith("workspace.") || name.startsWith("git.") || name.startsWith("web.") ||
     name === "terminal.run" || name === "project.verify";
   return reserved ? [...new Set<ToolEffect>([...inferred, ...declared])] : [...declared];
 }

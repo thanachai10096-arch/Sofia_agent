@@ -24,7 +24,7 @@ function fakeTransport(advertised = [{ name: "lookup", description: "Find record
 
 test("managed MCP bridge exposes only allowlisted namespaced tools", async () => {
   const transport = fakeTransport();
-  const connected = await connectManagedMcpServer(transport, { id: "docs", allowedTools: ["lookup"] });
+  const connected = await connectManagedMcpServer(transport, { id: "docs", allowedTools: ["lookup"], readOnlyTools: ["lookup"] });
   assert.deepEqual(connected.tools.map((tool) => tool.name), ["mcp.docs.lookup"]);
   assert.deepEqual(connected.tools[0]?.effects, ["network", "read"]);
   const result = await connected.tools[0]!.execute({ query: "hello" }, { runtime: {} as never });
@@ -52,5 +52,29 @@ test("managed MCP bridge closes transport when allowlist does not match server",
 test("managed MCP bridge rejects unsafe namespace", async () => {
   const transport = fakeTransport();
   await assert.rejects(connectManagedMcpServer(transport, { id: "../docs", allowedTools: ["lookup"] }), /lowercase slug/);
+  assert.equal(transport.calls.length, 0);
+});
+
+test("managed MCP tools default to destructive regardless of remote read-only hints", async () => {
+  const transport = fakeTransport();
+  const connected = await connectManagedMcpServer(transport, { id: "local", allowedTools: ["lookup"], requiresNetwork: false });
+  assert.deepEqual(connected.tools[0]?.effects, ["destructive"]);
+  await connected.close();
+});
+
+test("stdio MCP tools do not require network permission when operator marks them read-only", async () => {
+  const transport = fakeTransport();
+  const connected = await connectManagedMcpServer(transport, {
+    id: "local", allowedTools: ["lookup"], readOnlyTools: ["lookup"], requiresNetwork: false,
+  });
+  assert.deepEqual(connected.tools[0]?.effects, ["read"]);
+  await connected.close();
+});
+
+test("managed MCP bridge rejects read-only tools outside the allowed tool set", async () => {
+  const transport = fakeTransport();
+  await assert.rejects(connectManagedMcpServer(transport, {
+    id: "docs", allowedTools: ["lookup"], readOnlyTools: ["delete"],
+  }), /subset of allowedTools/);
   assert.equal(transport.calls.length, 0);
 });
