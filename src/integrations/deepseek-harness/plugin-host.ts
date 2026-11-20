@@ -118,6 +118,8 @@ export class SofiaPluginHost {
 
   dispose(): void {
     if (this.disposed) return;
+    // Close the host before invoking user cleanup to prevent re-entrant installs.
+    this.disposed = true;
     const installed = [...this.plugins.values()].reverse();
     this.plugins.clear();
     const errors: unknown[] = [];
@@ -132,7 +134,6 @@ export class SofiaPluginHost {
     this.services.clear();
     this.tools.clear();
     this.listeners.clear();
-    this.disposed = true;
     if (errors.length) throw new AggregateError(errors, "One or more Sofia plugins failed to dispose.");
   }
 
