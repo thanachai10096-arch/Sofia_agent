@@ -40,6 +40,11 @@ The library now exposes `SqliteApprovalStore` as a transactional metadata store 
 
 This is a storage primitive, not yet a replacement for the standard entrypoint's `ApprovalBroker`/file journal. Do not configure it as the live API approval backend until the broker is wired to its atomic operations and the API's pending/decision flows are covered by integration tests. SQLite WAL is intended for a local disk shared by processes on one host; it is not a safe general-purpose multi-host/network-filesystem coordination service. For multi-host deployments, use a transactional server database with equivalent compare-and-set semantics and worker leases.
 
+
+### Encrypted approval payload storage (library primitive)
+
+The library also exposes `Aes256GcmApprovalPayloadCipher` and `SqliteApprovalPayloadStore`. Initialize `SqliteApprovalStore` first, then open the payload store against the same local database file. Encrypt the proposed action with server-derived context (approval ID, principal ID, run ID, tool name, action hash, and expiry) before calling `save`; the payload store accepts only the encrypted envelope and checks that the matching approval is still pending. `load` returns an envelope only while that same owner/action context remains pending. The caller must decrypt with the original context and a stable 32-byte key held outside SQLite; never accept decryption context or keys from an API client. Envelopes are limited to 256 KiB. This primitive is not wired into `ApprovalBroker` or the API, does not implement worker notification/leases, and does not make SQLite suitable for multi-host use. Keep key IDs stable, retain old keys only for the required decrypt/backup window, and test rotation and restore procedures before enabling it.
+
 ## Secrets, TLS, and storage
 
 - Terminate TLS at a trusted ingress/reverse proxy and restrict direct access to the application port.
