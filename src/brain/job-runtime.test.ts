@@ -489,20 +489,32 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
   const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
+    run: async () => ({ completed: true, state: "completed", output: "concurrency test complete" }),
   } as unknown as SofiaBrain), undefined, namespace));
 
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
     runtime.submit({ task: "concurrent worker submission " + index }),
   ));
   const reader = new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
+    run: async () => ({ completed: true, state: "completed", output: "concurrency test complete" }),
   } as unknown as SofiaBrain), undefined, namespace);
   const persisted = await reader.list();
   const persistedIds = new Set(persisted.map((record) => record.id));
 
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
   for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
+
+  // Let the intentionally detached worker executions settle before deleting
+  // the shared state file. A never-resolving fake leaves heartbeat writes active
+  // and can race with this test's cleanup on slower filesystem runners.
+  const deadline = Date.now() + 5_000;
+  let settled = await reader.list();
+  while (Date.now() < deadline && !settled.every((record) => record.status === "completed")) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    settled = await reader.list();
+  }
+  assert.equal(settled.length, submitted.length);
+  assert.ok(settled.every((record) => record.status === "completed"), "all fake worker executions should settle before cleanup");
 
   const file = path.join(
     os.tmpdir(),
