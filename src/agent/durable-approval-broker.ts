@@ -32,8 +32,25 @@ export class DurableApprovalBroker implements ApprovalBrokerPort {
       const result = await this.coordinator.waitForDecision(ticket, request.principalId ?? "");
       return result.status === "approved";
     } finally {
-      // The proposal is no longer needed after a terminal decision. A failed
-      // cleanup is safe: it remains encrypted and cannot be read as pending.
+      // If the origin cannot authenticate or observe the proposal after a
+      // decision, close any still-pending record rather than leave a stale
+      // approval visible to reviewers. Terminal decisions remain single-use.
+      const current = this.approvals.get(
+        ticket.context.principalId,
+        ticket.id,
+        this.now(),
+      );
+      if (current?.status === "pending") {
+        this.approvals.settlePending(
+          current.id,
+          current.principalId,
+          current.actionHash,
+          "interrupted",
+          this.now(),
+        );
+      }
+      // The proposal is no longer needed after the origin reaches a terminal
+      // result. A failed cleanup is safe: it remains encrypted at rest.
       this.payloads.delete(ticket.id);
     }
   };
