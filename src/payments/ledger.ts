@@ -54,9 +54,7 @@ export class FinancialActionEngine {
     if (current.status !== "order_submitted" && current.status !== "payment_pending" && current.status !== "payment_review" && current.status !== "payment_failed") {
       throw new Error("Payment evidence can only be reconciled after order submission and before cancellation or fulfillment.");
     }
-    if (result.orderReference !== current.orderReference || result.amountMinor !== current.amountMinor || result.currency !== current.currency) {
-      throw new Error("Payment evidence does not match the prepared order.");
-    }
+    const result = await verifyPayment({ orderReference: current.orderReference, amountMinor: current.amountMinor, currency: current.currency }, adapter);
     const nextStatus = result.status === "succeeded" && result.verified ? "paid" :
       result.status === "processing" ? "payment_pending" :
         result.status === "failed" ? "payment_failed" : "payment_review";
