@@ -1,4 +1,5 @@
 import type { SofiaTool } from "../../tools/types.js";
+import type { ToolEffect } from "../../security/policy.js";
 
 /**
  * Sofia's in-process plugin host.
@@ -24,13 +25,24 @@ export interface SofiaPluginContext {
   onDispose(disposer: () => void): void;
 }
 
+export interface SofiaPluginManifest {
+  readonly version: string;
+  readonly description?: string;
+  /** Effects explicitly declared by tools owned by this plugin. */
+  readonly capabilities: readonly ToolEffect[];
+  /** Plugin IDs that must already be installed before this plugin. */
+  readonly dependencies?: readonly string[];
+}
+
 export interface SofiaPlugin {
   readonly id: string;
+  readonly manifest?: SofiaPluginManifest;
   install(context: SofiaPluginContext): void;
 }
 
 interface InstalledPlugin {
   id: string;
+  manifest?: SofiaPluginManifest;
   disposers: Array<() => void>;
 }
 
@@ -56,14 +68,35 @@ export class SofiaPluginHost {
     this.assertActive();
     if (!plugin.id.trim()) throw new Error("Sofia plugin id must not be empty.");
     if (this.plugins.has(plugin.id)) throw new Error(`Sofia plugin "${plugin.id}" is already installed.`);
+    const manifest = plugin.manifest;
+    if (manifest) {
+      if (!manifest.version.trim()) throw new Error(`Sofia plugin "${plugin.id}" must declare a manifest version.`);
+      const capabilities = new Set<ToolEffect>(manifest.capabilities);
+      for (const dependency of manifest.dependencies ?? []) {
+        if (dependency === plugin.id) throw new Error(`Sofia plugin "${plugin.id}" cannot depend on itself.`);
+        if (!this.plugins.has(dependency)) throw new Error(`Sofia plugin "${plugin.id}" requires plugin "${dependency}" to be installed first.`);
+      }
+      for (const capability of capabilities) {
+        if (!["read", "write", "shell", "network", "destructive", "browser"].includes(capability)) {
+          throw new Error(`Sofia plugin "${plugin.id}" declares an unknown capability.`);
+        }
+      }
+    }
 
-    const installed: InstalledPlugin = { id: plugin.id, disposers: [] };
+    const installed: InstalledPlugin = { id: plugin.id, manifest, disposers: [] };
     const context: SofiaPluginContext = {
       pluginId: plugin.id,
       registerTool: (tool) => {
         this.assertActive();
         if (!tool.name.trim()) throw new Error("Sofia plugin tool name must not be empty.");
         if (this.tools.has(tool.name)) throw new Error(`Sofia tool "${tool.name}" is already registered.`);
+        if (manifest) {
+          for (const effect of tool.effects ?? []) {
+            if (!manifest.capabilities.includes(effect)) {
+              throw new Error(`Sofia plugin "${plugin.id}" does not declare tool capability "${effect}" required by "${tool.name}".`);
+            }
+          }
+        }
         this.tools.set(tool.name, tool);
         installed.disposers.push(() => this.tools.delete(tool.name));
       },
@@ -97,6 +130,12 @@ export class SofiaPluginHost {
     this.assertActive();
     const installed = this.plugins.get(pluginId);
     if (!installed) return false;
+    const dependent = [...this.plugins.values()].find((candidate) =>
+      candidate.manifest?.dependencies?.includes(pluginId),
+    );
+    if (dependent) {
+      throw new Error(`Cannot uninstall Sofia plugin "${pluginId}" while "${dependent.id}" depends on it.`);
+    }
     this.plugins.delete(pluginId);
     try {
       this.runDisposers(installed);
@@ -114,6 +153,12 @@ export class SofiaPluginHost {
   listPlugins(): string[] {
     this.assertActive();
     return [...this.plugins.keys()];
+  }
+
+  getPluginManifest(pluginId: string): SofiaPluginManifest | undefined {
+    this.assertActive();
+    const manifest = this.plugins.get(pluginId)?.manifest;
+    return manifest ? { ...manifest, capabilities: [...manifest.capabilities], dependencies: [...(manifest.dependencies ?? [])] } : undefined;
   }
 
   dispose(): void {
