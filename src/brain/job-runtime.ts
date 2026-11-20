@@ -104,6 +104,7 @@ export interface JobRuntime {
     outcome: "completed" | "retry",
     actorId: string,
     note?: string,
+    confirmation?: { noSideEffect: true },
   ): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
@@ -591,7 +592,11 @@ export class DurableJobRuntime implements JobRuntime {
     outcome: "completed" | "retry",
     actorId: string,
     note?: string,
+    confirmation?: { noSideEffect: true },
   ): Promise<JobRecord> {
+    if (outcome === "retry" && confirmation?.noSideEffect !== true) {
+      throw new Error("Retry requires explicit confirmation that no external side effect occurred");
+    }
     if (this.resuming.has(id)) throw new Error("Job is already being resumed or reconciled");
     this.resuming.add(id);
     try {
@@ -619,7 +624,7 @@ export class DurableJobRuntime implements JobRuntime {
         inFlightStepId: undefined,
         reconciliations: [
           ...(snapshot.reconciliations ?? []),
-          { stepId, outcome, decidedAt, actorId, ...(note ? { note: String(redactSecrets(note)).slice(0, 1000) } : {}) },
+          { stepId, outcome, decidedAt, actorId, ...(note ? { note: String(redactSecrets(note)).slice(0, 1000) } : {}), ...(outcome === "retry" ? { confirmedNoSideEffect: true as const } : {}) },
         ],
       };
       const safeSnapshot = redactSecrets(reconciled) as BrainRunSnapshot;
