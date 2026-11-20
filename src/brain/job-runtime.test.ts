@@ -1023,3 +1023,41 @@ test("DurableJobRuntime isolates durable job history between principal namespace
   assert.deepEqual(await principalB.list(), []);
   assert.equal((await principalA.list()).some((job) => job.id === submitted.id), true);
 });
+
+
+test("DurableJobRuntime rejects a late worker result after its lease expires", async () => {
+  const namespace = "job-runtime-expired-write-" + randomUUID();
+  let releaseRun!: () => void;
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const brain = {
+    run: async () => {
+      markStarted();
+      await new Promise<void>((resolve) => { releaseRun = resolve; });
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({ task: "do not commit after lease expiry" });
+  await started;
+
+  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{
+    id: string;
+    status: string;
+    leaseExpiresAt?: string;
+  }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  assert.equal(saved.status, "running");
+  saved.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+  releaseRun();
+  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+  const persisted = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; status: string }>;
+  assert.equal(persisted.find((item) => item.id === submitted.id)?.status, "running");
+});
