@@ -131,3 +131,20 @@ test("plugin cannot recursively install a second instance with the same identity
   });
   assert.deepEqual(host.listPlugins(), ["recursive"]);
 });
+
+
+test("disposing the host during install rolls back the in-flight plugin", () => {
+  const host = new SofiaPluginHost();
+  let cleaned = false;
+
+  assert.throws(() => host.use({
+    id: "dispose-during-install",
+    install(context) {
+      context.onDispose(() => { cleaned = true; });
+      host.dispose();
+    },
+  }), /disposed/);
+
+  assert.equal(cleaned, true);
+  assert.throws(() => host.listPlugins(), /disposed/);
+});
