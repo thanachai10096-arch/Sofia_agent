@@ -14,6 +14,8 @@ agent, a second server, or a child CLI.
 - Reversible registration effects and reverse-order teardown.
 - Rollback of partial registrations when plugin installation fails.
 - Typed install/uninstall lifecycle events and runtime plugin unloading.
+- Versioned plugin manifests with declared capabilities and install-time validation of explicitly declared tool effects.
+- Dependency ordering: required plugins must be installed first, and providers cannot be unloaded while installed dependents remain.
 - Cleanup continues across failures; teardown reports aggregated cleanup errors.
 - Plugin tools enter Sofia's existing Tool Registry and continue through the
   existing Tool Gateway, approval, execution policy, audit, and workspace
@@ -50,7 +52,7 @@ copy of Cordis source.
    uses the same registration lifecycle. Browser and desktop tools are already
    registered in a short-lived host per Brain run.
 2. Bridge plugin lifecycle events to Sofia's existing run/step/tool event stream.
-3. Add tenant-scoped process plugin instances and scoped service injection.
+3. Add tenant-scoped process plugin instances, principal-bound grants, and scoped service injection. Manifest declarations are metadata/validation, not a replacement for host authorization.
 4. Add per-plugin capability manifests and approval metadata.
 5. Evaluate selective upstream source vendoring only where it is compatible
    with Sofia's Node >=20 runtime and does not duplicate core authority.
