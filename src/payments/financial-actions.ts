@@ -91,6 +91,29 @@ export async function executeFinancialAction(request: FinancialActionRequest, de
   return { record: updated, verification, replayed: false, configured: true };
 }
 
+/**
+ * Re-checks a previously submitted `unknown`, `processing`, or interrupted `submitting` action.
+ * This is read/verify-only: it never submits or captures a second payment.
+ */
+export async function reconcileFinancialAction(input: { ownerId: string; idempotencyKey: string }, deps: FinancialActionDependencies): Promise<FinancialActionResult> {
+  if (!input.ownerId.trim() || !input.idempotencyKey.trim()) throw new Error("Owner and idempotency key are required for reconciliation.");
+  const existing = await deps.store.find(input.ownerId, hashKey(input.ownerId, input.idempotencyKey));
+  if (!existing) throw new Error("Financial action was not found.");
+  if (existing.status === "succeeded" || existing.status === "failed") return { record: existing, replayed: true, configured: Boolean(deps.provider) };
+  if (!deps.provider) return { record: existing, replayed: true, configured: false };
+  if (existing.provider && existing.provider !== deps.provider.provider) throw new Error("Configured provider does not match the original financial action.");
+  const expected = { orderReference: existing.orderReference, amountMinor: existing.amountMinor, currency: existing.currency };
+  let verification: PaymentVerificationResult;
+  try { verification = await verifyPayment(expected, deps.provider); }
+  catch { verification = { ...expected, status: "unknown", verified: false, provider: deps.provider.provider, reason: "Provider reconciliation failed." }; }
+  const status: FinancialActionStatus = verification.verified ? "succeeded" : verification.status === "failed" ? "failed" : verification.status === "processing" ? "processing" : "unknown";
+  const updated: FinancialActionRecord = { ...existing, status, updatedAt: (deps.now ?? (() => new Date()))().toISOString(),
+    ...(verification.providerPaymentId ? { providerPaymentId: verification.providerPaymentId } : {}), reason: verification.reason };
+  await deps.store.update(updated);
+  await deps.ledger.append({ id: randomUUID(), actionId: existing.id, type: verification.verified ? "verified" : status === "failed" ? "failed" : "uncertain",
+    occurredAt: updated.updatedAt, details: { status, verified: verification.verified, reconciliation: true, reason: verification.reason } });
+  return { record: updated, verification, replayed: true, configured: true };
+}
 /** In-memory reference stores are deliberately process-local and must not be used for production payments. */
 export class MemoryFinancialActionStore implements FinancialActionStore {
   private readonly records = new Map<string, FinancialActionRecord>();
