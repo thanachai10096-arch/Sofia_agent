@@ -125,7 +125,7 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
   const tools=createToolRegistry([
     ...createBuiltinTools(),
-    ...(process.env.SOFIA_ENABLE_AGENT_REACH === "true" ? createAgentReachTools() : []),
+    ...createAgentReachTools(),
   ]);
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
