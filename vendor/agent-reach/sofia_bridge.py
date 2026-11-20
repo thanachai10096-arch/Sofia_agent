@@ -43,6 +43,53 @@ def _channels() -> dict[str, Any]:
     return {"ok": True, "channels": items}
 
 
+def _read_youtube(target: str, timeout: float) -> dict[str, Any]:
+    """Read metadata plus Thai/English captions; use configured speech transcription as fallback."""
+    channel = get_channel("youtube")
+    if channel is None:
+        raise ValueError("YouTube channel is not bundled")
+    metadata = run_action(channel, "read", {"target": target}, timeout=timeout)
+    if not metadata.get("ok"):
+        return metadata
+
+    # Agent-Reach's upstream default subtitle languages omit Thai. Prefer Thai first.
+    captions = run_action(
+        channel,
+        "subtitle",
+        {"target": target, "lang": "th,th-TH,en,en-US,en-GB,en-orig,zh-Hans"},
+        timeout=timeout,
+    )
+    source = "youtube_subtitles"
+    if not captions.get("ok"):
+        # Audio transcription is optional and only runs when the user configured a provider.
+        transcript = run_action(channel, "transcribe", {"target": target}, timeout=min(timeout, 1800))
+        if transcript.get("ok"):
+            captions = transcript
+            source = "speech_transcription"
+        else:
+            item = (metadata.get("items") or [{}])[0]
+            raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+            item["raw"] = {
+                **raw,
+                "content_status": "metadata_only",
+                "content_warning": "Video captions were unavailable and speech transcription is not configured or failed. Do not summarize the video as watched; only title and description were retrieved.",
+                "caption_error": (captions.get("error") or {}).get("message"),
+                "transcription_error": (transcript.get("error") or {}).get("message"),
+            }
+            return metadata
+
+    caption_items = captions.get("items") or []
+    caption_text = "\\n".join(
+        str(item.get("text") or "") for item in caption_items if item.get("text")
+    ).strip()
+    item = (metadata.get("items") or [{}])[0]
+    item["text"] = "\\n\\n[VIDEO TRANSCRIPT / CAPTIONS]\\n" + caption_text if caption_text else item.get("text")
+    raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+    caption_raw = (caption_items[0].get("raw") if caption_items and isinstance(caption_items[0].get("raw"), dict) else {})
+    item["raw"] = {**raw, "content_status": "transcript_available", "transcript_source": source, "transcript_language": caption_raw.get("lang")}
+    return metadata
+
+
 def handle(request: dict[str, Any]) -> dict[str, Any]:
     operation = request.get("operation")
     if operation == "channels":
@@ -51,6 +98,11 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         target = request.get("url")
         if not isinstance(target, str) or not target:
             raise ValueError("url is required")
+        if get_channel("youtube") is not None and get_channel("youtube").can_handle(target):
+            timeout = request.get("timeout", 180)
+            if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0 or timeout > 1800:
+                raise ValueError("timeout must be between 0 and 1800 seconds")
+            return _read_youtube(target, float(timeout))
         readers = [ch for ch in get_all_channels() if any(a.name == "read" for a in ch.actions)]
         specific = [ch for ch in readers if ch.name != "web"]
         channel = next((ch for ch in specific if ch.can_handle(target)), None)
