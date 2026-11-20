@@ -210,6 +210,7 @@ test("browser.login keeps the authenticated session available across Brain runs"
     const store = new BrowserProfileStore(root);
     const launchOptions: Array<{ profileDirectory?: string; headless?: boolean } | undefined> = [];
     let closeCount = 0;
+    let pageCloseCount = 0;
     const runtime: BrowserRuntime = {
       launch: async (options) => {
         launchOptions.push(options);
@@ -231,7 +232,7 @@ test("browser.login keeps the authenticated session available across Brain runs"
             forward: async () => {},
             reload: async () => {},
             screenshot: async () => "",
-            close: async () => {},
+            close: async () => { pageCloseCount++; },
           }),
           close: async () => { closeCount++; },
         };
@@ -260,6 +261,7 @@ test("browser.login keeps the authenticated session available across Brain runs"
     // Brain run cleanup must not close a user-owned persistent login window.
     await cleanup!();
     assert.equal(closeCount, 0);
+    assert.equal(pageCloseCount, 1, "run-owned tabs close while the saved login session remains open");
 
     // A later Brain run reuses the same authenticated context instead of
     // launching a second Chromium process against the locked profile directory.
