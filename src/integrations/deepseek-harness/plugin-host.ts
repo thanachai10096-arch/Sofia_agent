@@ -3,11 +3,19 @@ import type { SofiaTool } from "../../tools/types.js";
 /**
  * Sofia's in-process plugin host.
  *
- * This adopts the useful Cordis composition model (explicit plugin identity,
- * scoped registration, and reversible effects) while keeping Sofia's existing
- * Agent, Tool Gateway, security policy, and tenant boundary as the execution
- * authority. Plugins are code extensions, not independent agents or services.
+ * Inspired by Cordis composition: explicit plugin identity, scoped registration,
+ * reversible effects, and lifecycle events. Sofia's Agent, Tool Gateway,
+ * security policy, and tenant boundary remain the execution authority.
  */
+export interface SofiaPluginEventMap {
+  "plugin:installed": { pluginId: string };
+  "plugin:uninstalled": { pluginId: string };
+}
+
+export type SofiaPluginEventName = keyof SofiaPluginEventMap;
+export type SofiaPluginEventListener<K extends SofiaPluginEventName> =
+  (payload: SofiaPluginEventMap[K]) => void;
+
 export interface SofiaPluginContext {
   readonly pluginId: string;
   registerTool(tool: SofiaTool): void;
@@ -30,7 +38,19 @@ export class SofiaPluginHost {
   private readonly plugins = new Map<string, InstalledPlugin>();
   private readonly tools = new Map<string, SofiaTool>();
   private readonly services = new Map<string, unknown>();
+  private readonly listeners = new Map<SofiaPluginEventName, Set<(payload: never) => void>>();
   private disposed = false;
+
+  on<K extends SofiaPluginEventName>(
+    event: K,
+    listener: SofiaPluginEventListener<K>,
+  ): () => void {
+    this.assertActive();
+    const listeners = this.listeners.get(event) ?? new Set<(payload: never) => void>();
+    listeners.add(listener as (payload: never) => void);
+    this.listeners.set(event, listeners);
+    return () => listeners.delete(listener as (payload: never) => void);
+  }
 
   use(plugin: SofiaPlugin): void {
     this.assertActive();
@@ -67,11 +87,23 @@ export class SofiaPluginHost {
       plugin.install(context);
       this.plugins.set(plugin.id, installed);
     } catch (error) {
-      for (const dispose of installed.disposers.reverse()) {
-        try { dispose(); } catch { /* preserve the original install error */ }
-      }
+      this.runDisposers(installed);
       throw error;
     }
+    this.emit("plugin:installed", { pluginId: plugin.id });
+  }
+
+  unuse(pluginId: string): boolean {
+    this.assertActive();
+    const installed = this.plugins.get(pluginId);
+    if (!installed) return false;
+    this.plugins.delete(pluginId);
+    try {
+      this.runDisposers(installed);
+    } finally {
+      this.emit("plugin:uninstalled", { pluginId });
+    }
+    return true;
   }
 
   listTools(): SofiaTool[] {
@@ -88,12 +120,36 @@ export class SofiaPluginHost {
     if (this.disposed) return;
     const installed = [...this.plugins.values()].reverse();
     this.plugins.clear();
+    const errors: unknown[] = [];
     for (const plugin of installed) {
-      for (const dispose of plugin.disposers.reverse()) dispose();
+      try {
+        this.runDisposers(plugin);
+      } catch (error) {
+        errors.push(error);
+      }
+      this.emit("plugin:uninstalled", { pluginId: plugin.id });
     }
     this.services.clear();
     this.tools.clear();
+    this.listeners.clear();
     this.disposed = true;
+    if (errors.length) throw new AggregateError(errors, "One or more Sofia plugins failed to dispose.");
+  }
+
+  private runDisposers(plugin: InstalledPlugin): void {
+    const errors: unknown[] = [];
+    for (const dispose of plugin.disposers.reverse()) {
+      try { dispose(); } catch (error) { errors.push(error); }
+    }
+    if (errors.length) throw new AggregateError(errors, `Plugin "${plugin.id}" cleanup failed.`);
+  }
+
+  private emit<K extends SofiaPluginEventName>(event: K, payload: SofiaPluginEventMap[K]): void {
+    for (const listener of this.listeners.get(event) ?? []) {
+      try { listener(payload as never); } catch {
+        // Observers must not break plugin installation or teardown.
+      }
+    }
   }
 
   private assertActive(): void {
