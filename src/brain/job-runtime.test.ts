@@ -8,6 +8,32 @@ import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
+test("DurableJobRuntime deduplicates concurrent and restarted submits by owner-scoped idempotency key", async () => {
+  const namespace = "job-runtime-idempotency-" + randomUUID();
+  let calls = 0;
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const brain = {
+    run: async () => {
+      calls += 1;
+      await blocked;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => brain, undefined, namespace);
+  const second = new DurableJobRuntime(() => brain, undefined, namespace);
+  const input = { task: "deduplicated work", ownerKeyId: "tenant-a", idempotencyKey: "request-123" };
+  const [a, b] = await Promise.all([first.submit(input), second.submit(input)]);
+  assert.equal(a.id, b.id);
+  assert.equal(calls <= 1, true);
+
+  const otherOwner = await second.submit({ ...input, ownerKeyId: "tenant-b" });
+  assert.notEqual(otherOwner.id, a.id);
+  const sameAfterRestart = await new DurableJobRuntime(() => brain, undefined, namespace).submit(input);
+  assert.equal(sameAfterRestart.id, a.id);
+  release();
+});
+
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
   const namespace = "job-runtime-restart-" + randomUUID();
   const hangingBrain = {
