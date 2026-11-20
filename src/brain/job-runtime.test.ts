@@ -1344,3 +1344,135 @@ test("DurableJobRuntime restores and resumes a checkpoint only for its persisted
     await restartedRuntime.close();
   }
 });
+
+
+test("DurableJobRuntime recovers an owner-bound checkpoint after SIGKILL and rejects cross-owner resume", async () => {
+  const namespace = "job-runtime-owner-sigkill-" + randomUUID();
+  const owner = "cccccccccccccccccccccccccccccccc";
+  const otherOwner = "dddddddddddddddddddddddddddddddd";
+  const stateFile = path.join(
+    os.tmpdir(),
+    "sofia-agents-jobs",
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  const childScript = `
+    import { DurableJobRuntime } from "./src/brain/job-runtime.ts";
+    const snapshot = {
+      version: 1,
+      runId: "sigkill-owner-run",
+      task: "recover owner checkpoint after process crash",
+      understanding: {},
+      plan: {},
+      acceptanceCriteria: [],
+      completedStepIds: ["before-crash"],
+      checkpointId: "sigkill-owner-checkpoint",
+      usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+      observations: [],
+      diagnoses: [],
+      decisions: [],
+      recoveryRounds: 0,
+      trace: [],
+    };
+    const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+      run: async () => {
+        await onRunSnapshot(snapshot);
+        process.stdout.write("CHECKPOINT_SAVED\\n");
+        await new Promise((resolve) => setInterval(resolve, 60_000));
+        return { completed: true, state: "completed" };
+      },
+    }), undefined, ${JSON.stringify(namespace)});
+    await runtime.submit({
+      task: "recover owner checkpoint after process crash",
+      ownerKeyId: ${JSON.stringify(owner)},
+    });
+  `;
+
+  const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "-e", childScript], {
+    cwd: process.cwd(),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+  const checkpointSaved = new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("child did not persist its checkpoint")), 15_000);
+    child.stdout.on("data", () => {
+      if (stdout.includes("CHECKPOINT_SAVED")) {
+        clearTimeout(timeout);
+        resolve();
+      }
+    });
+    child.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.once("close", (code, signal) => {
+      if (!stdout.includes("CHECKPOINT_SAVED")) {
+        clearTimeout(timeout);
+        reject(new Error(stderr || `child exited before checkpoint (code=${code}, signal=${signal})`));
+      }
+    });
+  });
+
+  try {
+    await checkpointSaved;
+    child.kill("SIGKILL");
+    await new Promise<void>((resolve, reject) => {
+      child.once("close", () => resolve());
+      child.once("error", reject);
+    });
+
+    const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{
+      id: string;
+      status: string;
+      ownerKeyId?: string;
+      leaseExpiresAt?: string;
+      snapshot?: { checkpointId?: string };
+    }>;
+    const crashed = records.find((record) => record.ownerKeyId === owner);
+    assert.ok(crashed, "the crashed job must remain persisted for its original owner");
+    assert.equal(crashed.status, "running");
+    assert.equal(crashed.snapshot?.checkpointId, "sigkill-owner-checkpoint");
+    crashed.leaseExpiresAt = new Date(0).toISOString();
+    const temporary = stateFile + ".test-tmp";
+    await writeFile(temporary, JSON.stringify(records, null, 2), { encoding: "utf8", mode: 0o600 });
+    await (await import("node:fs/promises")).rename(temporary, stateFile);
+
+    let resumedPrincipal: string | undefined;
+    let resumedCheckpoint: string | undefined;
+    const restarted = new DurableJobRuntime(() => ({
+      run: async (input: {
+        principalId?: string;
+        resume?: { checkpointId?: string };
+      }) => {
+        resumedPrincipal = input.principalId;
+        resumedCheckpoint = input.resume?.checkpointId;
+        return { completed: true, state: "completed" };
+      },
+    } as unknown as SofiaBrain), undefined, namespace);
+
+    try {
+      const recovered = await restarted.getForOwner(crashed.id, owner);
+      assert.equal(recovered?.status, "failed", "expired running lease must be recovered as interrupted");
+      assert.equal(recovered?.snapshot?.checkpointId, "sigkill-owner-checkpoint");
+      assert.equal(await restarted.getForOwner(crashed.id, otherOwner), undefined);
+      await assert.rejects(
+        () => restarted.resumeForOwner(crashed.id, otherOwner),
+        /unknown job/i,
+      );
+      const completed = await restarted.resumeForOwner(crashed.id, owner);
+      assert.equal(completed.status, "completed");
+      assert.equal(resumedPrincipal, owner);
+      assert.equal(resumedCheckpoint, "sigkill-owner-checkpoint");
+      assert.equal(await restarted.getForOwner(crashed.id, otherOwner), undefined);
+    } finally {
+      await restarted.close();
+    }
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    await rm(stateFile, { force: true });
+    await rm(stateFile + ".lock", { force: true });
+    await rm(stateFile + ".test-tmp", { force: true });
+  }
+});
