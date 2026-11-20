@@ -5,6 +5,7 @@ import type { ApprovalPayloadCipher, ApprovalPayloadContext, EncryptedApprovalPa
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
 const MAX_ENVELOPE_BYTES = 256 * 1024;
+const MAX_PLAINTEXT_BYTES = 192 * 1024;
 
 function validContext(context: ApprovalPayloadContext): boolean {
   return Boolean(context && context.approvalId && context.principalId && context.runId &&
@@ -75,7 +76,7 @@ export class SqliteApprovalPayloadStore {
   }
 
   save(plaintext: string, context: ApprovalPayloadContext, cipher: ApprovalPayloadCipher, now = Date.now()): boolean {
-    if (typeof plaintext !== "string" || !validContext(context) || !Number.isSafeInteger(now)) return false;
+    if (typeof plaintext !== "string" || Buffer.byteLength(plaintext, "utf8") > MAX_PLAINTEXT_BYTES ||\n        !validContext(context) || !Number.isSafeInteger(now)) return false;
     try {
       const envelope = cipher.encrypt(plaintext, context);
       if (!validEnvelope(envelope)) return false;
