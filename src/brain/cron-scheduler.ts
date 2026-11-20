@@ -312,6 +312,7 @@ export class CronScheduler {
     await this.auditCallback?.(event);
   }
   async create(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
+    if (this.closed) throw new Error("Cron scheduler is closed");
     if (!await this.authorize(actor, "create")) throw new Error("Not authorized to create cron schedule");
     if (input.ownerKeyId !== actor) throw new Error("Schedule owner must match the authenticated API key");
     if (!input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim()) throw new Error("name, task and ownerKeyId are required");
@@ -350,6 +351,7 @@ export class CronScheduler {
     return this.store.transact(state => state.schedules.filter(s => s.ownerKeyId === actor).map(s => ({ ...s })));
   }
   async setEnabled(id: string, enabled: boolean, actor: string): Promise<CronSchedule> {
+    if (this.closed) throw new Error("Cron scheduler is closed");
     return this.store.transact(async state => {
       const schedule = state.schedules.find(s => s.id === id);
       if (!schedule) throw new Error("Unknown cron schedule");
@@ -388,8 +390,7 @@ export class CronScheduler {
     });
   }
   private async runTick(): Promise<void> {
-    try {
-      while (!this.closed && this.active.size < this.maxConcurrent) {
+    while (!this.closed && this.active.size < this.maxConcurrent) {
         const claim = await this.store.transact(async state => {
           const now = this.now();
           const activeExecutions = state.history.filter(item => item.status === "claimed" || item.status === "running").length;
@@ -442,9 +443,8 @@ export class CronScheduler {
         const controller = new AbortController();
         this.active.set(claim.schedule.id, controller);
         if (this.closed) controller.abort(new Error("Cron scheduler is shutting down"));
-        this.trackTask(this.executeClaim(claim.schedule, claim.executionId, claim.scheduledFor, controller), this.activeTasks);
-      }
-    } finally { /* tick lifecycle is finalized by tick() */ }
+      this.trackTask(this.executeClaim(claim.schedule, claim.executionId, claim.scheduledFor, controller), this.activeTasks);
+    }
   }
 
   async tick(): Promise<void> {
