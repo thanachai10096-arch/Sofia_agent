@@ -143,7 +143,7 @@ export class RegistryToolGateway implements ToolGateway {
             if (!persistedStart || persistedStart.id !== startedId ||
                 persistedStart.runId !== context.runId || persistedStart.principalId !== context.principalId ||
                 persistedStart.toolName !== call.tool || persistedStart.actionHash !== assessment.actionHash ||
-                persistedStart.decision !== "execution_started") {
+                persistedStart.risk !== assessment.risk || persistedStart.decision !== "execution_started") {
               throw new Error("Execution-start receipt readback mismatch.");
             }
           }
@@ -185,7 +185,9 @@ export class RegistryToolGateway implements ToolGateway {
       if (this.audit?.durable) {
         const persisted = await this.audit.read?.(evidenceId);
         if (!persisted || persisted.id !== evidenceId || persisted.runId !== context.runId ||
-            persisted.actionHash !== assessment.actionHash || persisted.decision !== "completed" ||
+            persisted.principalId !== context.principalId || persisted.toolName !== call.tool ||
+            persisted.actionHash !== assessment.actionHash || persisted.risk !== assessment.risk ||
+            persisted.decision !== "completed" ||
             (executionStartReceiptId !== undefined && persisted.relatedEventId !== executionStartReceiptId)) {
           throw new Error("Completion audit readback did not match the executed action.");
         }
