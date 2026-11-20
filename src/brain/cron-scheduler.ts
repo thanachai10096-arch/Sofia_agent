@@ -256,7 +256,29 @@ export class CronScheduler {
   private readonly maxSchedulesPerOwner: number;
   private readonly auditCallback?: CronSchedulerOptions["audit"];
   private ticking = false;
+  private closed = false;
+  private tickPromise?: Promise<void>;
   private readonly active = new Map<string, AbortController>();
+  private readonly activeTasks = new Set<Promise<void>>();
+  private readonly recoveryTasks = new Set<Promise<unknown>>();
+
+  private trackTask<T>(task: Promise<T>, collection: Set<Promise<T>>): Promise<T> {
+    collection.add(task);
+    void task.finally(() => collection.delete(task)).catch(() => undefined);
+    return task;
+  }
+
+  async close(): Promise<void> {
+    if (this.closed) {
+      await Promise.allSettled([...(this.tickPromise ? [this.tickPromise] : []), ...this.activeTasks, ...this.recoveryTasks]);
+      return;
+    }
+    this.closed = true;
+    for (const controller of this.active.values()) controller.abort(new Error("Cron scheduler is shutting down"));
+    if (this.tickPromise) await Promise.allSettled([this.tickPromise]);
+    for (const controller of this.active.values()) controller.abort(new Error("Cron scheduler is shutting down"));
+    await Promise.allSettled([...this.recoveryTasks, ...this.activeTasks]);
+  }
 
   constructor(private readonly runtime: JobRuntime, options: CronSchedulerOptions = {}) {
     this.store = options.store ?? new FileCronStore();
@@ -363,11 +385,9 @@ export class CronScheduler {
       return state.history.filter(h => h.scheduleId === id).map(h => ({ ...h }));
     });
   }
-  async tick(): Promise<void> {
-    if (this.ticking) return;
-    this.ticking = true;
+  private async runTick(): Promise<void> {
     try {
-      while (this.active.size < this.maxConcurrent) {
+      while (!this.closed && this.active.size < this.maxConcurrent) {
         const claim = await this.store.transact(async state => {
           const now = this.now();
           const activeExecutions = state.history.filter(item => item.status === "claimed" || item.status === "running").length;
@@ -419,9 +439,22 @@ export class CronScheduler {
         if (this.active.size >= this.maxConcurrent) break;
         const controller = new AbortController();
         this.active.set(claim.schedule.id, controller);
-        void this.executeClaim(claim.schedule, claim.executionId, claim.scheduledFor, controller);
+        if (this.closed) controller.abort(new Error("Cron scheduler is shutting down"));
+        this.trackTask(this.executeClaim(claim.schedule, claim.executionId, claim.scheduledFor, controller), this.activeTasks);
       }
-    } finally { this.ticking = false; }
+    } finally { /* tick lifecycle is finalized by tick() */ }
+  }
+
+  async tick(): Promise<void> {
+    if (this.closed || this.ticking) return;
+    this.ticking = true;
+    const task = this.runTick();
+    this.tickPromise = task;
+    try { await task; }
+    finally {
+      this.ticking = false;
+      if (this.tickPromise === task) this.tickPromise = undefined;
+    }
   }
   /**
    * Reconcile executions left in a non-terminal state by a previous scheduler process.
@@ -429,6 +462,13 @@ export class CronScheduler {
    * automatically resubmitted, because submit may have succeeded before the crash.
    */
   async recover(): Promise<{ reconciled: number; monitoring: number; indeterminate: number }> {
+    if (this.closed) return { reconciled: 0, monitoring: 0, indeterminate: 0 };
+    const task = this.recoverInternal();
+    this.trackTask(task, this.recoveryTasks);
+    return task;
+  }
+
+  private async recoverInternal(): Promise<{ reconciled: number; monitoring: number; indeterminate: number }> {
     const pending = await this.store.transact(state => state.history
       .filter(item => item.status === "claimed" || item.status === "running")
       .map(item => ({ ...item })));
@@ -523,10 +563,11 @@ export class CronScheduler {
         continue;
       }
 
-      if (!this.active.has(schedule.id)) {
+      if (!this.closed && !this.active.has(schedule.id)) {
         const controller = new AbortController();
         this.active.set(schedule.id, controller);
-        void this.monitorRecovered(schedule, execution.id, execution.jobId, controller);
+        if (this.closed) controller.abort(new Error("Cron scheduler is shutting down"));
+        this.trackTask(this.monitorRecovered(schedule, execution.id, execution.jobId, controller), this.activeTasks);
         monitoring++;
       }
     }
