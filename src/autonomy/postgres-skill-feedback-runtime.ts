@@ -8,6 +8,8 @@ import { SkillFeedbackLedger } from "./skill-feedback.js";
 export interface PostgresSkillFeedbackRuntimeOptions {
   /** A trusted server-side pool. Never construct this from request or model input. */
   pool: AutonomyPgPool;
+  /** Set false after an operator-managed migration; runtime DB role then needs no DDL grants. */
+  initializeSchema?: boolean;
   /** Resolve tenant/project scope from the authenticated principal. */
   resolveScope(principalId: string): string | Promise<string>;
   /** Read incident counts from the trusted host safety monitor. */
@@ -35,9 +37,12 @@ export async function createPostgresSkillFeedbackHostConfig(
   }
   const registry = new PostgresSkillRegistryStore(options.pool);
   const feedbackStore = new PostgresSkillFeedbackStore(options.pool);
-  // Do not expose a partially initialized configuration if either schema fails.
-  await registry.ensureSchema();
-  await feedbackStore.ensureSchema();
+  // Schema creation is opt-out for least-privilege runtime roles; migrations can run separately.
+  if (options.initializeSchema !== false) {
+    // Do not expose a partially initialized configuration if either schema fails.
+    await registry.ensureSchema();
+    await feedbackStore.ensureSchema();
+  }
   return {
     registry,
     ledger: new SkillFeedbackLedger(feedbackStore),
