@@ -8,6 +8,7 @@ import time
 from typing import Any
 from agent_reach.channels import get_all_channels, get_channel
 from agent_reach.runtime.dispatch import run_action
+from agent_reach.utils.url import normalize_public_http_url
 
 # Agent-Reach action names vary by channel (for example create_post,
 # send_message, or delete_comment). Match verb tokens, not only exact names.
@@ -111,6 +112,22 @@ def _read_youtube(target: str, timeout: float) -> dict[str, Any]:
     return metadata
 
 
+
+_URL_PARAMETER_NAMES = {"url", "target", "href", "website", "web_url", "profile_url"}
+
+
+def _validate_public_url_params(value: Any, key: str = "") -> None:
+    """Reject private/local destinations hidden inside otherwise read-only action params."""
+    if isinstance(value, dict):
+        for child_key, child in value.items():
+            _validate_public_url_params(child, str(child_key).lower())
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            _validate_public_url_params(child, key)
+    elif key in _URL_PARAMETER_NAMES and isinstance(value, str) and value.strip():
+        normalize_public_http_url(value)
+
+
 def handle(request: dict[str, Any]) -> dict[str, Any]:
     operation = request.get("operation")
     if operation == "channels":
@@ -119,6 +136,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         target = request.get("url")
         if not isinstance(target, str) or not target:
             raise ValueError("url is required")
+        target = normalize_public_http_url(target)
         if get_channel("youtube") is not None and get_channel("youtube").can_handle(target):
             timeout = request.get("timeout", 180)
             if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0 or timeout > 1800:
@@ -139,6 +157,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("params must be an object")
     if is_mutating_action(action_name):
         raise ValueError("This Agent-Reach action is not enabled in Sofia's read-only integration")
+    _validate_public_url_params(params)
     channel = get_channel(channel_name)
     if channel is None:
         raise ValueError("Unknown channel: " + channel_name)
