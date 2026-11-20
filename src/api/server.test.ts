@@ -179,6 +179,20 @@ test("multi-project hosts reject shared durable job and cron routes", async () =
     });
     assert.equal(createCronWithWorkspace.status, 503);
     assert.deepEqual(await createCronWithWorkspace.json(), { error: "project_scoped_cron_unavailable" });
+
+    // Every schedule operation must stay disabled in multi-project mode, not only list/create.
+    const blockedCronRequests: Array<{ path: string; method: string }> = [
+      { path: "/v1/cron", method: "GET" },
+      { path: "/v1/cron/schedules/schedule-a/history?workspace=project-a", method: "GET" },
+      { path: "/v1/cron/schedules/schedule-a/enable?workspace=project-a", method: "POST" },
+      { path: "/v1/cron/schedules/schedule-a/disable?workspace=project-a", method: "POST" },
+      { path: "/v1/cron/schedules/schedule-a?workspace=project-a", method: "DELETE" },
+    ];
+    for (const request of blockedCronRequests) {
+      const response = await fetch(baseUrl + request.path, { method: request.method, headers: auth });
+      assert.equal(response.status, 503, request.method + " " + request.path);
+      assert.deepEqual(await response.json(), { error: "project_scoped_cron_unavailable" });
+    }
     assert.equal(workspaceResolverCalls, 0, "cron requests must fail closed before resolving or creating any project runtime");
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
