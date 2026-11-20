@@ -186,3 +186,30 @@ class PublicRedirectGuardTests(unittest.TestCase):
             request, None, 302, "Found", {}, "https://docs.example.org/article"
         )
         self.assertEqual(redirected.full_url, "https://docs.example.org/article")
+
+
+
+class TranscriptionPublicUrlTests(unittest.TestCase):
+    def test_transcription_uses_shared_public_url_validation(self):
+        from agent_reach.transcribe import _assert_safe_public_url
+
+        self.assertEqual(
+            _assert_safe_public_url("https://example.com/audio"),
+            "https://example.com/audio",
+        )
+
+    def test_transcription_rejects_legacy_private_ip_spellings(self):
+        from agent_reach.transcribe import TranscribeError, _assert_safe_public_url
+
+        for url in (
+            "http://127.1/audio",
+            "http://2130706433/audio",
+            "http://0x7f000001/audio",
+            "http://0177.0.0.1/audio",
+            "http://0xA9FEA9FE/audio",
+            "http://user:pass@example.com/audio",
+            "file:///etc/passwd",
+        ):
+            with self.subTest(url=url):
+                with self.assertRaises(TranscribeError):
+                    _assert_safe_public_url(url)
