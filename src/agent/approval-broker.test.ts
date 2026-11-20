@@ -76,6 +76,27 @@ test("approval broker expires requests and denies late approvals", async () => {
   assert.equal((await store.get(record.id))?.status, "expired");
 });
 
+test("approval broker observes aborts that occur while registering the abort listener", async () => {
+  const store = new InMemoryApprovalDecisionStore();
+  const broker = new ApprovalBroker({ store, ttlMs: 5_000, pollIntervalMs: 10_000 });
+  const signal = {
+    aborted: false,
+    addEventListener() { this.aborted = true; },
+    removeEventListener() {},
+  } as unknown as AbortSignal;
+  assert.equal(await broker.handle({
+    runId: "run-abort-registration-race",
+    principalId: "principal-1",
+    toolName: "workspace.write_file",
+    input: {},
+    actionHash: "f".repeat(64),
+    risk: "high",
+    signal,
+  }), false);
+  const [record] = await store.listPending("principal-1");
+  assert.equal(record, undefined, "the raced abort must cancel rather than leave a pending approval");
+});
+
 test("approval broker cancels a pending request when its run is aborted", async () => {
   const store = new InMemoryApprovalDecisionStore();
   const broker = new ApprovalBroker({ store, ttlMs: 5_000, pollIntervalMs: 25 });
