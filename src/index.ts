@@ -130,4 +130,4 @@ export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-c
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
 export { createSofiaPluginHost, SofiaPluginHost } from "./integrations/deepseek-harness/plugin-host.js";
-export type { SofiaPlugin, SofiaPluginContext } from "./integrations/deepseek-harness/plugin-host.js";
+export type { SofiaPlugin, SofiaPluginContext, SofiaPluginEventMap, SofiaPluginEventName, SofiaPluginEventListener } from "./integrations/deepseek-harness/plugin-host.js";
