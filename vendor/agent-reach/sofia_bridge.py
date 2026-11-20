@@ -21,10 +21,19 @@ MUTATING_ACTIONS = {
 }
 
 
+READ_ONLY_ACTIONS = {
+    "search", "read", "get", "list", "fetch", "metadata",
+    "subtitle", "subtitles", "transcribe", "extract", "lookup", "query",
+}
+
+
 def is_mutating_action(name: str) -> bool:
-    """Return True for mutating action names, including compound snake/kebab names."""
+    """Fail closed: only known read/search verbs are allowed through this bridge."""
     tokens = set(re.findall(r"[a-z0-9]+", name.lower()))
-    return bool(tokens & MUTATING_ACTIONS)
+    if not tokens:
+        return True
+    first_verb = next(iter(re.findall(r"[a-z0-9]+", name.lower())), "")
+    return first_verb not in READ_ONLY_ACTIONS or bool(tokens & MUTATING_ACTIONS)
 
 
 def _channels() -> dict[str, Any]:
