@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { assessAction, assertSafePath, containsPromptInjection, redactSecrets, riskFor } from "../src/security/guard.js";
 import { MemorySecurityAudit } from "../src/security/audit.js";
-import { classifyToolEffects } from "../src/security/policy.js";
+import { classifyToolEffects, shouldCreateBrowserTools } from "../src/security/policy.js";
 import { SecurityController } from "../src/security/controller.js";
 
 describe("Sofia security controls",()=>{
@@ -130,6 +130,12 @@ describe("Sofia security controls",()=>{
   });
 });
 
+
+it("creates browser tools when either network navigation or browser interaction is enabled", () => {
+  assert.equal(shouldCreateBrowserTools({ allowNetwork: true, allowBrowser: false }), true);
+  assert.equal(shouldCreateBrowserTools({ allowNetwork: false, allowBrowser: true }), true);
+  assert.equal(shouldCreateBrowserTools({ allowNetwork: false, allowBrowser: false }), false);
+});
 
 it("shared tool-effect classification marks privileged actions consistently", () => {
   assert.deepEqual(classifyToolEffects("terminal.run"), ["shell", "network"]);
