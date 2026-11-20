@@ -30,4 +30,4 @@ jobs:
       - name: Compile helper
         run: python -m py_compile scripts/sofia-xfs-quota-helper.py scripts/test_sofia_xfs_quota_helper.py scripts/test_sofia_xfs_quota_integration.py
       - name: Run helper unit tests
-        run: python -m unittest scripts/test_sofia_xfs_quota_helper.py
+        run: python -m unittest scripts/test_sofia_xfs_quota_helper.py scripts/test_sofia_xfs_quota_integration.py
