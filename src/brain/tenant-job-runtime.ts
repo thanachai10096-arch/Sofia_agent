@@ -85,8 +85,12 @@ export class TenantJobRuntimeRouter implements JobRuntime {
   }
 
   async get(id: string): Promise<JobRecord | undefined> {
-    for (const pending of this.runtimes.values()) {
-      const record = await (await pending).get(id);
+    // A notification/recovery lookup can happen before list() has hydrated
+    // runtimes after restart. Search every configured owner runtime rather
+    // than silently treating an uninitialized tenant's persisted job as absent.
+    const pending = await Promise.all([...this.allowedOwners].map((owner) => this.runtimeFor(owner)));
+    for (const runtime of pending) {
+      const record = await runtime.get(id);
       if (record) return record;
     }
     return undefined;
