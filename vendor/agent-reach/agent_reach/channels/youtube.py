@@ -53,6 +53,12 @@ def _video_url(target: str) -> str:
     if _VIDEO_ID_RE.match(t):
         return f"https://www.youtube.com/watch?v={t}"
     candidate = t if "://" in t else f"https://{t}"
+    from agent_reach.utils.url import normalize_public_http_url
+
+    try:
+        candidate = normalize_public_http_url(candidate)
+    except (TypeError, ValueError):
+        raise ReachError(BAD_INPUT, "target must be a public YouTube URL") from None
     if host_matches(candidate, "youtube.com", "youtu.be"):
         return candidate
     raise ReachError(BAD_INPUT, "target must be a YouTube link or 11-character video id")
