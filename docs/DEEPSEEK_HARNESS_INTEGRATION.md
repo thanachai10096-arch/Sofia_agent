@@ -11,6 +11,8 @@ agent, a second server, or a child CLI.
 - Tool and service registration through a plugin-scoped context.
 - Reversible registration effects and reverse-order teardown.
 - Rollback of partial registrations when plugin installation fails.
+- Typed install/uninstall lifecycle events and runtime plugin unloading.
+- Cleanup continues across failures; teardown reports aggregated cleanup errors.
 - Plugin tools enter Sofia's existing Tool Registry and continue through the
   existing Tool Gateway, approval, execution policy, audit, and workspace
   runtime. Plugins do not bypass those controls.
@@ -42,10 +44,10 @@ copy of Cordis source.
 
 ## Next integration stages
 
-1. Move Sofia's built-in tools and optional Agent-Reach adapter behind native
-   plugins so every capability uses the same registration lifecycle.
-2. Add typed lifecycle events around Sofia's existing run/step/tool events.
-3. Add scoped service injection for tenant-owned plugin instances.
+1. Move browser, desktop, messaging, and MCP adapters behind native plugins
+   so every capability uses the same registration lifecycle.
+2. Bridge plugin lifecycle events to Sofia's existing run/step/tool event stream.
+3. Add tenant-scoped plugin instances and scoped service injection.
 4. Add per-plugin capability manifests and approval metadata.
 5. Evaluate selective upstream source vendoring only where it is compatible
    with Sofia's Node >=20 runtime and does not duplicate core authority.
