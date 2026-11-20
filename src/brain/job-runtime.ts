@@ -84,6 +84,7 @@ export interface JobRuntime {
   cancel(id: string): Promise<boolean>;
   cancelForOwner?(id: string, ownerKeyId: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
+  listForOwner?(ownerKeyId: string): Promise<JobRecord[]>;
   markNotificationDelivered?(id: string): Promise<void>;
   close?(): Promise<void>;
 }
@@ -518,6 +519,10 @@ export class DurableJobRuntime implements JobRuntime {
     canonical.notificationDelivered = true;
     canonical.updatedAt = new Date().toISOString();
     await this.state.save(canonical);
+  }
+
+  async listForOwner(ownerKeyId: string): Promise<JobRecord[]> {
+    return (await this.list()).filter((record) => record.ownerKeyId === ownerKeyId);
   }
 
   async list(): Promise<JobRecord[]> {
