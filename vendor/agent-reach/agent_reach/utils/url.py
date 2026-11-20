@@ -157,8 +157,12 @@ def host_matches(url: str, *domains: str) -> bool:
 class PublicOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Revalidate every redirect hop so a public URL cannot redirect to a local host."""
 
+    def __init__(self, resolver=socket.getaddrinfo):
+        super().__init__()
+        self._resolver = resolver
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        assert_public_http_url(newurl)
+        assert_public_http_url(newurl, resolver=self._resolver)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
