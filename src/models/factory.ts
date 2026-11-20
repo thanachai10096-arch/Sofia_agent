@@ -47,7 +47,7 @@ function intEnv(name:string,fallback:number,minimum=0){const value=Number(proces
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:NonNullable<AgentDependencies["tools"]>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
