@@ -23,12 +23,12 @@ Sofia now has a provider-neutral payment execution foundation. It deliberately d
 
 ## Sofia tool integration
 
-`createFinancialActionTools(dependencies)` exposes two tools for composition with the normal `createToolRegistry([...createBuiltinTools(), ...createFinancialActionTools(dependencies)])` path:
+`createFinancialActionTools(dependencies, authenticatedOwnerId)` exposes two tools for composition with the normal `createToolRegistry([...createBuiltinTools(), ...createFinancialActionTools(dependencies, principal.id)])` path. The owner ID is bound when the tool set is created and is deliberately omitted from model-visible input schemas, preventing the model from selecting another account:
 
 - `finance.payment.execute` — marked `network` + `destructive`; the existing policy gateway must allow both effects and require transaction approval. The injected `FinancialApprovalVerifier` independently checks the approval is bound to the exact owner and transaction fingerprint.
 - `finance.payment.reconcile` — marked `network`; it only queries provider verification and never creates a second payment.
 
-The factory intentionally requires dependencies from the host. It does not silently create a fake provider, approval verifier, or production store. The caller must derive `ownerId` from the authenticated principal, not trust a model-supplied owner string; validate this at the application boundary before exposing the tools. Export is available from the package entry point as `createFinancialActionTools`.
+The factory intentionally requires dependencies and a non-empty authenticated owner ID from the host. It does not silently create a fake provider, approval verifier, or production store. Never pass a model-supplied owner ID. Export is available from the package entry point as `createFinancialActionTools`.
 
 ## Production integration gates
 
