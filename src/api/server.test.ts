@@ -409,3 +409,66 @@ test("tenant mode disables the process-wide cron scheduler and fails cron routes
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("tenant cron schedulers are isolated and recovered before their first tick", async () => {
+  const events: string[] = [];
+  const principalId = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 32);
+  const schedulerFor = (id: string) => ({
+    async recover() { events.push("recover:" + id); return { reconciled: 0, monitoring: 0, indeterminate: 0 }; },
+    async tick() { events.push("tick:" + id); },
+    async list(actor: string) { events.push("list:" + id + ":" + actor); return []; },
+    async create() { throw new Error("not used"); },
+    async history() { return []; },
+    async setEnabled() { throw new Error("not used"); },
+    async cancel() { return false; },
+  });
+  const resolved: string[] = [];
+  const tenantRuntime = {
+    async list() { return []; },
+    async submit() { throw new Error("not used"); },
+    async get() { return undefined; },
+    async resume() { throw new Error("not used"); },
+    async cancel() { return false; },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { "cron-user-one": ["cron:read"], "cron-user-two": ["cron:read"] },
+    resolvePrincipalDependencies: async () => ({
+      provider: { generate: async () => ({ text: "tenant" }) },
+      router: new ModelRouter([route]),
+      reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+      jobRuntime: tenantRuntime as never,
+    }),
+    resolvePrincipalCronScheduler: async (id) => {
+      resolved.push(id);
+      return schedulerFor(id) as never;
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  try {
+    for (const key of ["cron-user-one", "cron-user-two"]) {
+      const response = await fetch(baseUrl + "/v1/cron/schedules", {
+        headers: { authorization: "Bearer " + key },
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { schedules: [] });
+    }
+    const one = principalId("cron-user-one");
+    const two = principalId("cron-user-two");
+    assert.deepEqual(resolved, [one, two]);
+    assert.deepEqual(events, [
+      "recover:" + one, "tick:" + one, "list:" + one + ":" + one,
+      "recover:" + two, "tick:" + two, "list:" + two + ":" + two,
+    ]);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
