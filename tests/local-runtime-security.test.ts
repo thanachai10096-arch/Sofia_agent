@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createNodeWorkspaceRuntime } from "../src/platform/local-runtime.js";
+import { assertSafeGitArgs, createNodeWorkspaceRuntime } from "../src/platform/local-runtime.js";
 
 async function fixture() {
   const parent = await mkdtemp(path.join(os.tmpdir(), "sofia-runtime-security-"));
@@ -98,6 +98,51 @@ test("Docker sandbox mode fails closed without an explicitly pinned image", asyn
     else process.env.SOFIA_SANDBOX_MODE = oldMode;
     if (oldImage === undefined) delete process.env.SOFIA_SANDBOX_IMAGE;
     else process.env.SOFIA_SANDBOX_IMAGE = oldImage;
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
+
+
+test("Git runtime blocks destructive history and working-tree operations", () => {
+  assert.doesNotThrow(() => assertSafeGitArgs(["status", "--short"]));
+  assert.doesNotThrow(() => assertSafeGitArgs(["restore", "--staged", "src/file.ts"]));
+  assert.throws(() => assertSafeGitArgs(["reset", "--hard", "HEAD"]), /subcommand is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["clean", "-fd"]), /subcommand is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["rebase", "main"]), /subcommand is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["checkout", "--", "src/file.ts"]), /subcommand is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["restore", "src/file.ts"]), /working tree is blocked/);
+  assert.throws(() => assertSafeGitArgs(["restore", "--staged", "--worktree", "src/file.ts"]), /working tree is blocked/);
+});
+
+test("Git runtime blocks force pushes and Git execution/configuration overrides", () => {
+  assert.doesNotThrow(() => assertSafeGitArgs(["push", "origin", "feature-branch"]));
+  assert.throws(() => assertSafeGitArgs(["push", "--force", "origin", "feature-branch"]), /Destructive or force Git options/);
+  assert.throws(() => assertSafeGitArgs(["push", "--force-with-lease", "origin", "feature-branch"]), /Destructive or force Git options/);
+  assert.throws(() => assertSafeGitArgs(["status", "-c", "core.pager=cat"]), /Git option is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["status", "--git-dir=/tmp/other.git"]), /Git option is not allowed/);
+  assert.throws(() => assertSafeGitArgs(["branch", "-D", "main"]), /Destructive or force Git options/);
+  assert.throws(() => assertSafeGitArgs(["branch", "-d", "old-branch"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["tag", "--delete", "v1.0"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["remote", "remove", "origin"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["stash", "clear"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["push", "--delete", "origin", "main"]), /ref deletion, stash deletion/);
+  assert.throws(() => assertSafeGitArgs(["push", "origin", ":main"]), /Deleting remote refs via Git push refspecs/);
+  assert.throws(() => assertSafeGitArgs(["push", "origin", "+:refs/heads/main"]), /Deleting remote refs via Git push refspecs/);
+  assert.throws(() => assertSafeGitArgs(["commit", "--amend", "--no-edit"]), /ref deletion, stash deletion/);
+});
+
+
+test("generic process execution cannot bypass the Git argument policy", async () => {
+  const f = await fixture();
+  try {
+    const blocked = await f.runtime.run("git", ["reset", "--hard", "HEAD"]);
+    assert.notEqual(blocked.code, 0);
+    assert.match(blocked.stderr, /Git subcommand is not allowed/);
+
+    const windowsPathBlocked = await f.runtime.run("C:\\Program Files\\Git\\git.exe", ["clean", "-fd"]);
+    assert.notEqual(windowsPathBlocked.code, 0);
+    assert.match(windowsPathBlocked.stderr, /Git subcommand is not allowed/);
+  } finally {
     await rm(f.parent, { recursive: true, force: true });
   }
 });
