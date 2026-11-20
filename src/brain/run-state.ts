@@ -32,6 +32,7 @@ export interface BrainRunSnapshot {
     decidedAt: string;
     actorId: string;
     note?: string;
+    confirmedNoSideEffect?: true;
   }>;
   checkpointId: string;
   baselineSnapshotId?: string;
