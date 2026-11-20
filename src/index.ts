@@ -141,3 +141,5 @@ export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessa
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
 
 export { TenantJobRuntimeRouter, createRegistryBackedTenantJobRuntimeRouter } from "./brain/tenant-job-runtime.js";
+
+export { SqliteSkillFeedbackStore, openTenantSkillFeedbackStore } from "./autonomy/sqlite-skill-feedback-store.js";
