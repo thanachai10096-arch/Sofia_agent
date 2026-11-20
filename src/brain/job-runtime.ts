@@ -616,6 +616,18 @@ export class DurableJobRuntime implements JobRuntime {
         throw new Error("In-flight step is already marked completed");
       }
       const decidedAt = new Date().toISOString();
+      const step = snapshot.plan.steps.find((item) => item.id === stepId)!;
+      const safeNote = note ? String(redactSecrets(note)).slice(0, 1000) : undefined;
+      const reconciledObservation = outcome === "completed"
+        ? {
+            stepId,
+            tool: step.call.tool,
+            ok: true,
+            evidenceId: `reconciled:${stepId}:${decidedAt}`,
+            preview: safeNote ?? "An authorized operator confirmed that this step completed; no additional result details were supplied.",
+            truncated: false,
+          }
+        : undefined;
       const reconciled: BrainRunSnapshot = {
         ...snapshot,
         completedStepIds: outcome === "completed"
@@ -624,7 +636,15 @@ export class DurableJobRuntime implements JobRuntime {
         inFlightStepId: undefined,
         reconciliations: [
           ...(snapshot.reconciliations ?? []),
-          { stepId, outcome, decidedAt, actorId, ...(note ? { note: String(redactSecrets(note)).slice(0, 1000) } : {}), ...(outcome === "retry" ? { confirmedNoSideEffect: true as const } : {}) },
+          {
+            stepId,
+            outcome,
+            decidedAt,
+            actorId,
+            ...(safeNote ? { note: safeNote } : {}),
+            ...(outcome === "retry" ? { confirmedNoSideEffect: true as const } : {}),
+            ...(reconciledObservation ? { observation: reconciledObservation } : {}),
+          },
         ],
       };
       const safeSnapshot = redactSecrets(reconciled) as BrainRunSnapshot;
