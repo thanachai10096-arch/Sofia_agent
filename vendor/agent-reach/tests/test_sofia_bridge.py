@@ -161,6 +161,54 @@ class PublicUrlBoundaryTests(unittest.TestCase):
         dispatch.assert_called_once()
 
 
+class PublicDnsPreflightTests(unittest.TestCase):
+    def test_rejects_hostname_with_private_or_mixed_dns_answers(self):
+        from agent_reach.utils.url import assert_public_http_url
+
+        def mixed_answers(host, port, *, type):
+            return [
+                (2, 1, 6, "", ("93.184.216.34", port)),
+                (2, 1, 6, "", ("127.0.0.1", port)),
+            ]
+
+        with self.assertRaisesRegex(ValueError, "non-public address"):
+            assert_public_http_url("https://example.test/path", resolver=mixed_answers)
+
+    def test_rejects_empty_and_unresolvable_dns_answers(self):
+        from agent_reach.utils.url import assert_public_http_url
+
+        with self.assertRaisesRegex(ValueError, "no DNS addresses"):
+            assert_public_http_url("https://empty.test", resolver=lambda *args, **kwargs: [])
+
+        def failed_lookup(*args, **kwargs):
+            raise OSError("DNS unavailable")
+
+        with self.assertRaisesRegex(ValueError, "could not be resolved"):
+            assert_public_http_url("https://offline.test", resolver=failed_lookup)
+
+    def test_accepts_hostname_with_only_public_dns_answers(self):
+        from agent_reach.utils.url import assert_public_http_url
+
+        def public_answers(host, port, *, type):
+            return [(2, 1, 6, "", ("93.184.216.34", port))]
+
+        self.assertEqual(
+            assert_public_http_url("https://example.test/path", resolver=public_answers),
+            "https://example.test/path",
+        )
+
+    def test_public_redirect_requires_public_dns_answers(self):
+        from agent_reach.utils.url import PublicOnlyRedirectHandler
+
+        handler = PublicOnlyRedirectHandler(
+            resolver=lambda host, port, **kwargs: [
+                (2, 1, 6, "", ("127.0.0.1", port))
+            ]
+        )
+        request = __import__("urllib.request", fromlist=["Request"]).Request("https://example.com/start")
+        with self.assertRaisesRegex(ValueError, "non-public address"):
+            handler.redirect_request(request, None, 302, "Found", {}, "https://redirect.example.test/")
+
 class PublicRedirectGuardTests(unittest.TestCase):
     def test_redirect_handler_rejects_private_redirect_targets(self):
         from agent_reach.utils.url import PublicOnlyRedirectHandler
