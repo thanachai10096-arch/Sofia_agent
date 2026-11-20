@@ -142,7 +142,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         configuredApiOwners.map(token => createHash("sha256").update(token).digest("hex").slice(0, 32)),
         config.tenantDependencyRegistry!,
       )
-    : jobRuntime;
+    : deps.jobRuntime;
   const agent = new SofiaAgent(deps);
   // Per-owner agents are created only through a server-side resolver after authentication.
   const tenantAgents = new Map<string, Promise<{ agent: SofiaAgent; dependencies: AgentDependencies }>>();
