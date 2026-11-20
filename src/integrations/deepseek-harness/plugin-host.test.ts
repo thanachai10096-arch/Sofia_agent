@@ -101,3 +101,47 @@ test("host cannot be repopulated from a disposal callback", () => {
   host.dispose();
   assert.throws(() => host.listPlugins(), /disposed/);
 });
+
+test("plugin manifests require dependencies to be installed first", () => {
+  const host = new SofiaPluginHost();
+  assert.throws(() => host.use({
+    id: "consumer",
+    manifest: { version: "1.0.0", capabilities: [], dependencies: ["provider"] },
+    install() {},
+  }), /requires plugin "provider"/);
+  host.use({ id: "provider", manifest: { version: "1.0.0", capabilities: [] }, install() {} });
+  host.use({
+    id: "consumer",
+    manifest: { version: "1.0.0", capabilities: [], dependencies: ["provider"] },
+    install() {},
+  });
+  assert.throws(() => host.unuse("provider"), /while "consumer" depends on it/);
+  assert.equal(host.unuse("consumer"), true);
+  assert.equal(host.unuse("provider"), true);
+});
+
+test("plugin manifest rejects tools whose declared effects exceed capabilities", () => {
+  const host = new SofiaPluginHost();
+  assert.throws(() => host.use({
+    id: "limited",
+    manifest: { version: "1.0.0", capabilities: ["read"] },
+    install(ctx) {
+      ctx.registerTool({ ...tool("network.read"), effects: ["read", "network"] });
+    },
+  }), /does not declare tool capability "network"/);
+  assert.deepEqual(host.listPlugins(), []);
+  assert.deepEqual(host.listTools(), []);
+});
+
+test("plugin manifests are exposed as defensive metadata copies", () => {
+  const host = new SofiaPluginHost();
+  host.use({
+    id: "reader",
+    manifest: { version: "1.2.0", description: "Read-only connector", capabilities: ["read", "network"] },
+    install() {},
+  });
+  const manifest = host.getPluginManifest("reader");
+  assert.deepEqual(manifest?.capabilities, ["read", "network"]);
+  assert.equal(manifest?.version, "1.2.0");
+  assert.equal(host.getPluginManifest("missing"), undefined);
+});
