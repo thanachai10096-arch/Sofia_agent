@@ -568,3 +568,28 @@ test("revoking a profile waits for an in-flight acquire before closing and delet
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("profile revocation deletes credentials even when the browser refuses to close", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-profile-revoke-close-failure-"));
+  try {
+    const store = new BrowserProfileStore(root);
+    const profile = await store.create("principal-close-failure");
+    const manager = new BrowserProfileSessionManager(store, () => ({
+      launch: async () => ({
+        id: "unresponsive-session",
+        newPage: async () => { throw new Error("not used"); },
+        close: async () => { throw new Error("browser close failed"); },
+      }),
+    }));
+    await manager.acquire("principal-close-failure", profile.id);
+    await assert.rejects(
+      manager.revoke("principal-close-failure", profile.id),
+      /revocation cleanup was incomplete/,
+    );
+    await assert.rejects(store.get("principal-close-failure", profile.id));
+    await assert.rejects(manager.acquire("principal-close-failure", profile.id));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
