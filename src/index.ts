@@ -4,6 +4,16 @@ export { createManagedSkillLearningHandler } from "./brain/managed-skill-learnin
 export type { SkillLifecycleWorkflowOptions, SkillLifecycleWorkflowResult } from "./brain/skill-lifecycle-workflow.js";
 export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
 
+export { ApprovalBroker, FileApprovalJournal } from "./agent/approval.js";
+export type { ApprovalBrokerPort, ApprovalDecision, ApprovalHandler, ApprovalRequest, ApprovalAuditRecord, ApprovalAuditStatus, PendingApproval } from "./agent/approval.js";
+export { Aes256GcmApprovalPayloadCipher } from "./agent/approval-payload-cipher.js";
+export type { ApprovalPayloadContext, ApprovalPayloadCipher, EncryptedApprovalPayload } from "./agent/approval-payload-cipher.js";
+export { SqliteApprovalStore } from "./agent/sqlite-approval-store.js";
+export { SqliteApprovalPayloadStore } from "./agent/sqlite-approval-payload-store.js";
+export { DurableApprovalCoordinator } from "./agent/durable-approval-coordinator.js";
+export type { DurableApprovalTicket, DurableApprovalResult, DurableApprovalCoordinatorOptions } from "./agent/durable-approval-coordinator.js";
+export type { TransactionalApprovalStore } from "./agent/sqlite-approval-store.js";
+export type { ApprovalRequest, ApprovalHandler, PendingApproval, ApprovalDecision, ApprovalAuditRecord, ApprovalAuditStatus, ApprovalJournal } from "./agent/approval.js";
 export { SofiaAgent } from "./agent/core.js";
 export { classifyTask } from "./agent/classifier.js";
 export { ModelRouter } from "./models/router.js";
@@ -128,3 +138,5 @@ export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHA
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { DurableApprovalBroker } from "./agent/durable-approval-broker.js";

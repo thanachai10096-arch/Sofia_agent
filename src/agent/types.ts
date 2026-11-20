@@ -11,6 +11,8 @@ import type { SecurityAuditSink } from "../security/audit.js";
 import type { DesktopCapability } from "../desktop/types.js";
 export interface AgentRequest {
   task: string;
+  /** Trusted host-assigned run ID used to bind approval requests to API cancellation. */
+  runId?: string;
   context?: string;
   /** Explicit configured route ID, or auto/omitted for Sofia's automatic routing. */
   modelRouteId?: string;
@@ -41,7 +43,7 @@ export interface AgentDependencies {
  tools?:ToolRegistry;
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
- brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
+ brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;runId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;
  securityAudit?: SecurityAuditSink;

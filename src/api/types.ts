@@ -1,6 +1,7 @@
 import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import type { ApprovalBrokerPort } from "../agent/approval.js";
 
 export interface AgentRunInput {
   task: string;
@@ -56,6 +57,8 @@ export interface SofiaApiConfig {
   securityAdminScope?: string;
   /** Optional durable run store; queued/running runs become failed after restart. */
   runStore?: RunRecordStore;
+  /** Approval broker shared with the agent execution gateway; the standard entrypoint configures a file-backed journal. */
+  approvalBroker?: ApprovalBrokerPort;
   /** Optional Discord interactions route; signature verification is delegated to the supplied transport. */
   discordInteractionRoute?: {
     transport: DiscordInteractionTransport;

@@ -121,7 +121,7 @@ function pathId(url: string): string | null {
 }
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
-  const agent = new SofiaAgent(deps);
+  const agent = new SofiaAgent(config.approvalBroker ? { ...deps, approval: config.approvalBroker.handle } : deps);
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
   const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
@@ -144,6 +144,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
+  const abortRun = (run: ActiveRun, reason?: Error) => {
+    if (!run.controller.signal.aborted) run.controller.abort(reason);
+    // Resolve any owner-bound approval wait immediately when its run is cancelled.
+    config.approvalBroker?.cancelRun(run.id, run.ownerKeyId);
+  };
   const runStore = config.runStore;
   const persist = (run: ActiveRun): Promise<void> => {
     if (!runStore) return Promise.resolve();
@@ -212,9 +217,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       run.status = "running";
       run.updatedAt = Date.now();
       void persist(run).catch(() => undefined);
-      const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
+      const timer = setTimeout(() => abortRun(run, new Error("Run timed out.")), requestTimeoutMs);
       try {
         const result = await agent.run({
+          runId: run.id,
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
@@ -347,6 +353,37 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
+      const isApprovalRequest = requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/");
+      if (isApprovalRequest) {
+        const broker = config.approvalBroker;
+        if (!broker) return json(res, 503, { error: "approval_broker_unavailable" }, origin, config);
+        if (req.method === "GET" && requestUrl.pathname === "/v1/approvals") {
+          if (!auth.scopes.includes("approval:read")) return json(res, 403, { error: "forbidden", requiredScope: "approval:read" }, origin, config);
+          return json(res, 200, { approvals: broker.pending(auth.keyId) }, origin, config);
+        }
+        if (req.method === "GET" && requestUrl.pathname === "/v1/approvals/history") {
+          if (!auth.scopes.includes("approval:read")) return json(res, 403, { error: "forbidden", requiredScope: "approval:read" }, origin, config);
+          return json(res, 200, { approvals: broker.history(auth.keyId) }, origin, config);
+        }
+        const decisionMatch = requestUrl.pathname.match(/^\/v1\/approvals\/([^/]+)\/decision$/);
+        if (req.method === "POST" && decisionMatch) {
+          if (!auth.scopes.includes("approval:decide")) return json(res, 403, { error: "forbidden", requiredScope: "approval:decide" }, origin, config);
+          let approvalId: string;
+          try { approvalId = decodeURIComponent(decisionMatch[1]!); } catch { return json(res, 400, { error: "invalid_approval_id" }, origin, config); }
+          if (!approvalId || approvalId.length > 128) return json(res, 400, { error: "invalid_approval_id" }, origin, config);
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          const input = raw as Record<string, unknown>;
+          if (typeof input.actionHash !== "string" || input.actionHash.length < 1 || input.actionHash.length > 256 ||
+              typeof input.approved !== "boolean") return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          const accepted = broker.decide({ approvalId, principalId: auth.keyId, actionHash: input.actionHash, approved: input.approved });
+          return accepted
+            ? json(res, 200, { approvalId, status: input.approved ? "approved" : "rejected" }, origin, config)
+            : json(res, 404, { error: "approval_not_found_or_expired" }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
+
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
       if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
@@ -455,7 +492,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const run = runs.get(id);
         if (!run || run.ownerKeyId !== auth.keyId) return json(res, 404, { error: "run_not_found" }, origin, config);
         if (run.status === "queued" || run.status === "running") {
-          run.controller.abort();
+          abortRun(run, new Error("Run cancelled by owner."));
           run.status = "cancelled";
           run.updatedAt = Date.now();
           void persist(run).catch(() => undefined);
@@ -494,6 +531,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try {
           run.status = "running";
           const result = await agent.run({
+            runId,
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
@@ -617,6 +655,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const runId = randomUUID();
         try {
           const result = await agent.run({
+            runId,
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
