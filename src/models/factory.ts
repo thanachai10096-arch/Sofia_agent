@@ -14,7 +14,7 @@ import type { AgentDependencies } from "../agent/types.js";
 import { Reviewer } from "../review/reviewer.js";
 import { createNodeWorkspaceRuntime } from "../platform/local-runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
-import { assertSecurityConfiguration, loadExecutionPolicyFromEnv } from "../security/policy.js";
+import { assertSecurityConfiguration, loadExecutionPolicyFromEnv, shouldCreateBrowserTools } from "../security/policy.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { createAgentReachTools } from "../integrations/agent-reach.js";
 import { createSofiaPluginHost } from "../integrations/deepseek-harness/plugin-host.js";
@@ -111,7 +111,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
         },
       });
     };
-    const runBrowserTools = dependencies.policy.allowBrowser
+    const runBrowserTools = shouldCreateBrowserTools(dependencies.policy)
       ? createBrowserTools(
           new PlaywrightBrowserRuntime(),
           (cleanup) => browserCleanups.push(cleanup),
