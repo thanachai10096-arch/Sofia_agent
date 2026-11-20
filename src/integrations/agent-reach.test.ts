@@ -59,6 +59,8 @@ test("read rejects non-HTTP schemes, credentials, localhost and private IPs befo
     "http://169.254.169.254/latest/meta-data/",
     "http://172.20.0.1/",
     "http://224.0.0.1/",
+    "http://[::1]/",
+    "http://[::ffff:127.0.0.1]/",
   ]) {
     await assert.rejects(tool.execute({ url }, { runtime }), undefined, url);
   }
