@@ -188,7 +188,7 @@ export async function proposeSkillImprovement(
 ): Promise<SkillImprovementProposal | null> {
   if (!current || !summary || summary.skillName !== current.name ||
       summary.recommendation === "retain" || summary.recommendation === "insufficient-data" ||
-      summary.evidenceIds.length === 0 || digestSkillCandidate(current) !== summary.candidateDigest) {
+      !summary.integrityValid || summary.evidenceIds.length === 0 || digestSkillCandidate(current) !== summary.candidateDigest) {
     return null;
   }
   const result = await propose({ current: structuredClone(current), feedback: structuredClone(summary) });
