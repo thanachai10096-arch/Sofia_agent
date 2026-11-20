@@ -15,17 +15,23 @@ export class SofiaAgent {
   async run(request: AgentRequest): Promise<AgentResult> {
     const sessionId = request.sessionId;
     if (!sessionId || !this.deps.sessionStore) return this.runUnlocked(request);
-    const previous = this.sessionTails.get(sessionId) ?? Promise.resolve();
+    // Session IDs are caller-controlled labels. Scope both the transcript key and
+    // in-process serialization queue to the authenticated principal so two tenants
+    // choosing the same label can never share history or block one another.
+    const storageSessionId = request.principalId
+      ? JSON.stringify([request.principalId, sessionId])
+      : sessionId;
+    const previous = this.sessionTails.get(storageSessionId) ?? Promise.resolve();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     const tail = previous.catch(() => undefined).then(() => gate);
-    this.sessionTails.set(sessionId, tail);
+    this.sessionTails.set(storageSessionId, tail);
     await previous.catch(() => undefined);
     try {
-      return await this.runUnlocked(request);
+      return await this.runUnlocked({ ...request, sessionId: storageSessionId });
     } finally {
       release();
-      if (this.sessionTails.get(sessionId) === tail) this.sessionTails.delete(sessionId);
+      if (this.sessionTails.get(storageSessionId) === tail) this.sessionTails.delete(storageSessionId);
     }
   }
 

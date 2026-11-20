@@ -1,4 +1,5 @@
 import type { TelegramTransport, TelegramUpdate } from "./telegram.js";
+import type { TelegramPollLease, TelegramPollLeaseHandle } from "./telegram-poll-lease.js";
 
 interface TelegramApiResponse<T> {
   ok: boolean;
@@ -10,7 +11,12 @@ export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
-  onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed", status?: number, failureKind?: "network" | "invalid_json" | "http" | "unknown") => void;
+  /** When supplied, only the Redis lease owner is allowed to long-poll this bot. */
+  pollLease?: TelegramPollLease;
+  pollLeaseRenewIntervalMs?: number;
+  /** Maximum wait for Redis lease acquisition/release operations. */
+  pollLeaseOperationTimeoutMs?: number;
+  onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed" | "poll_lease_unavailable" | "poll_lease_lost", status?: number, failureKind?: "network" | "invalid_json" | "http" | "unknown") => void;
 }
 
 /**
@@ -27,6 +33,28 @@ class TelegramRequestError extends Error {
   }
 }
 
+async function withLeaseOperationTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("Telegram poll lease " + label + " timed out.")), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function releaseLeaseSafely(lease: TelegramPollLeaseHandle, timeoutMs: number): Promise<void> {
+  try {
+    await withLeaseOperationTimeout(lease.release(), timeoutMs, "release");
+  } catch {
+    // The lease TTL is the final recovery mechanism if Redis cannot release it.
+  }
+}
+
 export function createTelegramHttpTransport(options: TelegramHttpTransportOptions): TelegramTransport {
   const token = options.token;
   if (!/^[A-Za-z0-9:_-]{20,256}$/.test(token)) {
@@ -37,10 +65,18 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     throw new Error("Telegram poll timeout must be an integer between 1 and 50 seconds.");
   }
   const fetchImpl = options.fetchImpl ?? fetch;
+  const leaseOperationTimeoutMs = options.pollLeaseOperationTimeoutMs ?? 5_000;
+  if (!Number.isSafeInteger(leaseOperationTimeoutMs) || leaseOperationTimeoutMs < 250 || leaseOperationTimeoutMs > 30_000) {
+    throw new Error("Telegram poll lease operation timeout must be between 250 milliseconds and 30 seconds.");
+  }
   const endpoint = `https://api.telegram.org/bot${token}`;
   let controller: AbortController | undefined;
   let loop: Promise<void> | undefined;
   let stopped = true;
+  let pollLeaseHandle: TelegramPollLeaseHandle | undefined;
+  let leaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
+  let leaseRenewalInFlight = false;
+  let leaseLost = false;
 
   async function request<T>(method: string, body: Record<string, unknown> | undefined, signal: AbortSignal): Promise<T> {
     let response: Response;
@@ -135,7 +171,88 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     async start(signal, onUpdate) {
       if (!stopped) return;
       stopped = false;
+      leaseLost = false;
       controller = new AbortController();
+      if (options.pollLease) {
+        // Keep the acquisition promise so a lease granted after our local
+        // deadline can still be released. The late result must never restart
+        // polling, but leaving it held until TTL expiry harms failover.
+        const acquireOperation = Promise.resolve().then(() => options.pollLease!.acquire());
+        try {
+          pollLeaseHandle = await withLeaseOperationTimeout(acquireOperation, leaseOperationTimeoutMs, "acquire");
+        } catch {
+          void acquireOperation
+            .then((lateLease) => lateLease ? releaseLeaseSafely(lateLease, leaseOperationTimeoutMs) : undefined)
+            .catch(() => undefined);
+          stopped = true;
+          controller.abort();
+          controller = undefined;
+          try { options.onError?.("poll_lease_unavailable"); } catch { /* diagnostics must not affect startup */ }
+          return;
+        }
+        if (!pollLeaseHandle) {
+          stopped = true;
+          controller.abort();
+          controller = undefined;
+          try { options.onError?.("poll_lease_unavailable"); } catch { /* diagnostics must not affect startup */ }
+          return;
+        }
+        const leaseTtlMs = pollLeaseHandle.ttlMs;
+        const maxRenewEveryMs = Math.floor(leaseTtlMs / 3);
+        const renewEvery = options.pollLeaseRenewIntervalMs ?? Math.min(10_000, maxRenewEveryMs);
+        if (!Number.isSafeInteger(leaseTtlMs) || leaseTtlMs < 5_000 || leaseTtlMs > 300_000
+          || !Number.isSafeInteger(renewEvery) || renewEvery < 1_000 || renewEvery > maxRenewEveryMs) {
+          await withLeaseOperationTimeout(pollLeaseHandle.release(), leaseOperationTimeoutMs, "release").catch(() => undefined);
+          pollLeaseHandle = undefined;
+          stopped = true;
+          controller.abort();
+          controller = undefined;
+          throw new Error("Telegram poll lease renewal interval must be at least 1 second and no more than one third of its TTL.");
+        }
+        // Bound each Redis renewal attempt. A hung Redis request must not let
+        // this process continue polling after its distributed lease can expire.
+        const renewDeadlineMs = Math.min(renewEvery, leaseTtlMs - (2 * renewEvery));
+        leaseRenewalTimer = setInterval(() => {
+          if (leaseRenewalInFlight || leaseLost || stopped || !pollLeaseHandle) return;
+          leaseRenewalInFlight = true;
+          const lease = pollLeaseHandle;
+          let deadline: ReturnType<typeof setTimeout> | undefined;
+          let renewalTimedOut = false;
+          const renewalOperation = Promise.resolve().then(() => lease.renew());
+          const timedRenewal = new Promise<boolean>((resolve) => {
+            deadline = setTimeout(() => {
+              renewalTimedOut = true;
+              resolve(false);
+            }, renewDeadlineMs);
+          });
+          const markLeaseLost = () => {
+            if (stopped || leaseLost) return;
+            leaseLost = true;
+            if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
+            leaseRenewalTimer = undefined;
+            try { options.onError?.("poll_lease_lost"); } catch { /* diagnostics must not affect shutdown */ }
+            controller?.abort();
+          };
+          void Promise.race([renewalOperation, timedRenewal]).then((renewed) => {
+            if (!renewed) {
+              markLeaseLost();
+              if (renewalTimedOut) {
+                // A timed-out Redis command may still complete and extend the
+                // TTL after this process has stopped polling. Release that
+                // late extension using the owner-scoped lease handle.
+                void renewalOperation
+                  .then((lateRenewed) => lateRenewed ? releaseLeaseSafely(lease, leaseOperationTimeoutMs) : undefined)
+                  .catch(() => undefined);
+              }
+            }
+          }).catch(() => {
+            markLeaseLost();
+          }).finally(() => {
+            if (deadline) clearTimeout(deadline);
+            leaseRenewalInFlight = false;
+          });
+        }, renewEvery);
+      }
       const stopFromParent = () => controller?.abort(signal.reason);
       signal.addEventListener("abort", stopFromParent, { once: true });
       if (signal.aborted) stopFromParent();
@@ -151,10 +268,20 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       }
       if (controller.signal.aborted) {
         signal.removeEventListener("abort", stopFromParent);
+        if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
+        leaseRenewalTimer = undefined;
+        const lease = pollLeaseHandle;
+        pollLeaseHandle = undefined;
+        if (lease) await releaseLeaseSafely(lease, leaseOperationTimeoutMs);
         return;
       }
-      loop = poll(controller.signal, onUpdate).finally(() => {
+      loop = poll(controller.signal, onUpdate).finally(async () => {
         signal.removeEventListener("abort", stopFromParent);
+        if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
+        leaseRenewalTimer = undefined;
+        const lease = pollLeaseHandle;
+        pollLeaseHandle = undefined;
+        if (lease) await releaseLeaseSafely(lease, leaseOperationTimeoutMs);
       });
       // Return after launching the loop; the polling promise is joined by stop().
     },
@@ -181,7 +308,12 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       if (stopped) return;
       stopped = true;
       controller?.abort();
+      if (leaseRenewalTimer) clearInterval(leaseRenewalTimer);
+      leaseRenewalTimer = undefined;
       await loop?.catch(() => undefined);
+      const lease = pollLeaseHandle;
+      pollLeaseHandle = undefined;
+      if (lease) await releaseLeaseSafely(lease, leaseOperationTimeoutMs);
       controller = undefined;
       loop = undefined;
     },

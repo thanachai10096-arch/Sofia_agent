@@ -229,3 +229,133 @@ test("Telegram polling reports HTTP errors with status", async () => {
   await transport.stop();
   assert.deepEqual(events[0], { event: "poll_failed", status: 503, kind: "http" });
 });
+
+
+test("Telegram polling fails closed when the distributed lease is already held", async () => {
+  const requests: string[] = [];
+  const events: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    requests.push(String(input));
+    return ok(true);
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    pollLease: {
+      async acquire() { return undefined; },
+    },
+    onError(event) { events.push(event); },
+  });
+  await transport.start(new AbortController().signal, async () => {
+    throw new Error("Update handler must never run without the lease.");
+  });
+  assert.deepEqual(requests, []);
+  assert.deepEqual(events, ["poll_lease_unavailable"]);
+  await transport.stop();
+  assert.deepEqual(requests, []);
+});
+
+test("Telegram polling does not call deleteWebhook when lease acquisition times out", async () => {
+  const requests: string[] = [];
+  const events: string[] = [];
+  const fetchImpl: typeof fetch = async (input) => {
+    requests.push(String(input));
+    return ok(true);
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    pollLeaseOperationTimeoutMs: 250,
+    pollLease: {
+      async acquire() {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return {
+          ttlMs: 15_000,
+          async renew() { return true; },
+          async release() { events.push("late_lease_released"); },
+        };
+      },
+    },
+    onError(event) { events.push(event); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(requests, []);
+  assert.ok(events.includes("poll_lease_unavailable"));
+  assert.ok(events.includes("late_lease_released"));
+  await transport.stop();
+  assert.deepEqual(requests, []);
+});
+
+
+test("Telegram polling aborts the active long poll when lease renewal never resolves", async () => {
+  const events: string[] = [];
+  let pollAbortedResolve!: () => void;
+  const pollAborted = new Promise<void>((resolve) => { pollAbortedResolve = resolve; });
+  let releaseCount = 0;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    if (String(input).endsWith("/getUpdates")) {
+      return await new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) {
+          pollAbortedResolve();
+          reject(new Error("aborted"));
+          return;
+        }
+        signal?.addEventListener("abort", () => {
+          pollAbortedResolve();
+          reject(new Error("aborted"));
+        }, { once: true });
+      });
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    pollLeaseRenewIntervalMs: 1_000,
+    pollLeaseOperationTimeoutMs: 1_000,
+    pollLease: {
+      async acquire() {
+        return {
+          ttlMs: 5_000,
+          async renew() { return await new Promise<boolean>(() => {}); },
+          async release() { releaseCount++; },
+        };
+      },
+    },
+    onError(event) { events.push(event); },
+  });
+
+  await transport.start(new AbortController().signal, async () => {});
+  await Promise.race([
+    pollAborted,
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Lease loss did not abort the long poll before TTL expiry")), 4_000)),
+  ]);
+  assert.ok(events.includes("poll_lease_lost"));
+  await transport.stop();
+  assert.equal(releaseCount, 1);
+});
+
+test("Telegram polling rejects a renewal interval that can outlive the lease safety window", async () => {
+  let releaseCount = 0;
+  const transport = createTelegramHttpTransport({
+    token,
+    pollLeaseRenewIntervalMs: 2_000,
+    pollLease: {
+      async acquire() {
+        return {
+          ttlMs: 5_000,
+          async renew() { return true; },
+          async release() { releaseCount++; },
+        };
+      },
+    },
+  });
+  await assert.rejects(
+    () => transport.start(new AbortController().signal, async () => {}),
+    /renewal interval/,
+  );
+  assert.equal(releaseCount, 1);
+});

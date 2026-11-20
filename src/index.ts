@@ -1,5 +1,11 @@
 export { VersionedSkillLifecycle } from "./brain/skill-lifecycle.js";
 export { runSkillLifecycleWorkflow } from "./brain/skill-lifecycle-workflow.js";
+export { compareSkillRegressionBenchmark } from "./brain/skill-regression-benchmark.js";
+export { FileSkillBenchmarkHistory } from "./brain/skill-benchmark-history.js";
+export { measureSkillCapability } from "./brain/skill-capability-measurement.js";
+export type { SkillCapabilityMetrics, SkillCapabilityMeasurementInput } from "./brain/skill-capability-measurement.js";
+export type { SkillBenchmarkHistoryRecord } from "./brain/skill-benchmark-history.js";
+export type { SkillBenchmarkCheck, SkillRegressionBenchmarkInput, SkillRegressionBenchmarkResult } from "./brain/skill-regression-benchmark.js";
 export { createManagedSkillLearningHandler } from "./brain/managed-skill-learning.js";
 export type { SkillLifecycleWorkflowOptions, SkillLifecycleWorkflowResult } from "./brain/skill-lifecycle-workflow.js";
 export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";

@@ -17,6 +17,28 @@ test("project memory survives a new store instance", async () => {
   assert.ok((await second.find("type_error")).length > 0);
 });
 
+test("concurrent project memory saves from separate store instances do not overwrite each other", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-concurrent-"));
+  const first = new FileProjectMemoryStore("shared-project", root);
+  const second = new FileProjectMemoryStore("shared-project", root);
+  const entries = Array.from({ length: 24 }, (_, index) => ({
+    id: "entry-" + index,
+    project: "shared-project",
+    kind: "decision" as const,
+    content: "Concurrent decision " + index,
+    confidence: 0.8,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    uses: 0,
+  }));
+
+  await Promise.all(entries.map((entry, index) => (index % 2 === 0 ? first : second).save(entry)));
+
+  const persisted = await first.list();
+  assert.equal(persisted.length, entries.length);
+  assert.deepEqual(new Set(persisted.map((entry) => entry.id)), new Set(entries.map((entry) => entry.id)));
+});
+
 test("project memory writes valid JSON", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-memory-json-"));
   const store = new FileProjectMemoryStore("project-b", root);

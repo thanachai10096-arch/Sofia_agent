@@ -98,7 +98,7 @@ export class RegistryToolGateway implements ToolGateway {
         boundSignal.dispose();
       }
       const safeData = redactSecrets(data);
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
+      await this.audit?.record({id:evidenceId,at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
       return{ok:true,data:safeData,evidenceId};
     }catch(error){
       const message=String(redactSecrets(error instanceof Error?error.message:String(error)));

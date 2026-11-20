@@ -8,6 +8,53 @@ import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
+test("DurableJobRuntime accepts an injected durable JobStateStore", async () => {
+  const namespace = "job-runtime-injected-store-" + randomUUID();
+  const { FileJobStateStore } = await import("./job-runtime.js");
+  const injectedStore = new FileJobStateStore(namespace);
+  const brain = {
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, "unused-default-namespace", injectedStore);
+  const submitted = await runtime.submit({ task: "use injected store" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt += 1) {
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "completed");
+  assert.equal((await injectedStore.get(submitted.id))?.status, "completed");
+});
+
+test("DurableJobRuntime deduplicates concurrent and restarted submits by owner-scoped idempotency key", async () => {
+  const namespace = "job-runtime-idempotency-" + randomUUID();
+  let calls = 0;
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const brain = {
+    run: async () => {
+      calls += 1;
+      await blocked;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+  const first = new DurableJobRuntime(() => brain, undefined, namespace);
+  const second = new DurableJobRuntime(() => brain, undefined, namespace);
+  const input = { task: "deduplicated work", ownerKeyId: "tenant-a", idempotencyKey: "request-123" };
+  const [a, b] = await Promise.all([first.submit(input), second.submit(input)]);
+  assert.equal(a.id, b.id);
+  for (let attempt = 0; attempt < 50 && calls === 0; attempt += 1) {
+    await new Promise<void>(resolve => setImmediate(resolve));
+  }
+  assert.equal(calls, 1, "the shared idempotency key must start only one brain execution");
+
+  const otherOwner = await second.submit({ ...input, ownerKeyId: "tenant-b" });
+  assert.notEqual(otherOwner.id, a.id);
+  const sameAfterRestart = await new DurableJobRuntime(() => brain, undefined, namespace).submit(input);
+  assert.equal(sameAfterRestart.id, a.id);
+  release();
+});
+
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
   const namespace = "job-runtime-restart-" + randomUUID();
   const hangingBrain = {
@@ -996,4 +1043,181 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(selectedRoute, "coding");
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
+});
+
+
+test("DurableJobRuntime isolates durable job history between principal namespaces", async () => {
+  const namespaceA = "principal-job-isolation-a-" + randomUUID();
+  const namespaceB = "principal-job-isolation-b-" + randomUUID();
+  const neverFinishes = {
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain;
+  const principalA = new DurableJobRuntime(() => neverFinishes, undefined, namespaceA);
+  const principalB = new DurableJobRuntime(() => neverFinishes, undefined, namespaceB);
+
+  const submitted = await principalA.submit({
+    task: "private job for principal A",
+    ownerKeyId: "principal-a",
+  });
+  let active = await principalA.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && active?.status !== "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    active = await principalA.get(submitted.id);
+  }
+
+  assert.equal(active?.status, "running");
+  assert.equal(await principalB.get(submitted.id), undefined);
+  assert.deepEqual(await principalB.list(), []);
+  assert.equal((await principalA.list()).some((job) => job.id === submitted.id), true);
+});
+
+
+test("DurableJobRuntime rejects a late worker result after its lease expires", async () => {
+  const namespace = "job-runtime-expired-write-" + randomUUID();
+  let releaseRun!: () => void;
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const brain = {
+    run: async () => {
+      markStarted();
+      await new Promise<void>((resolve) => { releaseRun = resolve; });
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submitted = await runtime.submit({ task: "do not commit after lease expiry" });
+  await started;
+
+  const stateFile = path.join(os.tmpdir(), "sofia-agents-jobs", createHash("sha256").update(namespace).digest("hex") + ".json");
+  const records = JSON.parse(await readFile(stateFile, "utf8")) as Array<{
+    id: string;
+    status: string;
+    leaseExpiresAt?: string;
+  }>;
+  const saved = records.find((item) => item.id === submitted.id);
+  assert.ok(saved);
+  assert.equal(saved.status, "running");
+  saved.leaseExpiresAt = new Date(0).toISOString();
+  await writeFile(stateFile + ".test-tmp", JSON.stringify(records, null, 2), "utf8");
+  await (await import("node:fs/promises")).rename(stateFile + ".test-tmp", stateFile);
+
+  releaseRun();
+  await new Promise<void>((resolve) => setTimeout(resolve, 50));
+
+  const persisted = JSON.parse(await readFile(stateFile, "utf8")) as Array<{ id: string; status: string }>;
+  assert.equal(persisted.find((item) => item.id === submitted.id)?.status, "running");
+});
+
+
+test("DurableJobRuntime reconciles an uncertain tool step and audits the explicit decision", async () => {
+  const namespace = "job-runtime-reconcile-" + randomUUID();
+  const stepId = "purchase-step";
+  const snapshot = {
+    version: 1,
+    runId: "reconcile-run-" + randomUUID(),
+    task: "complete a purchase",
+    understanding: {},
+    plan: { strategy: "direct", reason: "Recover the interrupted purchase", steps: [{ id: stepId, objective: "Complete the purchase", call: { tool: "purchase", input: {} }, dependencies: [] }] },
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    inFlightStepId: stepId,
+    checkpointId: "checkpoint-reconcile",
+    usage: { steps: 1, toolCalls: 1, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  let resumedSnapshot: import("./run-state.js").BrainRunSnapshot | undefined;
+  let brainCalls = 0;
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      brainCalls += 1;
+      if (input.resume) {
+        resumedSnapshot = input.resume;
+        return { completed: true, state: "completed", output: "recovered" };
+      }
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed", output: "interrupted" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  const submitted = await runtime.submit({ task: snapshot.task, ownerKeyId: "owner-a" });
+  let failed = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && failed?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    failed = await runtime.get(submitted.id);
+  }
+  assert.equal(failed?.status, "failed");
+  assert.equal(failed?.snapshot?.inFlightStepId, stepId);
+
+  const reconciled = await runtime.reconcile(submitted.id, stepId, "completed", "owner-a", "Verified in the merchant account");
+  assert.equal(reconciled.snapshot?.inFlightStepId, undefined);
+  assert.deepEqual(reconciled.snapshot?.completedStepIds, [stepId]);
+  assert.deepEqual(reconciled.snapshot?.reconciliations?.[0]?.observation, {
+    stepId,
+    tool: "purchase",
+    ok: true,
+    evidenceId: reconciled.snapshot?.reconciliations?.[0]?.observation?.evidenceId,
+    preview: "Verified in the merchant account",
+    truncated: false,
+  });
+  assert.deepEqual(reconciled.snapshot?.reconciliations?.map((entry) => ({
+    stepId: entry.stepId, outcome: entry.outcome, actorId: entry.actorId, note: entry.note,
+  })), [{
+    stepId, outcome: "completed", actorId: "owner-a", note: "Verified in the merchant account",
+  }]);
+
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.equal(brainCalls, 2);
+  assert.deepEqual(resumedSnapshot?.completedStepIds, [stepId]);
+  assert.equal(resumedSnapshot?.inFlightStepId, undefined);
+});
+
+test("DurableJobRuntime requires the exact unresolved step before reconciliation", async () => {
+  const namespace = "job-runtime-reconcile-mismatch-" + randomUUID();
+  const snapshot = {
+    version: 1,
+    runId: "reconcile-mismatch-" + randomUUID(),
+    task: "send a message",
+    understanding: {},
+    plan: { strategy: "direct", reason: "Recover the interrupted message", steps: [{ id: "send-step", objective: "Send the message", call: { tool: "send", input: {} }, dependencies: [] }] },
+    acceptanceCriteria: [],
+    completedStepIds: [],
+    inFlightStepId: "send-step",
+    checkpointId: "checkpoint-mismatch",
+    usage: { steps: 1, toolCalls: 1, modelCalls: 0, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+  const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed", output: "interrupted" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+  const submitted = await runtime.submit({ task: snapshot.task, ownerKeyId: "owner-a" });
+  let failed = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && failed?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    failed = await runtime.get(submitted.id);
+  }
+  await assert.rejects(
+    () => runtime.reconcile(submitted.id, "send-step", "retry", "owner-a"),
+    /explicit confirmation that no external side effect occurred/i,
+  );
+  await assert.rejects(
+    () => runtime.reconcile(submitted.id, "different-step", "retry", "owner-a", undefined, { noSideEffect: true }),
+    /does not match the unresolved in-flight step/i,
+  );
+  const retried = await runtime.reconcile(submitted.id, "send-step", "retry", "owner-a", "Checked delivery history; no message was sent", { noSideEffect: true });
+  assert.equal(retried.snapshot?.inFlightStepId, undefined);
+  assert.equal(retried.snapshot?.reconciliations?.[0]?.confirmedNoSideEffect, true);
+  assert.deepEqual(retried.snapshot?.completedStepIds, []);
 });

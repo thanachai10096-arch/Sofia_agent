@@ -30,6 +30,10 @@ import { buildRepositoryMap } from "../brain/repository-intelligence.js";
 import { FileProjectMemoryStore, PersistentSkillLedger } from "../brain/project-memory.js";
 import { EvolutionEngine } from "../brain/evolution.js";
 import { VersionedSkillLifecycle } from "../brain/skill-lifecycle.js";
+import { compareSkillRegressionBenchmark } from "../brain/skill-regression-benchmark.js";
+import { FileSkillBenchmarkHistory } from "../brain/skill-benchmark-history.js";
+import { measureSkillCapability } from "../brain/skill-capability-measurement.js";
+import { AuditSkillEvidenceVerifier } from "../brain/skill-evidence.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "../brain/managed-skill-learning.js";
 import path from "node:path";
@@ -40,26 +44,117 @@ import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import { PrincipalWorkspaceResolver } from "../platform/principal-workspace.js";
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;evidenceVerifier:AuditSkillEvidenceVerifier;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
   const projectMemory=new FileProjectMemoryStore(workspace);
   const skillLedger=new PersistentSkillLedger(projectMemory);
-  const skillLifecycle=new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate) => {
-    const checks = [
+  const skillBenchmarkHistory = new FileSkillBenchmarkHistory(path.join(workspace, ".sofia", "skill-benchmark-history.json"));
+  let skillLifecycle!: VersionedSkillLifecycle;
+  skillLifecycle = new VersionedSkillLifecycle(new InMemorySkillsPlatform(), async (candidate, provenance) => {
+    const checks: Array<{ name: string; passed: boolean; detail?: string }> = [
       { name: "skill-metadata", passed: Boolean(candidate.skill.id && candidate.skill.name.trim() && candidate.skill.description.trim()) },
       { name: "procedure", passed: candidate.skill.procedure.length > 0 && candidate.skill.procedure.every((step) => step.trim().length > 0) },
       { name: "verification", passed: candidate.skill.verification.length > 0 && candidate.skill.verification.every((item) => ["typecheck", "test", "build"].includes(item)) },
+      ...await dependencies.evidenceVerifier.verify(candidate, provenance),
     ];
+    const previous = skillLifecycle.active(candidate.skill.id);
+    const historicalBaseline = previous ? undefined
+      : skillBenchmarkHistory.list(candidate.skill.id).filter((record) => record.passed).at(-1);
+    const baselineChecks = previous?.evaluation?.checks ?? historicalBaseline?.checks;
+    if (previous && !baselineChecks?.length) {
+      checks.push({ name: "skill-regression-benchmark", passed: false, detail: "Previous active Skill has no persisted evaluation baseline." });
+    } else if (baselineChecks?.length) {
+      try {
+        const benchmark = compareSkillRegressionBenchmark({
+          baseline: baselineChecks.filter((check) => check.name !== "skill-regression-benchmark" && check.name !== "skill-benchmark-history" && check.name !== "skill-capability-measurement").map((check) => ({ name: check.name, passed: check.passed })),
+          candidate: checks.map((check) => ({ name: check.name, passed: check.passed })),
+        });
+        checks.push({
+          name: "skill-regression-benchmark",
+          passed: benchmark.passed,
+          detail: benchmark.passed
+            ? "Candidate preserves all prior benchmark checks and introduces no failing checks."
+            : "Regression benchmark blocked promotion: " + benchmark.regressions.join(", "),
+        });
+      } catch (error) {
+        checks.push({
+          name: "skill-regression-benchmark",
+          passed: false,
+          detail: error instanceof Error ? error.message : "Regression benchmark failed unexpectedly.",
+        });
+      }
+    } else {
+      checks.push({
+        name: "skill-regression-benchmark",
+        passed: true,
+        detail: "First managed version: its verified checks become the baseline for future upgrades.",
+      });
+    }
+    const benchmarkBaseline = baselineChecks?.filter((check) =>
+      check.name !== "skill-regression-benchmark" &&
+      check.name !== "skill-benchmark-history" &&
+      check.name !== "skill-capability-measurement");
+    let capability: ReturnType<typeof measureSkillCapability> | undefined;
+    try {
+      capability = measureSkillCapability({
+        checks,
+        ...(benchmarkBaseline?.length ? { baseline: benchmarkBaseline } : {}),
+      });
+      checks.push({
+        name: "skill-capability-measurement",
+        passed: true,
+        detail: "Capability score " + capability.score + "/100; pass rate " +
+          Math.round(capability.passRate * 100) + "%; baseline coverage " +
+          Math.round(capability.baselineCoverage * 100) + "%.",
+      });
+    } catch (error) {
+      checks.push({
+        name: "skill-capability-measurement",
+        passed: false,
+        detail: error instanceof Error ? error.message : "Capability measurement failed.",
+      });
+      capability = {
+        score: 0, passRate: 0, baselineCoverage: 1,
+        passedChecks: 0, totalChecks: 1, baselineChecks: 0,
+        missingBaselineChecks: [], failedChecks: ["capability-measurement"],
+      };
+    }
+    checks.push({
+      name: "skill-benchmark-history",
+      passed: true,
+      detail: "Persisting this evaluation to the durable benchmark history.",
+    });
+    try {
+      skillBenchmarkHistory.append({
+        skillId: candidate.skill.id,
+        skillVersion: candidate.version,
+        evaluatedAt: new Date().toISOString(),
+        passed: checks.every((check) => check.passed),
+        checks,
+        capability,
+        ...((previous?.package.version ?? historicalBaseline?.skillVersion) ? { baselineVersion: previous?.package.version ?? historicalBaseline?.skillVersion } : {}),
+        ...(provenance.runId ? { runId: provenance.runId } : {}),
+      });
+    } catch (error) {
+      const historyCheck = checks.find((check) => check.name === "skill-benchmark-history");
+      if (historyCheck) {
+        historyCheck.passed = false;
+        historyCheck.detail = error instanceof Error
+          ? "Durable benchmark history write failed: " + error.message
+          : "Durable benchmark history write failed.";
+      }
+    }
     return { passed: checks.every((check) => check.passed), checks };
   }, { file: path.join(workspace, ".sofia", "skill-lifecycle.json") });
-  const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval);
+  const onSkillCandidate = createManagedSkillLearningHandler(skillLifecycle, dependencies.approval, dependencies.audit);
   return ({signal,maxSteps,principalId,modelRouteId,desktopCapabilities,onRunSnapshot,onEvent})=>{
     const requestedRouteId = modelRouteId && modelRouteId !== "auto" ? modelRouteId : undefined;
     const requestedRoute = requestedRouteId ? config.routes.find((route) => route.id === requestedRouteId) : undefined;
@@ -119,20 +214,95 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
 }
 
 export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
-  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
+  const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const encryptedAudit=auditSecret?new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret):undefined; const audit=encryptedAudit?new CompositeSecurityAudit([memoryAudit,encryptedAudit]):memoryAudit; const evidenceVerifier=new AuditSkillEvidenceVerifier(async()=>encryptedAudit ? encryptedAudit.list() : []);
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
   const tools=createToolRegistry(createBuiltinTools());
   const provider=new SofiaModelGateway(config.providers);
   const evolution=new EvolutionEngine(path.join(workspace, ".sofia", "evolution.json"));
+  // Browser login profiles contain cookies and authenticated browser state.
+  // Keep them inside this dependency set's workspace instead of a process-wide
+  // environment path, so separate principal workspaces cannot share credentials.
   const profileSessions = process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
-    process.env.SOFIA_BROWSER_HEADLESS === "false" && process.env.SOFIA_BROWSER_PROFILE_DIR?.trim()
-      ? new BrowserProfileSessionManager(new BrowserProfileStore(process.env.SOFIA_BROWSER_PROFILE_DIR), () => new PlaywrightBrowserRuntime())
+    process.env.SOFIA_BROWSER_HEADLESS === "false"
+      ? new BrowserProfileSessionManager(
+          new BrowserProfileStore(path.join(workspace, ".sofia", "browser-profiles")),
+          () => new PlaywrightBrowserRuntime(),
+        )
       : undefined;
-  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions});
+  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,evidenceVerifier,profileSessions});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
-  const userMemoryStore = new FileUserMemoryStore();
+  // User memory follows the same workspace boundary as the rest of this
+  // dependency set; the store still hashes each authenticated principal ID.
+  const userMemoryStore = new FileUserMemoryStore(path.join(workspace, ".sofia", "user-memory"));
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
+}
+
+/**
+ * Build isolated dependency graphs for authenticated API principals.
+ * Pass only an ID derived from successful API-key authentication, never a
+ * request-body, query-string, or URL principal value.
+ *
+ * No automatic eviction is performed: disposing a graph while durable jobs
+ * or browser sessions are active would be unsafe. The API composition root
+ * must close this registry during graceful shutdown.
+ */
+type PrincipalDependencies = AgentDependencies & { closeSessionStore: () => void };
+
+type PrincipalDependencyFactory = (
+  workspace: string,
+  approval?: AgentDependencies["approval"],
+) => Promise<PrincipalDependencies>;
+
+/**
+ * Build a registry for authenticated principals. The optional factory keeps
+ * lifecycle/concurrency behavior testable without opening real model or DB resources.
+ */
+export function createSofiaPrincipalDependencyRegistry(
+  configuredRoot: string,
+  approval?: AgentDependencies["approval"],
+  createDependencies: PrincipalDependencyFactory = createSofiaAgentDependenciesWithSessions,
+) {
+  const resolver = new PrincipalWorkspaceResolver(path.resolve(configuredRoot));
+  const entries = new Map<string, Promise<AgentDependencies & { closeSessionStore: () => void }>>();
+  let closed = false;
+
+  return {
+    async forPrincipal(authenticatedPrincipalId: string) {
+      if (closed) throw new Error("Principal dependency registry is closed.");
+      if (typeof authenticatedPrincipalId !== "string" || !authenticatedPrincipalId.trim()) {
+        throw new Error("An authenticated principal ID is required.");
+      }
+      let pending = entries.get(authenticatedPrincipalId);
+      if (!pending) {
+        pending = (async () => {
+          const workspace = await resolver.resolve(authenticatedPrincipalId);
+          return createDependencies(workspace, approval);
+        })();
+        entries.set(authenticatedPrincipalId, pending);
+        void pending.catch(() => {
+          if (entries.get(authenticatedPrincipalId) === pending) entries.delete(authenticatedPrincipalId);
+        });
+      }
+      return pending;
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      const pending = [...entries.values()];
+      entries.clear();
+      const settled = await Promise.allSettled(pending);
+      await Promise.allSettled(settled.flatMap((item) => item.status === "fulfilled"
+        ? [
+            Promise.resolve().then(() => item.value.closeSessionStore()),
+            item.value.closeBrowserProfiles?.() ?? Promise.resolve(),
+          ]
+        : []));
+    },
+    get size() {
+      return entries.size;
+    },
+  };
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
@@ -142,6 +312,10 @@ export async function createSofiaAgentDependenciesWithSessions(
   databasePath?: string,
 ): Promise<AgentDependencies & { closeSessionStore: () => void }> {
   const dependencies = createSofiaAgentDependencies(workspace, approval);
-  const sessionStore = await SqliteSessionStore.open(databasePath);
+  // Keep every mutable store beneath the workspace selected by the composition
+  // root. The global SqliteSessionStore default is useful for local CLI use, but
+  // would silently place API transcripts outside an explicitly supplied workspace.
+  const sessionDatabasePath = databasePath ?? path.join(workspace, ".sofia", "sessions", "sessions.sqlite");
+  const sessionStore = await SqliteSessionStore.open(sessionDatabasePath);
   return { ...dependencies, sessionStore, closeSessionStore: () => sessionStore.close() };
 }

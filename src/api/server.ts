@@ -8,7 +8,7 @@ import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
-import type { RunRecord } from "./run-record-store.js";
+import type { RunRecord, RunRecordStore } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 
@@ -122,6 +122,19 @@ function pathId(url: string): string | null {
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
+  // Keep one Agent instance per cached dependency graph. SofiaAgent owns
+  // per-session turn serialization, so recreating it for every HTTP request
+  // would allow concurrent requests for the same tenant/session to race.
+  const principalAgents = new WeakMap<AgentDependencies, SofiaAgent>();
+  const getAgent = (agentDeps: AgentDependencies): SofiaAgent => {
+    if (agentDeps === deps) return agent;
+    let instance = principalAgents.get(agentDeps);
+    if (!instance) {
+      instance = new SofiaAgent(agentDeps);
+      principalAgents.set(agentDeps, instance);
+    }
+    return instance;
+  };
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
   const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
@@ -134,19 +147,93 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   }
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
-  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStorePath);
-  const countToolCall = (keyId: string, controller: AbortController, event: { type: string }): boolean => {
+  const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.resolvePrincipalUsageStorePath ? undefined : config.usageStorePath);
+  const principalUsageLimiters = new Map<string, Promise<UsageLimiter>>();
+  const resolveUsageLimiter = async (principalId: string): Promise<UsageLimiter> => {
+    if (!config.resolvePrincipalUsageStorePath) return usage;
+    let pending = principalUsageLimiters.get(principalId);
+    if (!pending) {
+      pending = config.resolvePrincipalUsageStorePath(principalId).then((storePath) =>
+        new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, storePath));
+      principalUsageLimiters.set(principalId, pending);
+      pending.catch(() => { if (principalUsageLimiters.get(principalId) === pending) principalUsageLimiters.delete(principalId); });
+    }
+    return pending;
+  };
+  const countToolCall = (limiter: UsageLimiter, keyId: string, controller: AbortController, event: { type: string }): boolean => {
     if (event.type !== "tool.started") return true;
-    try { usage.consumeToolCall(keyId); return true; }
+    try { limiter.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
-  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  // A single scheduler over the fallback dependency graph must never run
+  // when authenticated requests are resolved into tenant-specific graphs.
+  // Tenant cron remains unavailable until a per-principal scheduler lifecycle
+  // and recovery loop are composed here.
+  const cronScheduler = !config.resolvePrincipalDependencies && deps.jobRuntime
+    ? new CronScheduler(deps.jobRuntime)
+    : undefined;
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
+  const principalCronSchedulers = new Map<string, Promise<CronScheduler>>();
+  const principalCronTimers = new Map<string, NodeJS.Timeout>();
+  const resolveCronScheduler = async (principalId: string, principalDeps: AgentDependencies): Promise<CronScheduler | undefined> => {
+    if (!config.resolvePrincipalDependencies) return cronScheduler;
+    if (!config.resolvePrincipalCronScheduler) return undefined;
+    let pending = principalCronSchedulers.get(principalId);
+    if (!pending) {
+      pending = config.resolvePrincipalCronScheduler(principalId, principalDeps).then(async (scheduler) => {
+        await scheduler.recover();
+        if (!cronClosed && !principalCronTimers.has(principalId)) {
+          await scheduler.tick();
+          const timer = setInterval(() => { void scheduler.tick().catch(() => undefined); }, 1_000);
+          timer.unref?.();
+          principalCronTimers.set(principalId, timer);
+        }
+        return scheduler;
+      });
+      principalCronSchedulers.set(principalId, pending);
+      pending.catch(() => { if (principalCronSchedulers.get(principalId) === pending) principalCronSchedulers.delete(principalId); });
+    }
+    return pending;
+  };
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
-  const persist = (run: ActiveRun): Promise<void> => {
-    if (!runStore) return Promise.resolve();
+  const principalRunStores = new Map<string, Promise<RunRecordStore>>();
+  const loadedPrincipalRuns = new Set<string>();
+  const resolveRunStore = async (ownerKeyId: string): Promise<RunRecordStore | undefined> => {
+    if (!config.resolvePrincipalRunStore) return runStore;
+    let pending = principalRunStores.get(ownerKeyId);
+    if (!pending) {
+      pending = config.resolvePrincipalRunStore(ownerKeyId);
+      principalRunStores.set(ownerKeyId, pending);
+      pending.catch(() => { if (principalRunStores.get(ownerKeyId) === pending) principalRunStores.delete(ownerKeyId); });
+    }
+    const store = await pending;
+    if (!loadedPrincipalRuns.has(ownerKeyId)) {
+      for (const record of store.loadAllSync()) {
+        if (record.ownerKeyId !== ownerKeyId) continue;
+        const interrupted = record.status === "queued" || record.status === "running";
+        const restored: ActiveRun = {
+          id: record.id, status: interrupted ? "failed" : record.status,
+          ...(record.result ? { result: record.result as unknown as AgentRunResponse["result"] } : {}),
+          ...(interrupted ? { error: "Run interrupted by server restart." } : record.error ? { error: record.error } : {}),
+          controller: new AbortController(), createdAt: record.createdAt,
+          updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
+          desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+          ...(record.idempotencyId ? { idempotencyId: record.idempotencyId } : {}),
+          ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
+        };
+        runs.set(restored.id, restored);
+        if (restored.idempotencyId && restored.requestFingerprint) idempotency.set(restored.idempotencyId, { runId: restored.id, fingerprint: restored.requestFingerprint });
+        if (interrupted) await store.save({ id: restored.id, status: restored.status, ...(restored.error ? { error: restored.error } : {}), createdAt: restored.createdAt, updatedAt: restored.updatedAt, ownerKeyId, desktopCapabilities: [...restored.desktopCapabilities], ...(restored.idempotencyId ? { idempotencyId: restored.idempotencyId } : {}), ...(restored.requestFingerprint ? { requestFingerprint: restored.requestFingerprint } : {}) });
+      }
+      loadedPrincipalRuns.add(ownerKeyId);
+    }
+    return store;
+  };
+  const persist = async (run: ActiveRun): Promise<void> => {
+    const store = await resolveRunStore(run.ownerKeyId);
+    if (!store) return;
     const record: RunRecord = {
       id: run.id, status: run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
@@ -155,9 +242,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.idempotencyId ? { idempotencyId: run.idempotencyId } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
-    return runStore.save(record);
+    return store.save(record);
   };
-  if (runStore) for (const record of runStore.loadAllSync()) {
+  if (!config.resolvePrincipalRunStore && runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
@@ -196,10 +283,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     ...(run.error ? { error: run.error } : {}),
   });
 
-  const modelSelectionError = (input: AgentRunInput): { status: number; error: string } | undefined => {
+  const modelSelectionError = (input: AgentRunInput, modelDeps: AgentDependencies = deps): { status: number; error: string } | undefined => {
     const requested = input.modelRouteId?.trim();
     if (!requested || requested === "auto") return undefined;
-    const routes = deps.router.listRoutes?.();
+    const routes = modelDeps.router.listRoutes?.();
     if (!routes) return { status: 503, error: "model_selection_unavailable" };
     const route = routes.find((item) => item.id === requested);
     if (!route) return { status: 400, error: "invalid_model_route" };
@@ -207,14 +294,14 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     return undefined;
   };
 
-  const startRun = (run: ActiveRun, input: AgentRunInput) => {
+  const startRun = (run: ActiveRun, input: AgentRunInput, runAgent: SofiaAgent = agent, usageLimiter: UsageLimiter = usage) => {
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
       void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
-        const result = await agent.run({
+        const result = await runAgent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
@@ -224,7 +311,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
-          onEvent: (event) => { countToolCall(run.ownerKeyId, run.controller, event); },
+          onEvent: (event) => { countToolCall(usageLimiter, run.ownerKeyId, run.controller, event); },
         });
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -254,7 +341,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const prune = () => {
     const cutoff = Date.now() - retention;
     for (const [id, run] of runs) {
-      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
+      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); void resolveRunStore(run.ownerKeyId).then((store) => store?.remove(id)).catch(() => undefined); }
     }
     for (const [key, entry] of idempotency) {
       if (!runs.has(entry.runId)) idempotency.delete(key);
@@ -294,11 +381,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       const auth = authenticate(req, config);
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
+      // The resolver receives only the opaque principal ID derived from the verified bearer key.
+      // Never accept a workspace or principal identifier from request input.
+      const requestDeps = config.resolvePrincipalDependencies
+        ? await config.resolvePrincipalDependencies(auth.keyId)
+        : deps;
+      const requestAgent = getAgent(requestDeps);
+      const requestRunStore = await resolveRunStore(auth.keyId);
+      const requestUsage = await resolveUsageLimiter(auth.keyId);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
-        if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
+        if (!requestDeps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
         if (req.method === "GET") {
           if (!auth.scopes.includes("memory:read")) return json(res, 403, { error: "forbidden", requiredScope: "memory:read" }, origin, config);
           const query = requestUrl.searchParams.get("q")?.trim() ?? "";
@@ -306,8 +401,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           const rawLimit = Number(requestUrl.searchParams.get("limit") ?? "8");
           const limit = Number.isSafeInteger(rawLimit) ? Math.max(1, Math.min(20, rawLimit)) : 8;
           const memories = query
-            ? await deps.userMemoryStore.find(auth.keyId, query, limit)
-            : (await deps.userMemoryStore.list(auth.keyId)).slice(0, 200);
+            ? await requestDeps.userMemoryStore!.find(auth.keyId, query, limit)
+            : (await requestDeps.userMemoryStore!.list(auth.keyId)).slice(0, 200);
           return json(res, 200, { memories }, origin, config);
         }
         if (req.method === "POST" && requestUrl.pathname === "/v1/memory") {
@@ -322,8 +417,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           }
           try {
             const entry = createUserMemoryEntry(input.kind as UserMemoryKind, input.content);
-            await deps.userMemoryStore.save(auth.keyId, entry);
-            const saved = (await deps.userMemoryStore.list(auth.keyId)).find((item) => item.id === entry.id);
+            await requestDeps.userMemoryStore!.save(auth.keyId, entry);
+            const saved = (await requestDeps.userMemoryStore!.list(auth.keyId)).find((item) => item.id === entry.id);
             if (!saved) return json(res, 500, { error: "memory_write_failed" }, origin, config);
             return json(res, 201, { memory: saved }, origin, config);
           } catch {
@@ -332,7 +427,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (req.method === "DELETE" && requestUrl.pathname === "/v1/memory") {
           if (!auth.scopes.includes("memory:write")) return json(res, 403, { error: "forbidden", requiredScope: "memory:write" }, origin, config);
-          await deps.userMemoryStore.clear(auth.keyId);
+          await requestDeps.userMemoryStore!.clear(auth.keyId);
           return json(res, 200, { cleared: true }, origin, config);
         }
         const memoryIdMatch = requestUrl.pathname.match(/^\/v1\/memory\/([^/]+)$/);
@@ -341,14 +436,23 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           let memoryId: string;
           try { memoryId = decodeURIComponent(memoryIdMatch[1]!); } catch { return json(res, 400, { error: "invalid_memory_id" }, origin, config); }
           if (!memoryId || memoryId.length > 256) return json(res, 400, { error: "invalid_memory_id" }, origin, config);
-          const deleted = await deps.userMemoryStore.delete(auth.keyId, memoryId);
+          const deleted = await requestDeps.userMemoryStore!.delete(auth.keyId, memoryId);
           return deleted ? json(res, 200, { deleted: true }, origin, config) : json(res, 404, { error: "memory_not_found" }, origin, config);
         }
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
-      if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
+      if (isCronRequest && config.resolvePrincipalDependencies && !config.resolvePrincipalCronScheduler) {
+        return json(res, 503, { error: "principal_cron_runtime_unavailable" }, origin, config);
+      }
+      if (isCronRequest && !requestDeps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
+      const requestCronScheduler = isCronRequest
+        ? await resolveCronScheduler(auth.keyId, requestDeps)
+        : undefined;
+      if (isCronRequest && !requestCronScheduler) {
+        return json(res, 503, { error: config.resolvePrincipalDependencies ? "principal_cron_runtime_unavailable" : "cron_scheduler_unavailable" }, origin, config);
+      }
       if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
         return json(res, 403, { error: "forbidden", requiredScope: "cron:read" }, origin, config);
       }
@@ -374,7 +478,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (isRunCancellation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
+      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel") || req.url.endsWith("/reconcile"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
@@ -382,7 +486,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const adminScope = config.securityAdminScope ?? "security:admin";
       const isSecurityAdmin = auth.scopes.includes(adminScope);
       if (req.method === "GET" && req.url === "/v1/models") {
-        const routes = deps.router.listRoutes?.();
+        const routes = requestDeps.router.listRoutes?.();
         if (!routes) return json(res, 503, { error: "model_selection_unavailable" }, origin, config);
         return json(res, 200, {
           automaticSelection: true,
@@ -430,7 +534,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         // whose in-memory map has not seen a run accepted by the previous one.
         // Rehydrate from the shared persistent store, and refresh newer records
         // so status polling follows updates written by the original process.
-        const stored = runStore?.load?.(id);
+        const stored = requestRunStore?.load?.(id);
         if (stored && (!run || stored.updatedAt > run.updatedAt)) {
           run = {
             id: stored.id,
@@ -467,10 +571,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
-        const selectionError = modelSelectionError(input);
+        const selectionError = modelSelectionError(input, requestDeps);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
-        try { usage.consume(auth.keyId); } catch {
+        try { requestUsage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
         const runId = randomUUID();
@@ -493,7 +597,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         res.on("close", abortOnDisconnect);
         try {
           run.status = "running";
-          const result = await agent.run({
+          const result = await requestAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
@@ -504,7 +608,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
             onEvent: (event) => {
-              if (!countToolCall(auth.keyId, controller, event)) return;
+              if (!countToolCall(requestUsage, auth.keyId, controller, event)) return;
               send({ type: "event", runId, event });
             },
           });
@@ -532,7 +636,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
-        const selectionError = modelSelectionError(input);
+        const selectionError = modelSelectionError(input, requestDeps);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
 
@@ -573,7 +677,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             res.setHeader("retry-after", "2");
             return json(res, 429, { error: "concurrency_limit", retryAfterMs: 2000 }, origin, config);
           }
-          try { usage.consume(auth.keyId); } catch (error) {
+          try { requestUsage.consume(auth.keyId); } catch (error) {
             return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
           }
           const runId = randomUUID();
@@ -604,11 +708,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) }
               : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
-          });
+          }, requestAgent, requestUsage);
           return json(res, 202, publicResponse(run), origin, config);
         }
 
-        try { usage.consume(auth.keyId); } catch (error) {
+        try { requestUsage.consume(auth.keyId); } catch (error) {
           return json(res, 429, { error: "quota_exceeded", message: error instanceof Error ? error.message : "Quota exceeded" }, origin, config);
         }
 
@@ -616,7 +720,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const runId = randomUUID();
         try {
-          const result = await agent.run({
+          const result = await requestAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
@@ -626,7 +730,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
-            onEvent: (event) => { countToolCall(auth.keyId, controller, event); },
+            onEvent: (event) => { countToolCall(requestUsage, auth.keyId, controller, event); },
           });
           if (controller.signal.aborted) {
             const reason = controller.signal.reason instanceof Error ? controller.signal.reason.message : "Request timed out or was cancelled.";
@@ -644,12 +748,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       }
 
-      if (isCronRequest && cronScheduler) {
+      if (isCronRequest && requestCronScheduler) {
         const schedulePath = "/v1/cron/schedules";
         const historyMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/history$/);
         const actionMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)\/(enable|disable)$/);
         if (req.method === "GET" && requestUrl.pathname === schedulePath) {
-          return json(res, 200, { schedules: await cronScheduler.list(auth.keyId) }, origin, config);
+          return json(res, 200, { schedules: await requestCronScheduler.list(auth.keyId) }, origin, config);
         }
         if (req.method === "POST" && requestUrl.pathname === schedulePath) {
           const raw = await body(req, maxBytes);
@@ -684,7 +788,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(typeof input.timeoutMs === "number" ? { timeoutMs: input.timeoutMs } : {}),
           };
           try {
-            const created = await cronScheduler.create(scheduleInput, auth.keyId);
+            const created = await requestCronScheduler.create(scheduleInput, auth.keyId);
             return json(res, 201, created, origin, config);
           } catch (error) {
             const message = error instanceof Error ? error.message : "Invalid cron schedule";
@@ -693,7 +797,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (historyMatch && req.method === "GET") {
           try {
-            return json(res, 200, { history: await cronScheduler.history(historyMatch[1]!, auth.keyId) }, origin, config);
+            return json(res, 200, { history: await requestCronScheduler.history(historyMatch[1]!, auth.keyId) }, origin, config);
           } catch (error) {
             const message = error instanceof Error ? error.message : "Cron history unavailable";
             const status = message === "Unknown cron schedule" ? 404 : message.startsWith("Not authorized") ? 403 : 400;
@@ -702,7 +806,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
         if (actionMatch && req.method === "POST") {
           try {
-            const updated = await cronScheduler.setEnabled(actionMatch[1]!, actionMatch[2] === "enable", auth.keyId);
+            const updated = await requestCronScheduler.setEnabled(actionMatch[1]!, actionMatch[2] === "enable", auth.keyId);
             return json(res, 200, updated, origin, config);
           } catch (error) {
             const message = error instanceof Error ? error.message : "Cron schedule update failed";
@@ -713,7 +817,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const cancelMatch = requestUrl.pathname.match(/^\/v1\/cron\/schedules\/([^/]+)$/);
         if (cancelMatch && req.method === "DELETE") {
           try {
-            const cancelled = await cronScheduler.cancel(cancelMatch[1]!, auth.keyId);
+            const cancelled = await requestCronScheduler.cancel(cancelMatch[1]!, auth.keyId);
             return cancelled
               ? json(res, 200, { id: cancelMatch[1], status: "disabled" }, origin, config)
               : json(res, 404, { error: "cron_schedule_not_found" }, origin, config);
@@ -727,12 +831,12 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
 
-      const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
-      if (jobMatch && deps.jobRuntime) {
+      const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel|reconcile))?$/);
+      if (jobMatch && requestDeps.jobRuntime) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
-        const job = await deps.jobRuntime.get(jobId);
+        const job = await requestDeps.jobRuntime!.get(jobId);
         if (!job || job.ownerKeyId !== auth.keyId) {
           return json(res, 404, { error: "job_not_found" }, origin, config);
         }
@@ -740,32 +844,59 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           return json(res, 200, job, origin, config);
         }
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
+          try { return json(res, 202, await requestDeps.jobRuntime!.resume(jobId), origin, config); }
           catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
-          const cancelled = await deps.jobRuntime.cancel(jobId);
+          const cancelled = await requestDeps.jobRuntime!.cancel(jobId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
+        }
+        if (req.method === "POST" && action === "reconcile") {
+          if (!requestDeps.jobRuntime!.reconcile) {
+            return json(res, 501, { error: "job_reconciliation_unavailable" }, origin, config);
+          }
+          let input: unknown;
+          try { input = await body(req, maxBytes); }
+          catch { return json(res, 400, { error: "invalid_request_body" }, origin, config); }
+          if (!input || typeof input !== "object" || Array.isArray(input)) {
+            return json(res, 400, { error: "invalid_reconciliation" }, origin, config);
+          }
+          const payload = input as Record<string, unknown>;
+          const stepId = typeof payload.stepId === "string" ? payload.stepId.trim() : "";
+          const outcome = payload.outcome;
+          const note = typeof payload.note === "string" ? payload.note.trim().slice(0, 1000) : undefined;
+          if (!stepId || stepId.length > 200 || (outcome !== "completed" && outcome !== "retry")) {
+            return json(res, 400, { error: "invalid_reconciliation" }, origin, config);
+          }
+          if (outcome === "retry" && payload.confirmNoSideEffect !== true) {
+            return json(res, 400, { error: "retry_requires_no_side_effect_confirmation" }, origin, config);
+          }
+          try {
+            const reconciled = await requestDeps.jobRuntime!.reconcile(jobId, stepId, outcome, auth.keyId, note, outcome === "retry" ? { noSideEffect: true } : undefined);
+            return json(res, 200, reconciled, origin, config);
+          } catch (error) {
+            return json(res, 409, { error: "job_reconciliation_failed", message: error instanceof Error ? error.message : "Reconciliation failed" }, origin, config);
+          }
         }
       }
 
       if (req.method === "GET" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
+        if (!requestDeps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+        const jobs = (await requestDeps.jobRuntime!.list()).filter((item) => item.ownerKeyId === auth.keyId);
         return json(res, 200, { jobs }, origin, config);
       }
 
       if (req.method === "POST" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+        if (!requestDeps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
-        const selectionError = modelSelectionError(input);
+        const selectionError = modelSelectionError(input, requestDeps);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
-        try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
+        try { requestUsage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
-          const job = await deps.jobRuntime.submit({
+          const job = await requestDeps.jobRuntime!.submit({
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,
@@ -806,11 +937,26 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       })();
     });
-    server.on("close", () => {
-      cronClosed = true;
-      if (cronTimer) clearInterval(cronTimer);
-      cronTimer = undefined;
+  } else if (config.resolvePrincipalDependencies && config.resolvePrincipalCronScheduler) {
+    // Schedules must continue after an API restart even when their owner does not
+    // make another HTTP request. Bootstrap every configured API principal at startup.
+    server.on("listening", () => {
+      const configuredTokens = Object.keys(config.apiKeys);
+      void Promise.all(configuredTokens.map(async (token) => {
+        const principalId = createHash("sha256").update(token).digest("hex").slice(0, 32);
+        const principalDeps = await config.resolvePrincipalDependencies!(principalId);
+        await resolveCronScheduler(principalId, principalDeps);
+      })).catch(() => {
+        // Fail closed: a tenant whose dependencies or recovery fail gets no tick loop.
+      });
     });
   }
+  server.on("close", () => {
+    cronClosed = true;
+    if (cronTimer) clearInterval(cronTimer);
+    cronTimer = undefined;
+    for (const timer of principalCronTimers.values()) clearInterval(timer);
+    principalCronTimers.clear();
+  });
   return server;
 }

@@ -23,6 +23,18 @@ export interface BrainRunSnapshot {
   plan: ExecutionPlan;
   acceptanceCriteria: AcceptanceCriterion[];
   completedStepIds: string[];
+  /** A tool call may have produced external side effects before a crash. */
+  inFlightStepId?: string;
+  /** Explicit human reconciliation decisions for interrupted tool calls. */
+  reconciliations?: Array<{
+    stepId: string;
+    outcome: "completed" | "retry";
+    decidedAt: string;
+    actorId: string;
+    note?: string;
+    confirmedNoSideEffect?: true;
+    observation?: Observation;
+  }>;
   checkpointId: string;
   baselineSnapshotId?: string;
   usage: BrainRunUsageSnapshot;

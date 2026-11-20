@@ -30,6 +30,8 @@ The API entrypoint now wires the existing Telegram long-polling adapter into the
 
 Both allowlists are required and checked together. Missing or malformed optional configuration disables Telegram without stopping the API. Ordinary text messages are dispatched as natural-language tasks without requiring `/run`; `/run <task>` remains supported, while other slash commands are ignored. This behavior uses the shared handler default (`naturalLanguageEnabled: true`). The bridge uses the existing Sofia API key server-side, existing command authorization, rate limiting, and message deduplication. Do not expose the bot token or API key in chat, source control, or logs.
 
+**Distributed polling limitation:** `RedisTelegramPollLease` and the runtime injection seam exist, but the standalone `src/api/entrypoint.ts` does not yet construct or inject a Redis client/lease. Setting `SOFIA_TELEGRAM_REQUIRE_POLL_LEASE=true` therefore disables Telegram with a warning (fail-closed); it does not activate Redis protection. Do not set this flag to `false` on a multi-replica service, because each replica could start its own long poller. Complete and test the shared-Redis composition-root wiring before enabling Telegram across replicas.
+
 For first rollout, configure and verify this on `Sofia_API_Test` only. Do not enable Production until a real Telegram smoke test confirms an allowed user can submit a task and an unallowlisted user is denied. The file-based dedupe store is local to the service filesystem; use a shared atomic store before running multiple replicas or relying on cross-deployment deduplication.
 
 ## Composition contract

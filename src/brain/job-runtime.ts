@@ -11,6 +11,8 @@ import { redactSecrets } from "../security/guard.js";
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export interface JobRecord {
   id: string;
+  /** Stable caller-provided key used for durable, owner-scoped submit deduplication. */
+  idempotencyKey?: string;
   status: JobStatus;
   createdAt: string;
   updatedAt: string;
@@ -70,14 +72,40 @@ function publicJobRecord(record: JobRecord): JobRecord {
   // Lease ownership is an internal concurrency capability and must never be returned
   // to API/Discord clients, even though it remains in the durable store.
   delete safe.leaseOwnerToken;
+  delete safe.idempotencyKey;
   return safe;
 }
 
 
+/**
+ * Persistence contract for durable jobs.
+ *
+ * Implementations used by multiple hosts must make each mutation transactional
+ * and enforce the lease fencing token in the database, not in process memory.
+ */
+export interface JobStateStore {
+  createIfAbsent(record: JobRecord): Promise<{ record: JobRecord; created: boolean }>;
+  claim(id: string, ownerToken: string, leaseMs: number): Promise<JobRecord | undefined>;
+  heartbeat(id: string, ownerToken: string, leaseMs: number): Promise<boolean>;
+  markInterruptedIfExpired(id: string): Promise<JobRecord | undefined>;
+  cancel(id: string): Promise<JobRecord | undefined>;
+  save(record: JobRecord): Promise<boolean>;
+  list(): Promise<JobRecord[]>;
+  get(id: string): Promise<JobRecord | undefined>;
+}
+
 export interface JobRuntime {
-  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
+  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyKey?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   resume(id: string, signal?: AbortSignal): Promise<JobRecord>;
+  reconcile?(
+    id: string,
+    stepId: string,
+    outcome: "completed" | "retry",
+    actorId: string,
+    note?: string,
+    confirmation?: { noSideEffect: true },
+  ): Promise<JobRecord>;
   cancel(id: string): Promise<boolean>;
   list(): Promise<JobRecord[]>;
   markNotificationDelivered?(id: string): Promise<void>;
@@ -105,7 +133,7 @@ async function isExclusiveFileCollision(error: unknown, file: string): Promise<b
   }
 }
 
-class FileJobStateStore {
+export class FileJobStateStore implements JobStateStore {
   private readonly file: string;
   private readonly lockFile: string;
   private writes: Promise<void> = Promise.resolve();
@@ -380,6 +408,19 @@ class FileJobStateStore {
     }
   }
 
+  async createIfAbsent(record: JobRecord): Promise<{ record: JobRecord; created: boolean }> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      if (record.idempotencyKey) {
+        const existing = records.find(item => item.idempotencyKey === record.idempotencyKey && item.ownerKeyId === record.ownerKeyId);
+        if (existing) return { record: { ...existing }, created: false };
+      }
+      records.push({ ...record });
+      await this.write(records);
+      return { record: { ...record }, created: true };
+    });
+  }
+
   async save(record: JobRecord): Promise<boolean> {
     const operation = this.writes.then(() => this.withFileLock(async () => {
       const records = await this.read();
@@ -388,6 +429,13 @@ class FileJobStateStore {
         const current = records[index]!;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
+        // A matching fencing token is not sufficient after its lease expires:
+        // the old worker must not commit a late checkpoint or terminal result,
+        // even if no replacement worker has claimed the job yet.
+        if (current.status === "running") {
+          const leaseExpiry = current.leaseExpiresAt ? Date.parse(current.leaseExpiresAt) : 0;
+          if (!Number.isFinite(leaseExpiry) || leaseExpiry <= Date.now()) return false;
+        }
         records[index] = {
           ...record,
           ...(record.status === "running" && current.status === "running"
@@ -418,7 +466,7 @@ export class DurableJobRuntime implements JobRuntime {
   private readonly controllers = new Map<string, AbortController>();
   private readonly resuming = new Set<string>();
   private readonly starting = new Set<string>();
-  private readonly state: FileJobStateStore;
+  private readonly state: JobStateStore;
 
   constructor(
     private readonly brainFactory: (options: {
@@ -429,15 +477,17 @@ export class DurableJobRuntime implements JobRuntime {
     }) => SofiaBrain,
     private readonly runStore?: RunStore,
     namespace = process.cwd(),
+    stateStore?: JobStateStore,
   ) {
-    this.state = new FileJobStateStore(namespace);
+    this.state = stateStore ?? new FileJobStateStore(namespace);
   }
 
-  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
+  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyKey?: string }): Promise<JobRecord> {
     const id = randomUUID();
     const now = new Date().toISOString();
     const record: JobRecord = {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
       ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
       ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
@@ -445,10 +495,11 @@ export class DurableJobRuntime implements JobRuntime {
       ...(input.sessionTask ? { sessionTask: input.sessionTask } : {}),
       notificationDelivered: false,
     };
-    this.jobs.set(id, record);
-    await this.state.save(record);
-    void this.execute(record, input);
-    return publicJobRecord(record);
+    const persisted = await this.state.createIfAbsent(record);
+    const canonical = persisted.record;
+    this.jobs.set(canonical.id, canonical);
+    if (persisted.created) void this.execute(canonical, input);
+    return publicJobRecord(canonical);
   }
 
   private async recoverInterrupted(record: JobRecord): Promise<JobRecord> {
@@ -510,7 +561,7 @@ export class DurableJobRuntime implements JobRuntime {
   async resume(id: string, signal?: AbortSignal): Promise<JobRecord> {
     // Reserve the resume slot before the first await. Otherwise two callers can both
     // pass the guard while get() is pending and race to resume the same checkpoint.
-    if (this.resuming.has(id)) throw new Error("Job is already being resumed");
+    if (this.resuming.has(id)) throw new Error("Job is already being resumed or reconciled");
     this.resuming.add(id);
     try {
       const fetched = await this.get(id);
@@ -529,6 +580,82 @@ export class DurableJobRuntime implements JobRuntime {
       const saved = await this.state.save(record);
       if (!saved) throw new Error("Job state changed before resume could be scheduled");
       await this.execute(record, { task: record.task, ...(record.modelRouteId ? { modelRouteId: record.modelRouteId } : {}), acceptanceCriteria: record.snapshot.acceptanceCriteria }, signal, record.snapshot);
+      return publicJobRecord(record);
+    } finally {
+      this.resuming.delete(id);
+    }
+  }
+
+  async reconcile(
+    id: string,
+    stepId: string,
+    outcome: "completed" | "retry",
+    actorId: string,
+    note?: string,
+    confirmation?: { noSideEffect: true },
+  ): Promise<JobRecord> {
+    if (outcome === "retry" && confirmation?.noSideEffect !== true) {
+      throw new Error("Retry requires explicit confirmation that no external side effect occurred");
+    }
+    if (this.resuming.has(id)) throw new Error("Job is already being resumed or reconciled");
+    this.resuming.add(id);
+    try {
+      const fetched = await this.get(id);
+      if (!fetched) throw new Error("Unknown job");
+      const record = this.jobs.get(id) ?? fetched;
+      if (record.status !== "failed") throw new Error("Only failed jobs can be reconciled");
+      if (!record.snapshot) throw new Error("Job has no resumable snapshot");
+      const snapshot = record.snapshot;
+      if (!snapshot.inFlightStepId || snapshot.inFlightStepId !== stepId) {
+        throw new Error("Step does not match the unresolved in-flight step");
+      }
+      if (!snapshot.plan.steps.some((step) => step.id === stepId)) {
+        throw new Error("Unresolved step is missing from the saved plan");
+      }
+      if (snapshot.completedStepIds.includes(stepId)) {
+        throw new Error("In-flight step is already marked completed");
+      }
+      const decidedAt = new Date().toISOString();
+      const step = snapshot.plan.steps.find((item) => item.id === stepId)!;
+      const safeNote = note ? String(redactSecrets(note)).slice(0, 1000) : undefined;
+      const reconciledObservation = outcome === "completed"
+        ? {
+            stepId,
+            tool: step.call.tool,
+            ok: true,
+            evidenceId: `reconciled:${stepId}:${decidedAt}`,
+            preview: safeNote ?? "An authorized operator confirmed that this step completed; no additional result details were supplied.",
+            truncated: false,
+          }
+        : undefined;
+      const reconciled: BrainRunSnapshot = {
+        ...snapshot,
+        completedStepIds: outcome === "completed"
+          ? [...new Set([...snapshot.completedStepIds, stepId])]
+          : [...snapshot.completedStepIds],
+        inFlightStepId: undefined,
+        reconciliations: [
+          ...(snapshot.reconciliations ?? []),
+          {
+            stepId,
+            outcome,
+            decidedAt,
+            actorId,
+            ...(safeNote ? { note: safeNote } : {}),
+            ...(outcome === "retry" ? { confirmedNoSideEffect: true as const } : {}),
+            ...(reconciledObservation ? { observation: reconciledObservation } : {}),
+          },
+        ],
+      };
+      const safeSnapshot = redactSecrets(reconciled) as BrainRunSnapshot;
+      // Persist the canonical checkpoint first. The job record embeds the same
+      // snapshot as a fallback; a failed job-store write can be retried safely.
+      await this.runStore?.save(safeSnapshot);
+      record.snapshot = safeSnapshot;
+      record.updatedAt = decidedAt;
+      const saved = await this.state.save(record);
+      if (!saved) throw new Error("Job state changed before reconciliation could be saved");
+      this.jobs.set(id, record);
       return publicJobRecord(record);
     } finally {
       this.resuming.delete(id);
@@ -575,7 +702,10 @@ export class DurableJobRuntime implements JobRuntime {
       void this.state.heartbeat(record.id, leaseToken, leaseMs).then((ok) => {
         if (!ok) controller.abort(new Error("Job execution lease was lost"));
       }).catch(() => {
-        // A transient store error is not proof of lease loss; a later heartbeat retries.
+        // Without a successful renewal the worker cannot prove it still owns the
+        // lease. Fail closed: continuing could duplicate external side effects if
+        // another process reclaims the expired job while this worker is offline.
+        controller.abort(new Error("Unable to renew job execution lease"));
       });
     }, Math.floor(leaseMs / 3));
     heartbeat.unref?.();

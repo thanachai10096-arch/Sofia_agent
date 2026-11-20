@@ -2,7 +2,9 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
-import { createSofiaAgentDependenciesWithSessions } from "../models/factory.js";
+import { CronScheduler, FileCronStore } from "../brain/cron-scheduler.js";
+import { PrincipalWorkspaceResolver } from "../platform/principal-workspace.js";
+import { createSofiaAgentDependenciesWithSessions, createSofiaPrincipalDependencyRegistry } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import { createDiscordGatewayTransport } from "../integrations/messaging/discord-gateway-transport.js";
 import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.js";
@@ -21,6 +23,12 @@ const runStoreDirectory = path.resolve(
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+const principalDependencies = createSofiaPrincipalDependencyRegistry(
+  path.resolve(process.env.SOFIA_PRINCIPAL_WORKSPACES_DIR ?? path.join(workspace, ".sofia", "principals")),
+);
+const principalRunWorkspace = new PrincipalWorkspaceResolver(
+  path.resolve(process.env.SOFIA_PRINCIPAL_WORKSPACES_DIR ?? path.join(workspace, ".sofia", "principals")),
+);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -205,6 +213,19 @@ if (discordConfigured) {
 }
 
 const server = createSofiaApi(deps, {
+  resolvePrincipalDependencies: (authenticatedPrincipalId) => principalDependencies.forPrincipal(authenticatedPrincipalId),
+  resolvePrincipalRunStore: async (authenticatedPrincipalId) => new FileRunRecordStore(
+    await principalRunWorkspace.resolveStoreDirectory(authenticatedPrincipalId, "api-runs"),
+  ),
+  resolvePrincipalUsageStorePath: async (authenticatedPrincipalId) =>
+    path.join(await principalRunWorkspace.resolveStoreDirectory(authenticatedPrincipalId, "api-usage"), "usage.json"),
+  resolvePrincipalCronScheduler: async (authenticatedPrincipalId, principalDeps) => {
+    if (!principalDeps.jobRuntime) throw new Error("Tenant JobRuntime is unavailable.");
+    const cronDirectory = await principalRunWorkspace.resolveStoreDirectory(authenticatedPrincipalId, "cron");
+    return new CronScheduler(principalDeps.jobRuntime, {
+      store: new FileCronStore(authenticatedPrincipalId, cronDirectory),
+    });
+  },
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
@@ -214,6 +235,7 @@ const server = createSofiaApi(deps, {
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
+  void principalDependencies.close();
   deps.closeSessionStore();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });

@@ -6,6 +6,8 @@ import test from "node:test";
 import { VersionedSkillLifecycle } from "./skill-lifecycle.js";
 import { InMemorySkillsPlatform } from "../skills/platform.js";
 import { createManagedSkillLearningHandler } from "./managed-skill-learning.js";
+import { AuditSkillEvidenceVerifier } from "./skill-evidence.js";
+import { MemorySecurityAudit, type SecurityAuditEvent } from "../security/audit.js";
 import type { LearnedSkillCandidate } from "./learning.js";
 
 const candidate: LearnedSkillCandidate = {
@@ -15,17 +17,34 @@ const candidate: LearnedSkillCandidate = {
   strategy: "fix-implementation",
   procedure: ["inspect trusted failure evidence", "apply the repair", "verify the result"],
   verification: ["typecheck", "test", "build"],
-  evidenceIds: ["verification-1"],
+  evidenceIds: ["verification-typecheck", "verification-test", "verification-build"],
 };
 
-function fixture() {
+function fixture(trustedReadEvents?: () => Promise<readonly SecurityAuditEvent[]>) {
   const directory = mkdtempSync(path.join(os.tmpdir(), "sofia-managed-skill-"));
   const platform = new InMemorySkillsPlatform();
-  const lifecycle = new VersionedSkillLifecycle(platform, async (skill) => ({
-    passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length),
-    checks: [{ name: "metadata-and-verification", passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length) }],
-  }), { file: path.join(directory, "lifecycle.json") });
-  return { directory, platform, lifecycle };
+  const events: SecurityAuditEvent[] = (["typecheck", "test", "build"] as const).map((kind) => ({
+    id: "verification-" + kind,
+    at: new Date(0).toISOString(),
+    runId: "run-1",
+    toolName: "project.verify",
+    actionHash: "trusted-action-hash-" + kind,
+    risk: "low",
+    decision: "completed",
+    input: { kind },
+    result: { kind, code: 0, passed: true },
+  }));
+  const audit = new MemorySecurityAudit();
+  for (const event of events) audit.record(event);
+  const verifier = new AuditSkillEvidenceVerifier(trustedReadEvents ?? (async () => audit.list()));
+  const lifecycle = new VersionedSkillLifecycle(platform, async (skill, provenance) => {
+    const checks = [
+      { name: "metadata-and-verification", passed: Boolean(skill.skill.name && skill.skill.procedure.length && skill.skill.verification.length) },
+      ...await verifier.verify(skill, provenance),
+    ];
+    return { passed: checks.every((check) => check.passed), checks };
+  }, { file: path.join(directory, "lifecycle.json") });
+  return { directory, platform, lifecycle, audit };
 }
 
 test("managed skill learning activates only after explicit approval", async () => {
@@ -35,7 +54,7 @@ test("managed skill learning activates only after explicit approval", async () =
     const handler = createManagedSkillLearningHandler(f.lifecycle, async (request) => {
       approvalCalls.push({ toolName: request.toolName, risk: request.risk });
       return true;
-    });
+    }, f.audit);
     assert.equal(await handler(candidate, "run-1", "operator-1"), true);
     assert.equal(approvalCalls.length, 1);
     assert.equal(approvalCalls[0]?.toolName, "skill.lifecycle.promote");
@@ -46,14 +65,36 @@ test("managed skill learning activates only after explicit approval", async () =
   }
 });
 
-test("managed skill learning fails closed when approval is absent or declined", async () => {
+test("managed skill learning fails closed when approval is absent", async () => {
   const f = fixture();
   try {
-    const noApproval = createManagedSkillLearningHandler(f.lifecycle);
-    assert.equal(await noApproval(candidate, "run-2"), false);
-    const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false);
-    assert.equal(await declined(candidate, "run-3"), false);
+    const noApproval = createManagedSkillLearningHandler(f.lifecycle, undefined, f.audit);
+    assert.equal(await noApproval(candidate, "run-1"), false);
     assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
+  } finally {
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});
+
+test("managed skill learning fails closed when approval is declined", async () => {
+  const f = fixture();
+  try {
+    const declined = createManagedSkillLearningHandler(f.lifecycle, async () => false, f.audit);
+    assert.equal(await declined(candidate, "run-1"), false);
+    assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
+  } finally {
+    rmSync(f.directory, { recursive: true, force: true });
+  }
+});
+
+
+test("managed learning rejects memory-only evidence when durable audit is unavailable", async () => {
+  const f = fixture(async () => []);
+  try {
+    const handler = createManagedSkillLearningHandler(f.lifecycle, async () => true, f.audit);
+    assert.equal(await handler(candidate, "run-1", "operator-1"), false);
+    assert.equal(f.platform.get("learned:repair-type_error:type_error"), undefined);
+    assert.equal(f.audit.list().some((event) => event.toolName === "skill.candidate.attest"), true);
   } finally {
     rmSync(f.directory, { recursive: true, force: true });
   }

@@ -163,3 +163,111 @@ test("user-memory retrieval failure does not prevent a normal agent run", async 
   assert.match(contexts[0] ?? "", /Keep the existing task context/);
   assert.doesNotMatch(contexts[0] ?? "", /Relevant user memory/);
 });
+
+
+test("SofiaAgent scopes identical session labels to different authenticated principals", async () => {
+  const sessions = new MemorySessionStore();
+  const contexts = new Map<string, string[]>();
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async (request) => {
+        const owner = request.task.startsWith("owner-a") ? "owner-a" : "owner-b";
+        const values = contexts.get(owner) ?? [];
+        values.push(request.context ?? "");
+        contexts.set(owner, values);
+        return { text: `Reply for ${owner}` };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await agent.run({ task: "owner-a secret context", principalId: "owner-a", sessionId: "same-label" });
+  await agent.run({ task: "owner-b private context", principalId: "owner-b", sessionId: "same-label" });
+  await agent.run({ task: "owner-a follow-up", principalId: "owner-a", sessionId: "same-label" });
+  await agent.run({ task: "owner-b follow-up", principalId: "owner-b", sessionId: "same-label" });
+
+  const ownerAContext = contexts.get("owner-a")?.[1] ?? "";
+  const ownerBContext = contexts.get("owner-b")?.[1] ?? "";
+  assert.match(ownerAContext, /owner-a secret context/);
+  assert.doesNotMatch(ownerAContext, /owner-b private context/);
+  assert.match(ownerBContext, /owner-b private context/);
+  assert.doesNotMatch(ownerBContext, /owner-a secret context/);
+});
+
+
+test("SofiaAgent isolates concurrent identical session labels across principals", async () => {
+  const sessions = new MemorySessionStore();
+  let active = 0;
+  let maxActive = 0;
+  const contexts = new Map<string, string[]>();
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async (request) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        const owner = request.task.startsWith("owner-a") ? "owner-a" : "owner-b";
+        const values = contexts.get(owner) ?? [];
+        values.push(request.context ?? "");
+        contexts.set(owner, values);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { text: `Reply for ${owner}` };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await Promise.all([
+    agent.run({ task: "owner-a initial private turn", principalId: "owner-a", sessionId: "same-concurrent-label" }),
+    agent.run({ task: "owner-b initial private turn", principalId: "owner-b", sessionId: "same-concurrent-label" }),
+  ]);
+  await Promise.all([
+    agent.run({ task: "owner-a follow-up", principalId: "owner-a", sessionId: "same-concurrent-label" }),
+    agent.run({ task: "owner-b follow-up", principalId: "owner-b", sessionId: "same-concurrent-label" }),
+  ]);
+
+  assert.equal(maxActive, 2, "different principals must not share a session serialization queue");
+  assert.match(contexts.get("owner-a")?.[1] ?? "", /owner-a initial private turn/);
+  assert.doesNotMatch(contexts.get("owner-a")?.[1] ?? "", /owner-b initial private turn/);
+  assert.match(contexts.get("owner-b")?.[1] ?? "", /owner-b initial private turn/);
+  assert.doesNotMatch(contexts.get("owner-b")?.[1] ?? "", /owner-a initial private turn/);
+});
+
+
+test("SofiaAgent serializes concurrent turns for the same principal and session", async () => {
+  const sessions = new MemorySessionStore();
+  let active = 0;
+  let maxActive = 0;
+  const agent = new SofiaAgent({
+    provider: {
+      generate: async ({ task }) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return { text: `Completed: ${task}` };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    sessionStore: sessions,
+  });
+
+  await Promise.all([
+    agent.run({ task: "first tenant turn", principalId: "owner-a", sessionId: "tenant-session" }),
+    agent.run({ task: "second tenant turn", principalId: "owner-a", sessionId: "tenant-session" }),
+  ]);
+
+  assert.equal(maxActive, 1, "same-principal turns must share one serialization queue");
+  const stored = [...sessions.get(JSON.stringify(["owner-a", "tenant-session"]))!.messages];
+  assert.deepEqual(stored, [
+    "user: first tenant turn",
+    "assistant: Completed: first tenant turn",
+    "user: second tenant turn",
+    "assistant: Completed: second tenant turn",
+  ]);
+});

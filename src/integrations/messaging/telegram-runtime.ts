@@ -5,6 +5,7 @@ import { createMessagingGateway, type MessagingGateway } from "./gateway.js";
 import { createMessagingAccessCheck, createSofiaMessagingHandler } from "./sofia-handler.js";
 import { createTelegramAdapter } from "./telegram.js";
 import { createTelegramHttpTransport } from "./telegram-http-transport.js";
+import type { TelegramPollLease } from "./telegram-poll-lease.js";
 import type { OutboundMessage } from "./types.js";
 import { redactSecrets } from "../../security/guard.js";
 
@@ -119,6 +120,7 @@ function parseTelegramIds(value: string, pattern: RegExp, name: string): Readonl
 
 export interface TelegramMessagingEnvironment {
   SOFIA_MESSAGING_ENABLED?: string;
+  SOFIA_TELEGRAM_REQUIRE_POLL_LEASE?: string;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_ALLOWED_USER_IDS?: string;
   TELEGRAM_ALLOWED_CHAT_IDS?: string;
@@ -138,9 +140,15 @@ export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
   workspace = process.cwd(),
   onWarning: (message: string) => void = (message) => console.error(message),
+  dependencies: { pollLease?: TelegramPollLease } = {},
 ): TelegramMessagingRuntime | undefined {
   const requested = env.SOFIA_MESSAGING_ENABLED === "true";
   if (!requested) return undefined;
+  const requirePollLease = env.SOFIA_TELEGRAM_REQUIRE_POLL_LEASE?.trim().toLowerCase() === "true";
+  if (requirePollLease && !dependencies.pollLease) {
+    onWarning("Telegram integration disabled: a required distributed poll lease is not configured.");
+    return undefined;
+  }
 
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   const rawUsers = env.TELEGRAM_ALLOWED_USER_IDS?.trim();
@@ -188,6 +196,7 @@ export function createTelegramMessagingRuntime(
     });
     const adapter = createTelegramAdapter(createTelegramHttpTransport({
       token,
+      ...(dependencies.pollLease ? { pollLease: dependencies.pollLease } : {}),
       onError: (event, status, failureKind) => onWarning(
         "Telegram transport " + event +
         (failureKind ? " [" + failureKind + "]" : "") +

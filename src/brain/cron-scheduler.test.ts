@@ -344,3 +344,47 @@ test("execution timeout cancels the runtime job and records failure", async () =
   assert.equal(state.history[0].status, "failed");
   assert.match(state.history[0].error, /timed out/i);
 });
+
+
+test("two scheduler processes cannot dispatch the same due occurrence twice", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "sofia-cron-double-dispatch-"));
+  let now = new Date("2026-10-17T00:00:00.000Z");
+  let submitted = 0;
+  const runtime = {
+    async submit(input: { task: string; ownerKeyId?: string }) {
+      submitted++;
+      await new Promise(resolve => setTimeout(resolve, 40));
+      return { id: "shared-job-" + submitted, status: "completed", task: input.task } as JobRecord;
+    },
+    async get(id: string) {
+      return { id, status: "completed", task: "single dispatch" } as JobRecord;
+    },
+    async cancel() { return true; },
+    async list() { return []; },
+    async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const storeA = new FileCronStore("same-tenant", root);
+  const storeB = new FileCronStore("same-tenant", root);
+  const schedulerA = new CronScheduler(runtime, { store: storeA, now: () => now });
+  const schedulerB = new CronScheduler(runtime, { store: storeB, now: () => now });
+  try {
+    await schedulerA.create({
+      name: "single-dispatch", task: "single dispatch", cron: "* * * * *",
+      timeZone: "UTC", ownerKeyId: "same-tenant",
+    }, "same-tenant");
+    now = new Date("2026-10-17T00:01:00.000Z");
+    await Promise.all([schedulerA.tick(), schedulerB.tick()]);
+    for (let i = 0; i < 100 && submitted === 0; i++) await new Promise(resolve => setTimeout(resolve, 10));
+    for (let i = 0; i < 100; i++) {
+      const history = await storeA.transact(state => state.history.map(item => item.status));
+      if (history[0] === "completed") break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(submitted, 1);
+    const history = await storeA.transact(state => state.history);
+    assert.equal(history.length, 1);
+    assert.equal(history[0]?.status, "completed");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

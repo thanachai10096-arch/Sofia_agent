@@ -18,6 +18,8 @@ Misfires at least one minute late follow the configured policy: `skip` records a
 
 ## API routes
 
+In tenant API mode, each authenticated principal receives a scheduler backed by that principal's `JobRuntime` and private `cron` state directory. The API lazily resolves a scheduler for authenticated requests and also bootstraps every API key configured in `SofiaApiConfig.apiKeys` when the server starts, so existing schedules resume even if their owner makes no new request after a restart. API keys added dynamically outside this configuration require an explicit scheduler-bootstrap integration.
+
 Cron endpoints remain unavailable if no job runtime is configured.
 
 - `POST /v1/cron/schedules` — create a recurring schedule with `cron` or a one-time schedule with `runAt`.

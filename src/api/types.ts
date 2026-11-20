@@ -1,6 +1,7 @@
-import type { AgentResult } from "../agent/types.js";
+import type { AgentDependencies, AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
+import type { CronScheduler } from "../brain/cron-scheduler.js";
 
 export interface AgentRunInput {
   task: string;
@@ -40,6 +41,13 @@ export interface ApiAuth {
 
 export interface SofiaApiConfig {
   apiKeys: Record<string, string[]>;
+  /** Resolve isolated dependencies using only the principal ID derived from successful API-key authentication. */
+  resolvePrincipalDependencies?: (authenticatedPrincipalId: string) => Promise<AgentDependencies>;
+  /** Resolve a durable run-record store inside the authenticated principal workspace. */
+  resolvePrincipalRunStore?: (authenticatedPrincipalId: string) => Promise<RunRecordStore>;
+  /** Resolve an isolated durable quota file path inside the authenticated principal workspace. */
+  resolvePrincipalUsageStorePath?: (authenticatedPrincipalId: string) => Promise<string>;
+  resolvePrincipalCronScheduler?: (authenticatedPrincipalId: string, dependencies: AgentDependencies) => Promise<CronScheduler>;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
