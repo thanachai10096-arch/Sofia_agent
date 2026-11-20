@@ -84,6 +84,16 @@ export class SkillFeedbackLedger {
       if (existingId) {
         const existing = state.entries.find((entry) => entry.id === existingId);
         if (!existing) throw new Error("Skill feedback idempotency index is inconsistent.");
+        const sameRequest = existing.recordedBy === input.actor &&
+          existing.skillName === input.skillName &&
+          existing.skillVersion === input.skillVersion &&
+          existing.candidateDigest === input.candidateDigest &&
+          existing.outcome === input.outcome &&
+          existing.safetyIncidentCount === input.safetyIncidentCount &&
+          JSON.stringify([...existing.evidenceIds].sort()) === JSON.stringify([...new Set(input.evidenceIds)].sort());
+        if (!sameRequest) {
+          throw new Error("Skill feedback idempotency key was already used for a different execution outcome.");
+        }
         return { recorded: false, feedback: existing };
       }
       const id = createHash("sha256")
