@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
 import { MemorySessionStore } from "../session/store.js";
@@ -470,5 +473,43 @@ test("tenant cron schedulers are isolated and recovered before their first tick"
     ]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("principal usage quota files enforce limits independently per authenticated user", async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sofia-principal-usage-"));
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Quota test completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: {
+      "quota-user-one": ["agent:run"],
+      "quota-user-two": ["agent:run"],
+    },
+    maxRunsPerKeyPerDay: 1,
+    resolvePrincipalUsageStorePath: async (principalId) => path.join(root, principalId, "usage.json"),
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const run = (key: string) => fetch(baseUrl + "/v1/agent/runs", {
+    method: "POST",
+    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({ task: "complete a quota test task" }),
+  });
+
+  try {
+    assert.equal((await run("quota-user-one")).status, 200);
+    assert.equal((await run("quota-user-two")).status, 200);
+    const exceeded = await run("quota-user-one");
+    assert.equal(exceeded.status, 429);
+    assert.equal((await exceeded.json() as { error: string }).error, "quota_exceeded");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(root, { recursive: true, force: true });
   }
 });
