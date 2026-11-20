@@ -88,7 +88,9 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     // Stateful browser/desktop tools are scoped to this Brain run. They use
     // their own short-lived plugin host so sessions and handles cannot leak
     // between concurrent runs or principals.
-    const runPluginHost = createSofiaPluginHost();
+    const runPluginHost = principalId
+      ? createSofiaPluginHost({ scope: "principal", principalId })
+      : createSofiaPluginHost({ scope: "run" });
     const baseToolNames = new Set(dependencies.tools.list().map((tool) => tool.name));
     const registerRunTools = (pluginId: string, tools: ReturnType<typeof createBrowserTools>) => {
       if (!tools.length) return;
