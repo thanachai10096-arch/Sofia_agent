@@ -54,17 +54,17 @@ test("read passes a validated URL to the embedded bridge and marks output untrus
 test("generic channel action is routed through the vendored package", async () => {
   const { calls, runtime, get } = harness({ ok: true, items: [] });
   await get("internet.reach.action").execute({
-    channel: "github", action: "search", params: { query: "sofia agent" },
+    channel: "github", url: "https://github.com/", action: "search", params: { query: "sofia agent" },
   }, { runtime });
   assert.deepEqual(JSON.parse(calls[0]!.args[2]!), {
-    channel: "github", action: "search", params: { query: "sofia agent" }, timeout: 30,
+    channel: "github", url: "https://github.com/", action: "search", params: { query: "sofia agent" }, timeout: 30,
   });
 });
 
 test("mutating actions are blocked before invoking the embedded package", async () => {
   const { calls, runtime, get } = harness();
   await assert.rejects(get("internet.reach.action").execute({
-    channel: "twitter", action: "post", params: { text: "hello" },
+    channel: "twitter", url: "https://x.com/", action: "post", params: { text: "hello" },
   }, { runtime }), /not enabled/);
   assert.equal(calls.length, 0);
 });
