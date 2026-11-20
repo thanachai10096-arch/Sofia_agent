@@ -152,3 +152,5 @@ export type { RailwayAutonomyWorkerConfig } from "./autonomy/railway-worker.js";
 
 export { createRemoteSandboxRunnerServer } from "./autonomy/remote-runner-server.js";
 export type { RemoteSandboxRunnerOptions } from "./autonomy/remote-runner-server.js";
+
+export type { SkillFeedbackHostConfig } from "./models/factory.js";
