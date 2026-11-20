@@ -16,6 +16,10 @@ test("Telegram adapter normalizes messages and splits oversized replies", async 
   assert.ok(onUpdate);
   await onUpdate!({ update_id: 1, message: { message_id: 2, date: 100, text: "hello", chat: { id: 3, type: "private" }, from: { id: 4 } } });
   assert.equal((received as { identity: { userId: string } }).identity.userId, "4");
+  assert.equal((received as { identity: { threadId?: string } }).identity.threadId, undefined);
+  await onUpdate!({ update_id: 2, message: { message_id: 3, date: 101, text: "topic message", message_thread_id: 77, chat: { id: -1003, type: "supergroup" }, from: { id: 4 } } });
+  assert.equal((received as { identity: { channelId: string } }).identity.channelId, "-1003");
+  assert.equal((received as { identity: { threadId?: string } }).identity.threadId, "77");
   assert.equal((await adapter.send({ conversationId: "3", text: "x".repeat(5000) })).state, "sent");
   assert.equal(sent.length, 2);
 });
