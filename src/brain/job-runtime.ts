@@ -78,6 +78,7 @@ function publicJobRecord(record: JobRecord): JobRecord {
 
 
 export interface JobRuntime {
+  recoverQueued?(): Promise<number>;
   submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyId?: string; requestFingerprint?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   /** Owner-bound accessors fail closed for jobs without a matching persisted owner. */
