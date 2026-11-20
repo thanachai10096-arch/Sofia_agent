@@ -425,3 +425,42 @@ test("legacy cron migration partitions each owner and is safe to retry", async (
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test("cron scheduler close aborts active work, drains executions, and rejects later ticks", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  let submitted = 0;
+  let cancelled = false;
+  const runtime = {
+    async submit() {
+      submitted++;
+      return { id: "shutdown-job", status: "running", task: "shutdown task" } as JobRecord;
+    },
+    async getForOwner() {
+      return { id: "shutdown-job", status: cancelled ? "cancelled" : "running", task: "shutdown task" } as JobRecord;
+    },
+    async cancelForOwner() { cancelled = true; return true; },
+    async get() { throw new Error("unscoped lookup must not be used"); },
+    async cancel() { return true; },
+    async list() { return []; },
+    async resume() { throw new Error("unused"); },
+  } as unknown as JobRuntime;
+  const now = new Date("2026-10-17T00:01:00.000Z");
+  const scheduler = new CronScheduler(runtime, { store, now: () => now });
+  await scheduler.create({
+    name: "shutdown", task: "shutdown task", runAt: now.toISOString(),
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+
+  await scheduler.tick();
+  for (let i = 0; i < 50 && submitted === 0; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(submitted, 1);
+
+  await Promise.all([scheduler.close(), scheduler.close()]);
+  assert.equal(cancelled, true);
+  assert.equal(state.history[0]?.status, "cancelled");
+  await scheduler.tick();
+  assert.equal(submitted, 1);
+  assert.deepEqual(await scheduler.recover(), { reconciled: 0, monitoring: 0, indeterminate: 0 });
+});
