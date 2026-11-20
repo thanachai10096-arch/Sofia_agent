@@ -15,6 +15,9 @@ export interface JobRecord {
   createdAt: string;
   updatedAt: string;
   task: string;
+  /** Durable input needed to replay a queued job after a process restart. */
+  context?: string;
+  rollbackOnFailure?: boolean;
   modelRouteId?: string;
   ownerKeyId?: string;
   /** Destination used only for post-restart Discord job recovery notices. */
@@ -61,6 +64,7 @@ function redactJobRecord(record: JobRecord): JobRecord {
     // Preserve leaseOwnerToken and lease timestamps in storage: these are runtime
     // fencing metadata, not user content, and redacting them would break worker claims.
     task: String(redactSecrets(record.task)),
+    ...(record.context ? { context: String(redactSecrets(record.context)) } : {}),
     ...(record.sessionTask ? { sessionTask: String(redactSecrets(record.sessionTask)) } : {}),
     ...(record.snapshot ? { snapshot: redactSecrets(record.snapshot) as BrainRunSnapshot } : {}),
     ...(record.result ? { result: redactSecrets(record.result) as JobRecord["result"] } : {}),
@@ -494,6 +498,8 @@ export class DurableJobRuntime implements JobRuntime {
         // the Brain. A competing dispatcher will fail that same durable claim.
         void this.trackExecution(canonical, {
           task: canonical.task,
+          ...(canonical.context !== undefined ? { context: canonical.context } : {}),
+          ...(canonical.rollbackOnFailure !== undefined ? { rollbackOnFailure: canonical.rollbackOnFailure } : {}),
           ...(canonical.modelRouteId ? { modelRouteId: canonical.modelRouteId } : {}),
         });
         dispatched += 1;
@@ -511,6 +517,8 @@ export class DurableJobRuntime implements JobRuntime {
     const now = new Date().toISOString();
     const record: JobRecord = {
       id, status: "queued", createdAt: now, updatedAt: now, task: input.task,
+      ...(input.context !== undefined ? { context: input.context } : {}),
+      ...(input.rollbackOnFailure !== undefined ? { rollbackOnFailure: input.rollbackOnFailure } : {}),
       ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
       ...(input.ownerKeyId ? { ownerKeyId: input.ownerKeyId } : {}),
       ...(input.notificationChannelId ? { notificationChannelId: input.notificationChannelId } : {}),
