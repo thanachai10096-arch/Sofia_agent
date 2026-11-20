@@ -997,3 +997,29 @@ test("DurableJobRuntime preserves the selected model route on submitted jobs", a
   assert.equal(current?.modelRouteId, "coding");
   assert.equal(current?.status, "completed");
 });
+
+
+test("DurableJobRuntime isolates durable job history between principal namespaces", async () => {
+  const namespaceA = "principal-job-isolation-a-" + randomUUID();
+  const namespaceB = "principal-job-isolation-b-" + randomUUID();
+  const neverFinishes = {
+    run: async () => new Promise(() => undefined),
+  } as unknown as SofiaBrain;
+  const principalA = new DurableJobRuntime(() => neverFinishes, undefined, namespaceA);
+  const principalB = new DurableJobRuntime(() => neverFinishes, undefined, namespaceB);
+
+  const submitted = await principalA.submit({
+    task: "private job for principal A",
+    ownerKeyId: "principal-a",
+  });
+  let active = await principalA.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && active?.status !== "running"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    active = await principalA.get(submitted.id);
+  }
+
+  assert.equal(active?.status, "running");
+  assert.equal(await principalB.get(submitted.id), undefined);
+  assert.deepEqual(await principalB.list(), []);
+  assert.equal((await principalA.list()).some((job) => job.id === submitted.id), true);
+});
