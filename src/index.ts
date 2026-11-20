@@ -139,3 +139,5 @@ export { RedisChatMessageDeduplicator, REDIS_CHAT_DEDUPE_CLAIM_SCRIPT, REDIS_CHA
 export type { RedisChatMessageDeduplicatorOptions } from "./integrations/redis-chat-deduplicator.js";
 export { FileUserMemoryStore, createUserMemoryEntry, explicitUserMemoryFromMessage } from "./brain/user-memory.js";
 export type { UserMemoryEntry, UserMemoryKind, UserMemoryStore } from "./brain/user-memory.js";
+
+export { TenantJobRuntimeRouter } from "./brain/tenant-job-runtime.js";
