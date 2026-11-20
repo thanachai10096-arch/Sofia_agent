@@ -80,17 +80,18 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     const browserCleanups: Array<() => Promise<void>> = [];
     const localDisplayAvailable = process.platform === "win32" || process.platform === "darwin" ||
       Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
-    const loginEnabled = Boolean(dependencies.profileSessions) &&
+    const loginEnabled = dependencies.policy.allowBrowser && Boolean(dependencies.profileSessions) &&
       process.env.SOFIA_BROWSER_LOGIN_ENABLED === "true" &&
       process.env.SOFIA_BROWSER_HEADLESS === "false" && localDisplayAvailable &&
       Boolean(principalId);
-    const runBrowserTools = dependencies.policy.allowBrowser
-      ? createBrowserTools(
-          new PlaywrightBrowserRuntime(),
-          (cleanup) => browserCleanups.push(cleanup),
-          loginEnabled ? { profileSessions: dependencies.profileSessions, ownerId: principalId!, allowLogin: true } : {},
-        )
-      : [];
+    // Always advertise the browser tool contract to the Brain. The gateway applies
+    // allowNetwork/allowBrowser and host policy at execution time, returning a clear
+    // permission error instead of an "Unknown tool" when a model requests navigation.
+    const runBrowserTools = createBrowserTools(
+      new PlaywrightBrowserRuntime(),
+      (cleanup) => browserCleanups.push(cleanup),
+      loginEnabled ? { profileSessions: dependencies.profileSessions, ownerId: principalId!, allowLogin: true } : {},
+    );
     const grantedDesktopCapabilities = desktopCapabilities ?? [];
     const runDesktopTools = grantedDesktopCapabilities.length
       ? createDesktopTools({
