@@ -73,6 +73,17 @@ test("TenantJobRuntimeRouter isolates job submission, lookup, cancellation, and 
   assert.deepEqual(closed.sort(), [ownerOne, ownerTwo]);
 });
 
+test("TenantJobRuntimeRouter lists only the requested owner without initializing other tenants", async () => {
+  const created: string[] = [];
+  const router = new TenantJobRuntimeRouter([ownerOne, ownerTwo], (owner) => {
+    created.push(owner);
+    return fakeRuntime(owner, []);
+  });
+  assert.deepEqual(await router.listForOwner(ownerOne), []);
+  assert.deepEqual(created, [ownerOne]);
+  await router.close();
+});
+
 test("TenantJobRuntimeRouter hydrates every owner before a cross-runtime job lookup", async () => {
   const created: string[] = [];
   const restored: JobRecord = {
