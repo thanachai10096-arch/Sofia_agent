@@ -149,7 +149,7 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     }
     const runTools = createToolRegistry([
       ...dependencies.tools.list(),
-      ...runPluginHost.listTools(),
+      ...runPluginHost.listTools(principalId),
     ]);
     const toolGateway=new RegistryToolGateway({runtime:dependencies.runtime,tools:runTools},dependencies.policy,dependencies.approval,checkpointManager,dependencies.security,dependencies.audit);
     const rawSubagents=createSubagentRuntime(reasoner,toolGateway);
