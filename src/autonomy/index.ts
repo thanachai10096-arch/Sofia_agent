@@ -20,3 +20,6 @@ export * from "./skill-runtime.js";
 export * from "./skill-feedback.js";
 export * from "./postgres-skill-feedback-store.js";
 export * from "./brain-skill-feedback-adapter.js";
+
+export { createPostgresSkillFeedbackHostConfig } from "./postgres-skill-feedback-runtime.js";
+export type { PostgresSkillFeedbackRuntimeOptions } from "./postgres-skill-feedback-runtime.js";
