@@ -21,7 +21,7 @@ class QuotaHelperTests(unittest.TestCase):
             HELPER.validate_run_id(value.upper() + "extra")
 
     def test_hard_limit_parser_reads_the_hard_column_only(self):
-        sample = "123456 0 0 524288 00 [------]"
+        sample = "#123456 0 0 524288 00 [------]"
         self.assertEqual(HELPER.extract_hard_limit(sample, 123456), 524288)
 
     def test_hard_limit_parser_rejects_missing_duplicate_and_non_numeric_rows(self):
@@ -33,6 +33,13 @@ class QuotaHelperTests(unittest.TestCase):
             HELPER.extract_hard_limit("123456 0 0 unlimited 00", 123456)
 
 
+    def test_project_quota_state_requires_both_accounting_and_enforcement(self):
+        healthy = "Project quota state on /mnt (device)\\nAccounting: ON\\nEnforcement: ON\\n"
+        accounting_only = "Project quota state on /mnt (device)\\nAccounting: ON\\nEnforcement: OFF\\n"
+        other_quotas_only = "User quota state on /mnt\\nAccounting: ON\\nEnforcement: ON\\nGroup quota state on /mnt\\nAccounting: ON\\nEnforcement: ON\\n"
+        self.assertTrue(HELPER.project_quota_is_enforced(healthy))
+        self.assertFalse(HELPER.project_quota_is_enforced(accounting_only))
+        self.assertFalse(HELPER.project_quota_is_enforced(other_quotas_only))
     def test_strict_json_rejects_duplicate_keys_and_non_finite_numbers(self):
         with self.assertRaises(HELPER.HelperError):
             HELPER.strict_json_loads('{"operation":"probe","operation":"dispose"}')
