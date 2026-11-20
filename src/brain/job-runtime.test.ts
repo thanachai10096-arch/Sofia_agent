@@ -25,7 +25,10 @@ test("DurableJobRuntime deduplicates concurrent and restarted submits by owner-s
   const input = { task: "deduplicated work", ownerKeyId: "tenant-a", idempotencyKey: "request-123" };
   const [a, b] = await Promise.all([first.submit(input), second.submit(input)]);
   assert.equal(a.id, b.id);
-  assert.equal(calls <= 1, true);
+  for (let attempt = 0; attempt < 50 && calls === 0; attempt += 1) {
+    await new Promise<void>(resolve => setImmediate(resolve));
+  }
+  assert.equal(calls, 1, "the shared idempotency key must start only one brain execution");
 
   const otherOwner = await second.submit({ ...input, ownerKeyId: "tenant-b" });
   assert.notEqual(otherOwner.id, a.id);
