@@ -12,6 +12,34 @@ function tool(name: string): SofiaTool {
   };
 }
 
+test("plugin installation cannot recursively install the same plugin identity", () => {
+  const host = new SofiaPluginHost();
+  let nestedError: unknown;
+  host.use({
+    id: "reentrant.plugin",
+    install() {
+      assert.throws(
+        () => host.use({ id: "reentrant.plugin", install() {} }),
+        /already installed or being installed/,
+      );
+      nestedError = new Error("nested install rejected");
+    },
+  });
+  assert.ok(nestedError);
+  assert.deepEqual(host.listPlugins(), ["reentrant.plugin"]);
+});
+
+test("plugin identifiers reject surrounding whitespace", () => {
+  const host = new SofiaPluginHost();
+  assert.throws(() => host.use({ id: " plugin ", install() {} }), /surrounding whitespace/);
+  assert.throws(() => host.use({
+    id: "tool.whitespace",
+    install(ctx) { ctx.registerTool(tool(" invalid.tool ")); },
+  }), /tool name must not contain surrounding whitespace/);
+  assert.deepEqual(host.listPlugins(), []);
+  assert.deepEqual(host.listTools(), []);
+});
+
 test("plugin host installs tools and exposes registered services", () => {
   const host = new SofiaPluginHost();
   const counter = { value: 7 };
