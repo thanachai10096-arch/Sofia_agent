@@ -259,9 +259,27 @@ export class CronScheduler {
   private closed = false;
   private tickPromise?: Promise<void>;
   private closePromise?: Promise<void>;
+  private pendingAdmissions = 0;
+  private admissionsDrained?: Promise<void>;
+  private resolveAdmissionsDrained?: () => void;
   private readonly active = new Map<string, AbortController>();
   private readonly activeTasks = new Set<Promise<unknown>>();
   private readonly recoveryTasks = new Set<Promise<unknown>>();
+
+  private async withAdmission<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.closed) throw new Error("Cron scheduler is closed");
+    this.pendingAdmissions++;
+    try {
+      return await operation();
+    } finally {
+      this.pendingAdmissions--;
+      if (this.closed && this.pendingAdmissions === 0) {
+        this.resolveAdmissionsDrained?.();
+        this.resolveAdmissionsDrained = undefined;
+        this.admissionsDrained = undefined;
+      }
+    }
+  }
 
   private trackTask<T>(task: Promise<T>, collection: Set<Promise<unknown>>): Promise<T> {
     collection.add(task);
@@ -272,8 +290,12 @@ export class CronScheduler {
   async close(): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.closed = true;
-    for (const controller of this.active.values()) controller.abort(new Error("Cron scheduler is shutting down"));
     this.closePromise = (async () => {
+      if (this.pendingAdmissions > 0) {
+        this.admissionsDrained ??= new Promise<void>(resolve => { this.resolveAdmissionsDrained = resolve; });
+        await this.admissionsDrained;
+      }
+      for (const controller of this.active.values()) controller.abort(new Error("Cron scheduler is shutting down"));
       if (this.tickPromise) await Promise.allSettled([this.tickPromise]);
       for (const controller of this.active.values()) controller.abort(new Error("Cron scheduler is shutting down"));
       await Promise.allSettled([...this.recoveryTasks]);
@@ -311,8 +333,11 @@ export class CronScheduler {
     }
     await this.auditCallback?.(event);
   }
-  async create(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
-    if (this.closed) throw new Error("Cron scheduler is closed");
+  create(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
+    return this.withAdmission(() => this.createInternal(input, actor));
+  }
+
+  private async createInternal(input: CronScheduleInput, actor: string): Promise<CronSchedule> {
     if (!await this.authorize(actor, "create")) throw new Error("Not authorized to create cron schedule");
     if (input.ownerKeyId !== actor) throw new Error("Schedule owner must match the authenticated API key");
     if (!input.name.trim() || !input.task.trim() || !input.ownerKeyId.trim()) throw new Error("name, task and ownerKeyId are required");
@@ -350,8 +375,11 @@ export class CronScheduler {
   async list(actor: string): Promise<CronSchedule[]> {
     return this.store.transact(state => state.schedules.filter(s => s.ownerKeyId === actor).map(s => ({ ...s })));
   }
-  async setEnabled(id: string, enabled: boolean, actor: string): Promise<CronSchedule> {
-    if (this.closed) throw new Error("Cron scheduler is closed");
+  setEnabled(id: string, enabled: boolean, actor: string): Promise<CronSchedule> {
+    return this.withAdmission(() => this.setEnabledInternal(id, enabled, actor));
+  }
+
+  private async setEnabledInternal(id: string, enabled: boolean, actor: string): Promise<CronSchedule> {
     return this.store.transact(async state => {
       const schedule = state.schedules.find(s => s.id === id);
       if (!schedule) throw new Error("Unknown cron schedule");
@@ -362,7 +390,11 @@ export class CronScheduler {
       return { ...schedule };
     });
   }
-  async cancel(id: string, actor: string): Promise<boolean> {
+  cancel(id: string, actor: string): Promise<boolean> {
+    return this.withAdmission(() => this.cancelInternal(id, actor));
+  }
+
+  private async cancelInternal(id: string, actor: string): Promise<boolean> {
     const target = await this.store.transact(async state => {
       const schedule = state.schedules.find(s => s.id === id);
       if (!schedule) return undefined;
