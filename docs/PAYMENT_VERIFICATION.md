@@ -6,7 +6,8 @@ Sofia separates checkout-page evidence from authoritative payment-provider evide
 
 - `src/payments/verification.ts` defines the provider adapter contract and compares an authenticated provider result with the expected order reference, integer minor-unit amount, and ISO 4217 currency.
 - A missing adapter or unauthenticated response returns `unknown`; a mismatch returns `mismatch`. Only an authenticated provider result with status `succeeded` sets `verified: true`.
-- `src/payments/ledger.ts` provides a financial-order state machine: prepared → order submitted → payment pending/paid/failed/review. It calls the provider adapter itself; callers cannot pass a client-constructed payment-success result into the ledger. The included in-memory store is for tests and single-process development only.\n- `src/payments/webhooks.ts` contains generic HMAC and event replay primitives. Its `t=<unix-seconds>,v1=<hex>` header and `<timestamp>.<rawBody>` signing payload are an internal example format, **not a claim of compatibility with Stripe, Opn, PayPal, or another provider**.
+- `src/payments/ledger.ts` provides a financial-order state machine: prepared → order submitted → payment pending/paid/failed/review. It calls the provider adapter itself; callers cannot pass a client-constructed payment-success result into the ledger. The included in-memory store is for tests and single-process development only.
+- `src/payments/webhooks.ts` contains generic HMAC and event replay primitives. Its `t=<unix-seconds>,v1=<hex>` header and `<timestamp>.<rawBody>` signing payload are an internal example format, **not a claim of compatibility with Stripe, Opn, PayPal, or another provider**.
 
 ## Production integration requirements
 
