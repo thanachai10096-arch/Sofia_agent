@@ -87,3 +87,17 @@ test("a failing cleanup does not prevent other plugins from being disposed", () 
   assert.deepEqual(disposed, ["second", "first"]);
   assert.throws(() => host.listTools(), /disposed/);
 });
+
+test("host cannot be repopulated from a disposal callback", () => {
+  const host = new SofiaPluginHost();
+  host.use({
+    id: "reentrant",
+    install(ctx) {
+      ctx.onDispose(() => {
+        assert.throws(() => host.use({ id: "late", install() {} }), /disposed/);
+      });
+    },
+  });
+  host.dispose();
+  assert.throws(() => host.listPlugins(), /disposed/);
+});
