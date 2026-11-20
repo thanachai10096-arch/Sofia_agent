@@ -58,6 +58,16 @@ function setup() {
   };
 }
 
+test("parallel browser.open calls share one session and create distinct pages", async () => {
+  const harness = setup();
+  const [first, second] = await Promise.all([
+    harness.tool("browser.open").execute({}, {} as never),
+    harness.tool("browser.open").execute({}, {} as never),
+  ]) as [{ pageId: string }, { pageId: string }];
+  assert.notEqual(first.pageId, second.pageId);
+  assert.deepEqual(harness.counts(), { launchCount: 1, sessionCloseCount: 0, pageCloseCount: 0 });
+});
+
 test("browser.navigate remains compatible with plans using the navigate tool name", async () => {
   const harness = setup();
   const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
