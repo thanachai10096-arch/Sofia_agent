@@ -129,6 +129,7 @@ export { SqliteSessionStore } from "./session/sqlite-store.js";
 export type { Session } from "./session/store.js";
 export { createSofiaAgentDependenciesWithSessions } from "./models/factory.js";
 export { createSofiaAgentDependenciesWithOwnerSessions } from "./models/factory.js";
+export { createSofiaAgentDependenciesForTenantWithSessions } from "./models/factory.js";
 export { CoordinatedSubagentRuntime } from "./brain/coordinated-subagent-runtime.js";
 export { connectManagedMcpServer } from "./mcp/managed-server.js";
 export { connectManagedMcpRegistry } from "./mcp/registry.js";
