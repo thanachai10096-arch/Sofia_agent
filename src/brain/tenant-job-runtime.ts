@@ -137,6 +137,9 @@ export function createRegistryBackedTenantJobRuntimeRouter(
     const dependencies = await registry.getForPrincipal(ownerKeyId);
     const runtime = dependencies.jobRuntime;
     if (!runtime) throw new Error("Tenant Agent dependencies do not provide a JobRuntime.");
+    if (!runtime.getForOwner || !runtime.resumeForOwner || !runtime.cancelForOwner) {
+      throw new Error("Tenant JobRuntime must implement owner-scoped lookup, resume, and cancellation.");
+    }
     return {
       submit: runtime.submit.bind(runtime),
       get: runtime.get.bind(runtime),
