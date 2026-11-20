@@ -1,5 +1,6 @@
 """In-process Agent-Reach adapter for Sofia; no external CLI is invoked."""
 from __future__ import annotations
+import base64
 import json
 import re
 import sys
@@ -76,9 +77,13 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> int:
     try:
-        if len(sys.argv) != 3 or sys.argv[1] != "--request-json":
-            raise ValueError("Expected --request-json and a JSON request")
-        request = json.loads(sys.argv[2])
+        if len(sys.argv) != 3 or sys.argv[1] not in ("--request-json", "--request-base64"):
+            raise ValueError("Expected --request-json or --request-base64 and a request")
+        if sys.argv[1] == "--request-base64":
+            raw_request = base64.b64decode(sys.argv[2], validate=True).decode("utf-8")
+        else:
+            raw_request = sys.argv[2]
+        request = json.loads(raw_request)
         if not isinstance(request, dict):
             raise ValueError("Request must be a JSON object")
         result = handle(request)
