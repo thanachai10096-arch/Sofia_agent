@@ -1,7 +1,8 @@
 """Unit tests for Sofia's read-only Agent-Reach boundary."""
 import unittest
+from unittest.mock import patch
 
-from sofia_bridge import is_mutating_action
+from sofia_bridge import _read_youtube, is_mutating_action
 
 
 class MutatingActionGuardTests(unittest.TestCase):
@@ -22,3 +23,31 @@ class MutatingActionGuardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class YouTubeReadTests(unittest.TestCase):
+    def test_read_includes_thai_captions(self):
+        metadata = {"ok": True, "items": [{"title": "Short", "text": "description", "raw": {}}]}
+        captions = {"ok": True, "items": [{"text": "นี่คือคำบรรยายภาษาไทย", "raw": {"lang": "th"}}]}
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action", side_effect=[metadata, captions]
+        ) as run:
+            result = _read_youtube("https://www.youtube.com/shorts/abcdefghijk", 180)
+        self.assertTrue(result["ok"])
+        self.assertIn("นี่คือคำบรรยายภาษาไทย", result["items"][0]["text"])
+        self.assertEqual(result["items"][0]["raw"]["transcript_source"], "youtube_subtitles")
+        self.assertIn("th,th-TH", run.call_args_list[1].args[2]["lang"])
+
+    def test_does_not_claim_video_was_read_without_transcript(self):
+        metadata = {"ok": True, "items": [{"title": "Short", "text": "description", "raw": {}}]}
+        unavailable = {"ok": False, "error": {"message": "no subtitles"}}
+        no_provider = {"ok": False, "error": {"message": "no provider configured"}}
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action", side_effect=[metadata, unavailable, no_provider]
+        ):
+            result = _read_youtube("https://www.youtube.com/shorts/abcdefghijk", 180)
+        raw = result["items"][0]["raw"]
+        self.assertEqual(raw["content_status"], "metadata_only")
+        self.assertIn("Do not summarize the video as watched", raw["content_warning"])
+
+
