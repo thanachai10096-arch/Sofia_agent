@@ -308,14 +308,33 @@ class QuotaHelperTests(unittest.TestCase):
                 },
             }
             (state / "allocations.json").write_text(__import__("json").dumps(duplicate), encoding="utf-8")
+            (state / "allocations.json").chmod(0o600)
             with self.assertRaises(HELPER.HelperError):
                 HELPER.load_allocations(state)
 
             duplicate.pop("123e4567-e89b-42d3-a456-426614174011")
             duplicate["123e4567-e89b-42d3-a456-426614174010"]["status"] = "finished"
             (state / "allocations.json").write_text(__import__("json").dumps(duplicate), encoding="utf-8")
+            (state / "allocations.json").chmod(0o600)
             with self.assertRaises(HELPER.HelperError):
                 HELPER.load_allocations(state)
+
+    def test_registry_rejects_workspace_path_outside_canonical_run_directory(self):
+        run_id = "123e4567-e89b-42d3-a456-426614174012"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            root.mkdir()
+            allocations = {
+                run_id: {
+                    "project_id": HELPER.PROJECT_ID_MIN,
+                    "workspace": str(root / "run-elsewhere"),
+                    "bytes": 8 * 1024 * 1024,
+                    "inodes": HELPER.INODE_LIMIT,
+                    "status": "active",
+                }
+            }
+            with self.assertRaises(HELPER.HelperError):
+                HELPER.assert_workspace_registry_consistent(root, allocations)
 
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
