@@ -228,7 +228,11 @@ class PublicRedirectGuardTests(unittest.TestCase):
     def test_redirect_handler_allows_public_redirect_targets(self):
         from agent_reach.utils.url import PublicOnlyRedirectHandler
 
-        handler = PublicOnlyRedirectHandler()
+        handler = PublicOnlyRedirectHandler(
+            resolver=lambda host, port, **kwargs: [
+                (2, 1, 6, "", ("93.184.216.34", port))
+            ]
+        )
         request = __import__("urllib.request", fromlist=["Request"]).Request("https://example.com/start")
         redirected = handler.redirect_request(
             request, None, 302, "Found", {}, "https://docs.example.org/article"
@@ -241,10 +245,11 @@ class TranscriptionPublicUrlTests(unittest.TestCase):
     def test_transcription_uses_shared_public_url_validation(self):
         from agent_reach.transcribe import _assert_safe_public_url
 
-        self.assertEqual(
-            _assert_safe_public_url("https://example.com/audio"),
-            "https://example.com/audio",
-        )
+        with patch("agent_reach.utils.url.assert_public_http_url", side_effect=lambda value: value):
+            self.assertEqual(
+                _assert_safe_public_url("https://example.com/audio"),
+                "https://example.com/audio",
+            )
 
     def test_transcription_rejects_legacy_private_ip_spellings(self):
         from agent_reach.transcribe import TranscribeError, _assert_safe_public_url
@@ -268,10 +273,11 @@ class YouTubeUrlValidationTests(unittest.TestCase):
     def test_video_url_accepts_public_youtube_urls(self):
         from agent_reach.channels.youtube import _video_url
 
-        self.assertEqual(
-            _video_url("https://www.youtube.com/watch?v=jNQXAC9IVRw"),
-            "https://www.youtube.com/watch?v=jNQXAC9IVRw",
-        )
+        with patch("agent_reach.utils.url.assert_public_http_url", side_effect=lambda value: value):
+            self.assertEqual(
+                _video_url("https://www.youtube.com/watch?v=jNQXAC9IVRw"),
+                "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+            )
 
     def test_video_url_rejects_non_public_and_malformed_targets(self):
         from agent_reach.channels.youtube import _video_url
