@@ -21,6 +21,19 @@ const route: ModelRoute = {
   healthy: true,
 };
 
+test("API refuses multi-owner jobs and cron scopes until tenant runtime routing exists", () => {
+  assert.throws(() => createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: {
+      "jobs-owner-one": ["jobs:read", "jobs:manage"],
+      "jobs-owner-two": ["cron:read", "cron:manage"],
+    },
+  }), /tenant_job_runtime_required/);
+});
+
 test("API refuses a process-global JobRuntime when multiple API owners are configured", () => {
   const runtime = {
     async submit() { throw new Error("unused"); },
