@@ -177,22 +177,43 @@ test("registry-backed job routing reuses the exact tenant Agent dependency bundl
 
 test("registry-backed tenant job router restores persisted jobs without crossing owner namespaces", async () => {
   const namespaces = new Map([[ownerOne, "tenant-router-restart-" + ownerOne], [ownerTwo, "tenant-router-restart-" + ownerTwo]]);
-  const makeRegistry = () => ({
-    async getForPrincipal(ownerKeyId: string) {
-      const namespace = namespaces.get(ownerKeyId);
-      if (!namespace) throw new Error("Unknown owner");
-      const runtime = new DurableJobRuntime(() => ({
-        run: async () => ({ summary: "completed for " + ownerKeyId }),
-      } as unknown as SofiaBrain), undefined, namespace);
-      return { jobRuntime: runtime };
-    },
-  } as unknown as TenantDependencyRegistry);
-  const firstRouter = createRegistryBackedTenantJobRuntimeRouter([ownerOne, ownerTwo], makeRegistry());
+  const makeRegistry = () => {
+    const runtimes = new Map<string, DurableJobRuntime>();
+    const registry = {
+      async getForPrincipal(ownerKeyId: string) {
+        const namespace = namespaces.get(ownerKeyId);
+        if (!namespace) throw new Error("Unknown owner");
+        let runtime = runtimes.get(ownerKeyId);
+        if (!runtime) {
+          runtime = new DurableJobRuntime(() => ({
+            run: async () => ({ summary: "completed for " + ownerKeyId }),
+          } as unknown as SofiaBrain), undefined, namespace);
+          runtimes.set(ownerKeyId, runtime);
+        }
+        return { jobRuntime: runtime };
+      },
+    } as unknown as TenantDependencyRegistry;
+    return { registry, runtimes };
+  };
+  const firstBundle = makeRegistry();
+  const firstRouter = createRegistryBackedTenantJobRuntimeRouter([ownerOne, ownerTwo], firstBundle.registry);
   const first = await firstRouter.submit({ task: "persist owner one", ownerKeyId: ownerOne });
   const second = await firstRouter.submit({ task: "persist owner two", ownerKeyId: ownerTwo });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const [one, two] = await Promise.all([
+      firstRouter.getForOwner(first.id, ownerOne),
+      firstRouter.getForOwner(second.id, ownerTwo),
+    ]);
+    if (one?.status === "completed" && two?.status === "completed") break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal((await firstRouter.getForOwner(first.id, ownerOne))?.status, "completed");
+  assert.equal((await firstRouter.getForOwner(second.id, ownerTwo))?.status, "completed");
+  await Promise.all([...firstBundle.runtimes.values()].map(runtime => runtime.close?.()));
   await firstRouter.close();
 
-  const restartedRouter = createRegistryBackedTenantJobRuntimeRouter([ownerOne, ownerTwo], makeRegistry());
+  const restartedBundle = makeRegistry();
+  const restartedRouter = createRegistryBackedTenantJobRuntimeRouter([ownerOne, ownerTwo], restartedBundle.registry);
   try {
     const restoredOne = await restartedRouter.getForOwner(first.id, ownerOne);
     const restoredTwo = await restartedRouter.getForOwner(second.id, ownerTwo);
@@ -203,6 +224,7 @@ test("registry-backed tenant job router restores persisted jobs without crossing
     const all = await restartedRouter.list();
     assert.deepEqual(all.map(job => job.ownerKeyId).sort(), [ownerOne, ownerTwo]);
   } finally {
+    await Promise.all([...restartedBundle.runtimes.values()].map(runtime => runtime.close?.()));
     await restartedRouter.close();
   }
 });
