@@ -30,4 +30,6 @@ No payment provider is currently selected or configured. This module does not cl
 
 `FileFinancialActionStore` persists reservations and updates as JSON files with restrictive directory/file permissions, exclusive creation for idempotency reservations, and atomic rename for updates. `FileFinancialLedger` appends JSONL events and syncs each append. These adapters survive process restarts on a persistent local volume.
 
+`FileFinancialActionStore.update` also enforces monotonic lifecycle transitions and keeps the owner, idempotency identity, approval, order reference, amount, currency, and creation time immutable. `succeeded` and `failed` are terminal states. A provider payment ID, once recorded, cannot be silently replaced. These checks protect the local record API; they do not replace a database transaction or distributed compare-and-set for multi-process deployments.
+
 They are intended for one trusted Sofia process only. They are not a distributed transaction manager or multi-host lock. For multiple processes/replicas, implement the interfaces with a database unique constraint on `(owner_id, idempotency_hash)`, transactional state changes, and an append-only ledger/outbox. Back up and protect the local payment directory; it contains sensitive transaction metadata.
