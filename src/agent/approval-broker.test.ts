@@ -150,3 +150,16 @@ test("in-memory approval store enforces the per-principal pending cap", async ()
   }), /Too many pending approval requests/);
   assert.equal((await store.listPending("principal-1")).length, 50);
 });
+
+
+test("in-memory approval store rejects decisions from a different principal", async () => {
+  const store = new InMemoryApprovalDecisionStore();
+  await store.create({
+    id: "owner-bound", runId: "run-owner", principalId: "owner-1",
+    toolName: "workspace.write_file", input: {}, actionHash: "owner-hash",
+    risk: "high", status: "pending", createdAt: 1, expiresAt: 10_000,
+  });
+  assert.equal(await store.resolve("owner-bound", "owner-hash", "approved", "attacker", 2), false);
+  assert.equal((await store.get("owner-bound"))?.status, "pending");
+  assert.equal(await store.resolve("owner-bound", "owner-hash", "approved", "owner-1", 3), true);
+});
