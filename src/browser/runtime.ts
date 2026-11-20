@@ -177,7 +177,9 @@ function sendSocketError(socket: Socket, status: number): void {
  * the selected numeric IP address. This closes the DNS-check/connect TOCTOU
  * gap left by validating a URL while letting Chromium resolve the hostname.
  */
-export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
+export async function createBrowserEgressProxy(options: { resolver?: typeof lookup } = {}): Promise<BrowserEgressProxy> {
+  // Injection keeps proxy policy tests deterministic; production defaults to system DNS.
+  const resolver = options.resolver ?? lookup;
   let closed = false;
   const clientSockets = new Set<Socket>();
   const upstreamSockets = new Set<Socket>();
@@ -187,7 +189,7 @@ export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
         const target = assertSafeBrowserUrl(request.url ?? "");
         if (target.protocol !== "http:") throw new Error("Only HTTP proxy requests are supported without CONNECT.");
         if ((target.port ? Number(target.port) : 80) !== 80) throw new Error("Only standard HTTP port 80 is allowed.");
-        const address = await resolvePublicHostAddress(target.hostname);
+        const address = await resolvePublicHostAddress(target.hostname, resolver);
         if (closed || request.destroyed) return;
         const headers: OutgoingHttpHeaders = { ...request.headers, host: target.host };
         delete headers["proxy-authorization"];
@@ -230,7 +232,7 @@ export async function createBrowserEgressProxy(): Promise<BrowserEgressProxy> {
       try {
         const target = assertSafeBrowserUrl("https://" + (request.url ?? "") + "/");
         if ((target.port ? Number(target.port) : 443) !== 443) throw new Error("Only standard HTTPS port 443 is allowed.");
-        const address = await resolvePublicHostAddress(target.hostname);
+        const address = await resolvePublicHostAddress(target.hostname, resolver);
         if (closed || client.destroyed) return;
         const upstream = connectTcp({ host: address, family: isIP(address), port: 443 });
         upstreamSockets.add(upstream);
