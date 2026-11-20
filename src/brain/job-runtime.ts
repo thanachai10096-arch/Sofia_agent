@@ -388,6 +388,13 @@ class FileJobStateStore {
         const current = records[index]!;
         if (current.leaseOwnerToken !== record.leaseOwnerToken) return false;
         if (current.status === "cancelled" && record.status !== "cancelled") return false;
+        // A matching fencing token is not sufficient after its lease expires:
+        // the old worker must not commit a late checkpoint or terminal result,
+        // even if no replacement worker has claimed the job yet.
+        if (current.status === "running") {
+          const leaseExpiry = current.leaseExpiresAt ? Date.parse(current.leaseExpiresAt) : 0;
+          if (!Number.isFinite(leaseExpiry) || leaseExpiry <= Date.now()) return false;
+        }
         records[index] = {
           ...record,
           ...(record.status === "running" && current.status === "running"
