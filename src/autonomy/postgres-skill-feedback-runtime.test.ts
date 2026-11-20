@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import assert from "node:assert/strict";
+import test from "node:test";
 import { createPostgresSkillFeedbackHostConfig } from "./postgres-skill-feedback-runtime.js";
 
-describe("createPostgresSkillFeedbackHostConfig", () => {
-  it("initializes both durable stores before returning the Brain host config", async () => {
+test("Postgres skill feedback bootstrap initializes both durable stores", async () => {
     const statements: string[] = [];
     const pool = {
       async query(sql: string) { statements.push(sql); return { rows: [] }; },
@@ -16,24 +16,24 @@ describe("createPostgresSkillFeedbackHostConfig", () => {
       resolveSafetyIncidentCount,
     });
 
-    expect(statements).toHaveLength(2);
-    expect(statements[0]).toContain("sofia_skill_registry");
-    expect(statements[1]).toContain("sofia_skill_feedback");
-    expect(config.registry).toBeDefined();
-    expect(config.ledger).toBeDefined();
-    expect(config.resolveScope).toBe(resolveScope);
-    expect(config.resolveSafetyIncidentCount).toBe(resolveSafetyIncidentCount);
-  });
+    assert.equal(statements.length, 2);
+    assert.match(statements[0]!, /sofia_skill_registry/);
+    assert.match(statements[1]!, /sofia_skill_feedback/);
+    assert.ok(config.registry);
+    assert.ok(config.ledger);
+    assert.equal(config.resolveScope, resolveScope);
+    assert.equal(config.resolveSafetyIncidentCount, resolveSafetyIncidentCount);
+});
 
-  it("fails closed when a trusted host dependency is missing", async () => {
-    await expect(createPostgresSkillFeedbackHostConfig({
+test("Postgres skill feedback bootstrap fails closed when host dependencies are missing", async () => {
+    await assert.rejects(createPostgresSkillFeedbackHostConfig({
       pool: undefined as never,
       resolveScope: () => "tenant:test",
       resolveSafetyIncidentCount: () => 0,
-    })).rejects.toThrow("Trusted PostgreSQL pool and host identity/safety resolvers are required.");
-  });
+    }), /Trusted PostgreSQL pool and host identity\/safety resolvers are required\./);
+});
 
-  it("does not return a partially initialized host config when schema setup fails", async () => {
+test("Postgres skill feedback bootstrap rejects partial schema initialization", async () => {
     let calls = 0;
     const pool = {
       async query() {
@@ -43,11 +43,10 @@ describe("createPostgresSkillFeedbackHostConfig", () => {
       },
       async connect() { throw new Error("not used"); },
     };
-    await expect(createPostgresSkillFeedbackHostConfig({
+    await assert.rejects(createPostgresSkillFeedbackHostConfig({
       pool,
       resolveScope: () => "tenant:test",
       resolveSafetyIncidentCount: () => 0,
-    })).rejects.toThrow("database unavailable");
-    expect(calls).toBe(2);
-  });
+    }), /database unavailable/);
+    assert.equal(calls, 2);
 });
