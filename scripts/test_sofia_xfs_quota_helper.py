@@ -1,6 +1,8 @@
 """Unit tests for the fixed-protocol XFS quota helper (no root or XFS mount required)."""
 import importlib.util
 import unittest
+import tempfile
+from unittest.mock import patch
 from pathlib import Path
 
 MODULE_PATH = Path(__file__).with_name("sofia-xfs-quota-helper.py")
@@ -36,6 +38,56 @@ class QuotaHelperTests(unittest.TestCase):
             HELPER.strict_json_loads('{"operation":"probe","operation":"dispose"}')
         with self.assertRaises(HELPER.HelperError):
             HELPER.strict_json_loads('{"hardQuotaBytes":NaN}')
+
+    def test_create_persists_verified_allocation_and_dispose_releases_it(self):
+        run_id = "123e4567-e89b-42d3-a456-426614174000"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            state = Path(temp) / "state"
+            root.mkdir()
+            state.mkdir()
+            with patch.object(HELPER, "run", return_value=""), patch.object(HELPER, "verify_quota") as verify:
+                reply = HELPER.create(root, state, {
+                    "runId": run_id,
+                    "hardQuotaBytes": 8 * 1024 * 1024,
+                    "hardQuotaInodes": HELPER.INODE_LIMIT,
+                })
+                verify.assert_called_once()
+                workspace = root / ("run-" + run_id)
+                self.assertEqual(reply["workspacePath"], str(workspace))
+                self.assertTrue(workspace.is_dir())
+                allocation = HELPER.load_allocations(state)[run_id]
+                self.assertEqual(allocation["status"], "active")
+                self.assertEqual(allocation["project_id"], HELPER.PROJECT_ID_MIN)
+                dispose_reply = HELPER.dispose(root, state, {
+                    "runId": run_id,
+                    "workspacePath": str(workspace),
+                })
+                self.assertEqual(dispose_reply["runId"], run_id)
+                self.assertFalse(workspace.exists())
+                self.assertNotIn(run_id, HELPER.load_allocations(state))
+
+    def test_failed_create_keeps_project_id_reserved_for_recovery(self):
+        run_id = "123e4567-e89b-42d3-a456-426614174001"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            state = Path(temp) / "state"
+            root.mkdir()
+            state.mkdir()
+            def fail_project_assignment(argv, timeout=HELPER.COMMAND_TIMEOUT):
+                if "project -s" in " ".join(argv):
+                    raise HELPER.HelperError("simulated project assignment failure")
+                return ""
+            with patch.object(HELPER, "run", side_effect=fail_project_assignment), patch.object(HELPER, "verify_quota"):
+                with self.assertRaises(HELPER.HelperError):
+                    HELPER.create(root, state, {
+                        "runId": run_id,
+                        "hardQuotaBytes": 8 * 1024 * 1024,
+                        "hardQuotaInodes": HELPER.INODE_LIMIT,
+                    })
+            allocation = HELPER.load_allocations(state)[run_id]
+            self.assertEqual(allocation["status"], "needs_recovery")
+            self.assertEqual(allocation["project_id"], HELPER.PROJECT_ID_MIN)
 
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
