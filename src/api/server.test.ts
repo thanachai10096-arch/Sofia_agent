@@ -513,3 +513,55 @@ test("principal usage quota files enforce limits independently per authenticated
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("tenant cron schedulers recover configured principals on startup without an HTTP request", async () => {
+  const events: string[] = [];
+  const keys = ["startup-tenant-one", "startup-tenant-two"];
+  const principalId = (key: string) => createHash("sha256").update(key).digest("hex").slice(0, 32);
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: Object.fromEntries(keys.map(key => [key, ["cron:read"]])),
+    resolvePrincipalDependencies: async (id) => {
+      events.push("dependencies:" + id);
+      return {
+        provider: { generate: async () => ({ text: "tenant" }) },
+        router: new ModelRouter([route]),
+        reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+        jobRuntime: {
+          async list() { return []; }, async submit() { throw new Error("unused"); },
+          async get() { return undefined; }, async resume() { throw new Error("unused"); },
+          async cancel() { return false; },
+        } as never,
+      };
+    },
+    resolvePrincipalCronScheduler: async (id) => ({
+      async recover() { events.push("recover:" + id); return { reconciled: 0, monitoring: 0, indeterminate: 0 }; },
+      async tick() { events.push("tick:" + id); },
+      async list() { return []; },
+      async create() { throw new Error("unused"); },
+      async history() { return []; },
+      async setEnabled() { throw new Error("unused"); },
+      async cancel() { return false; },
+    } as never),
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    for (let i = 0; i < 100 && events.filter(item => item.startsWith("tick:")).length < keys.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    const expected = keys.map(principalId);
+    for (const id of expected) {
+      assert.ok(events.includes("dependencies:" + id));
+      assert.ok(events.includes("recover:" + id));
+      assert.ok(events.includes("tick:" + id));
+      assert.ok(events.indexOf("recover:" + id) < events.indexOf("tick:" + id));
+    }
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
