@@ -33,7 +33,7 @@ const context = {
   expiresAt: record.expiresAt,
 };
 
-test("SQLite approval payload store persists only encrypted envelopes for matching pending approvals", {
+test("SQLite approval payload store encrypts before persistence and decrypts only for the matching pending approval", {
   skip: !supportsNodeSqlite,
 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-payload-"));
@@ -44,24 +44,22 @@ test("SQLite approval payload store persists only encrypted envelopes for matchi
     assert.equal(metadata.createPending(record), true);
     const cipher = new Aes256GcmApprovalPayloadCipher(randomBytes(32), "primary-v1");
     const secret = JSON.stringify({ paymentToken: "plaintext-must-never-hit-disk", item: "private purchase" });
-    const encrypted = cipher.encrypt(secret, context);
 
-    assert.equal(payloads.save(context, encrypted, 2_000), true);
-    assert.deepEqual(payloads.load(context, 2_001), encrypted);
-    assert.equal(payloads.save(context, encrypted, 2_002), false);
+    assert.equal(payloads.save(secret, context, cipher, 2_000), true);
+    assert.equal(payloads.load(context, cipher, 2_001), secret);
+    assert.equal(payloads.save(secret, context, cipher, 2_002), false);
 
     const wrongOwner = { ...context, principalId: "tenant-payload-b" };
     const wrongAction = { ...context, actionHash: "other-action" };
-    assert.equal(payloads.load(wrongOwner, 2_001), null);
-    assert.equal(payloads.save(wrongAction, encrypted, 2_001), false);
+    assert.equal(payloads.load(wrongOwner, cipher, 2_001), null);
+    assert.equal(payloads.save(secret, wrongAction, cipher, 2_001), false);
+    assert.equal(payloads.load({ ...context, expiresAt: -1 }, cipher, 2_001), null);
 
     assert.equal(fs.readFileSync(file).includes(Buffer.from("plaintext-must-never-hit-disk")), false);
-    assert.equal(cipher.decrypt(payloads.load(context, 2_001)!, context), secret);
-
     assert.equal(metadata.settlePending(record.id, record.principalId, record.actionHash, "approved", 3_000), true);
-    assert.equal(payloads.load(context, 3_001), null);
+    assert.equal(payloads.load(context, cipher, 3_001), null);
     assert.equal(payloads.delete(record.id), true);
-    assert.equal(payloads.load(context, 3_001), null);
+    assert.equal(payloads.load(context, cipher, 3_001), null);
   } finally {
     payloads.close();
     metadata.close();
@@ -69,7 +67,7 @@ test("SQLite approval payload store persists only encrypted envelopes for matchi
   }
 });
 
-test("SQLite approval payload store rejects oversized and malformed envelopes", {
+test("SQLite approval payload store rejects oversized plaintext and invalid context", {
   skip: !supportsNodeSqlite,
 }, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-payload-invalid-"));
@@ -79,10 +77,8 @@ test("SQLite approval payload store rejects oversized and malformed envelopes", 
   try {
     assert.equal(metadata.createPending(record), true);
     const cipher = new Aes256GcmApprovalPayloadCipher(randomBytes(32), "primary-v1");
-    const encrypted = cipher.encrypt("small", context);
-    assert.equal(payloads.save(context, { ...encrypted, ciphertext: "x".repeat(300_000) }, 2_000), false);
-    assert.equal(payloads.save(context, { ...encrypted, algorithm: "none" } as never, 2_000), false);
-    assert.equal(payloads.load({ ...context, expiresAt: -1 }, 2_000), null);
+    assert.equal(payloads.save("x".repeat(300_000), context, cipher, 2_000), false);
+    assert.equal(payloads.save("small", { ...context, expiresAt: -1 }, cipher, 2_000), false);
   } finally {
     payloads.close();
     metadata.close();
