@@ -8,6 +8,24 @@ import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
+test("DurableJobRuntime accepts an injected durable JobStateStore", async () => {
+  const namespace = "job-runtime-injected-store-" + randomUUID();
+  const { FileJobStateStore } = await import("./job-runtime.js");
+  const injectedStore = new FileJobStateStore(namespace);
+  const brain = {
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, "unused-default-namespace", injectedStore);
+  const submitted = await runtime.submit({ task: "use injected store" });
+  let current = await runtime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && current?.status !== "completed"; attempt += 1) {
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
+    current = await runtime.get(submitted.id);
+  }
+  assert.equal(current?.status, "completed");
+  assert.equal((await injectedStore.get(submitted.id))?.status, "completed");
+});
+
 test("DurableJobRuntime deduplicates concurrent and restarted submits by owner-scoped idempotency key", async () => {
   const namespace = "job-runtime-idempotency-" + randomUUID();
   let calls = 0;
