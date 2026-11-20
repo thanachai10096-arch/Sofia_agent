@@ -112,14 +112,14 @@ def load_config():
 
 def project_quota_is_enforced(state):
     section = re.search(
-        r"Project quota state:[\\s\\S]*?(?=\\n(?:User|Group) quota state:|\\Z)",
+        r"Project quota state:[\s\S]*?(?=\n(?:User|Group) quota state:|\Z)",
         state,
         re.IGNORECASE,
     )
     if not section:
         return False
     body = section.group(0)
-    return bool(re.search(r"Accounting:\\s*ON", body, re.IGNORECASE) and re.search(r"Enforcement:\\s*ON", body, re.IGNORECASE))
+    return bool(re.search(r"Accounting:\s*ON", body, re.IGNORECASE) and re.search(r"Enforcement:\s*ON", body, re.IGNORECASE))
 
 def check_xfs(root):
     fs_type = run(["findmnt", "-n", "-o", "FSTYPE", "--target", str(root)]).strip()
@@ -256,8 +256,8 @@ def create(root, state_root, request):
     report = run(["xfs_quota", "-x", "-c", "report -p -n", str(root)])
     for line in report.splitlines():
         fields = line.split()
-        if fields and fields[0].isdigit():
-            existing_id = int(fields[0])
+        if fields and fields[0].lstrip("#").isdigit():
+            existing_id = int(fields[0].lstrip("#"))
             if PROJECT_ID_MIN <= existing_id <= PROJECT_ID_MAX and existing_id not in used:
                 fail("reserved project ID range contains an untracked allocation")
     project_id = next((candidate for candidate in range(PROJECT_ID_MIN, PROJECT_ID_MAX + 1) if candidate not in used), None)
@@ -351,7 +351,7 @@ def main():
             reply = dispose(root, state_root, request, abort=True)
         else:
             fail("unknown operation or unexpected request fields")
-        sys.stdout.write(json.dumps(reply, separators=(",", ":")) + "\\n")
+        sys.stdout.write(json.dumps(reply, separators=(",", ":")) + "\n")
     finally:
         os.close(lock_fd)
 
@@ -360,5 +360,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        sys.stderr.write("sofia-xfs-quota-helper: " + str(error)[:500] + "\\n")
+        sys.stderr.write("sofia-xfs-quota-helper: " + str(error)[:500] + "\n")
         sys.exit(1)
