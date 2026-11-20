@@ -159,3 +159,30 @@ class PublicUrlBoundaryTests(unittest.TestCase):
             })
         self.assertEqual(result, expected)
         dispatch.assert_called_once()
+
+
+class PublicRedirectGuardTests(unittest.TestCase):
+    def test_redirect_handler_rejects_private_redirect_targets(self):
+        from agent_reach.utils.url import PublicOnlyRedirectHandler
+
+        handler = PublicOnlyRedirectHandler()
+        request = __import__("urllib.request", fromlist=["Request"]).Request("https://example.com/start")
+        for target in (
+            "http://127.0.0.1/admin",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/",
+            "http://internal.example.local/",
+        ):
+            with self.subTest(target=target):
+                with self.assertRaisesRegex(ValueError, "public HTTP"):
+                    handler.redirect_request(request, None, 302, "Found", {}, target)
+
+    def test_redirect_handler_allows_public_redirect_targets(self):
+        from agent_reach.utils.url import PublicOnlyRedirectHandler
+
+        handler = PublicOnlyRedirectHandler()
+        request = __import__("urllib.request", fromlist=["Request"]).Request("https://example.com/start")
+        redirected = handler.redirect_request(
+            request, None, 302, "Found", {}, "https://docs.example.org/article"
+        )
+        self.assertEqual(redirected.full_url, "https://docs.example.org/article")
