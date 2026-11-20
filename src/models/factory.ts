@@ -51,6 +51,7 @@ import { createBrainSkillFeedbackRecorder } from "../autonomy/brain-skill-feedba
 import type { SkillFeedbackLedger } from "../autonomy/skill-feedback.js";
 import type { SkillRegistryStore } from "../autonomy/skill-registry.js";
 import type { SkillExecutionResultEvent } from "../brain/executor.js";
+import { createPostgresSkillFeedbackHostConfig, type PostgresSkillFeedbackRuntimeOptions } from "../autonomy/postgres-skill-feedback-runtime.js";
 
 export interface SkillFeedbackHostConfig {
   registry: SkillRegistryStore;
@@ -215,6 +216,16 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore();
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
+}
+
+/** Create Agent dependencies with durable PostgreSQL skill registry + feedback wired into Brain. */
+export async function createSofiaAgentDependenciesWithPostgresSkillFeedback(
+  workspace = process.cwd(),
+  approval: AgentDependencies["approval"] | undefined,
+  options: PostgresSkillFeedbackRuntimeOptions,
+): Promise<AgentDependencies> {
+  const skillFeedback = await createPostgresSkillFeedbackHostConfig(options);
+  return createSofiaAgentDependencies(workspace, approval, skillFeedback);
 }
 
 /** Create dependencies with opt-in durable SQLite transcripts; close the store on shutdown. */
