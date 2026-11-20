@@ -8,7 +8,7 @@ async function invokeReach(runtime: Parameters<SofiaTool["execute"]>[1]["runtime
   const result = await runtime.run(
     python,
     ["vendor/agent-reach/sofia_bridge.py", "--request-json", JSON.stringify(request)],
-    { timeoutMs: typeof request.timeout === "number" ? Math.min(1_850_000, request.timeout * 1000 + 5_000) : 35_000, allowNetwork: true },
+    { timeoutMs: typeof request.timeout === "number" ? Math.min(1_850_000, request.timeout * 1000 + 5_000) : 35_000, allowNetwork: request.operation !== "channels" },
   );
   let payload: unknown;
   try {
