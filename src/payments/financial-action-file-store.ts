@@ -66,6 +66,25 @@ export class FileFinancialActionStore implements FinancialActionStore {
       if (!validRecord(record, record.ownerId, record.idempotencyHash)) throw new Error("Refusing to persist an invalid financial action record.");
       const current = await this.find(record.ownerId, record.idempotencyHash);
       if (!current || current.id !== record.id) throw new Error("Cannot update an unreserved financial action.");
+      const terminal = current.status === "succeeded" || current.status === "failed";
+      const allowed: Record<FinancialActionRecord["status"], readonly FinancialActionRecord["status"][]> = {
+        submitting: ["submitting", "processing", "succeeded", "failed", "unknown"],
+        processing: ["processing", "succeeded", "failed", "unknown"],
+        unknown: ["unknown", "processing", "succeeded", "failed"],
+        succeeded: ["succeeded"],
+        failed: ["failed"],
+      };
+      if (terminal && record.status !== current.status) throw new Error("Terminal financial action records cannot change status.");
+      if (!allowed[current.status].includes(record.status)) throw new Error("Invalid financial action status transition.");
+      if (record.ownerId !== current.ownerId || record.idempotencyHash !== current.idempotencyHash ||
+          record.requestFingerprint !== current.requestFingerprint || record.approvalId !== current.approvalId ||
+          record.orderReference !== current.orderReference || record.amountMinor !== current.amountMinor ||
+          record.currency !== current.currency || record.createdAt !== current.createdAt ||
+          Date.parse(record.updatedAt) < Date.parse(current.updatedAt) ||
+          (current.provider && record.provider !== current.provider) ||
+          (current.providerPaymentId && record.providerPaymentId !== current.providerPaymentId)) {
+        throw new Error("Financial action identity and transaction terms are immutable.");
+      }
       const temporary = `${target}.${process.pid}.${randomUUID()}.tmp`;
       try { await writeFile(temporary, JSON.stringify(record), { encoding: "utf8", mode: 0o600, flag: "wx" }); await rename(temporary, target); }
       catch { try { await unlink(temporary); } catch { /* temporary file may not exist */ } throw new Error("Financial action record persistence failed."); }
