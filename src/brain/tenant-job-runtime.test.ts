@@ -3,6 +3,8 @@ import test from "node:test";
 import { createRegistryBackedTenantJobRuntimeRouter, TenantJobRuntimeRouter } from "./tenant-job-runtime.js";
 import type { TenantDependencyRegistry } from "../platform/tenant-dependency-registry.js";
 import type { JobRecord, JobRuntime } from "./job-runtime.js";
+import { DurableJobRuntime } from "./job-runtime.js";
+import type { SofiaBrain } from "./executor.js";
 
 const ownerOne = "11111111111111111111111111111111";
 const ownerTwo = "22222222222222222222222222222222";
@@ -170,4 +172,37 @@ test("registry-backed job routing reuses the exact tenant Agent dependency bundl
   await router.close();
   // The registry, not the router adapter, owns full dependency lifecycle shutdown.
   assert.deepEqual(closed, []);
+});
+
+
+test("registry-backed tenant job router restores persisted jobs without crossing owner namespaces", async () => {
+  const namespaces = new Map([[ownerOne, "tenant-router-restart-" + ownerOne], [ownerTwo, "tenant-router-restart-" + ownerTwo]]);
+  const makeRegistry = () => ({
+    async getForPrincipal(ownerKeyId: string) {
+      const namespace = namespaces.get(ownerKeyId);
+      if (!namespace) throw new Error("Unknown owner");
+      const runtime = new DurableJobRuntime(() => ({
+        run: async () => ({ summary: "completed for " + ownerKeyId }),
+      } as unknown as SofiaBrain), undefined, namespace);
+      return { jobRuntime: runtime };
+    },
+  } as unknown as TenantDependencyRegistry);
+  const firstRouter = createRegistryBackedTenantJobRuntimeRouter([ownerOne, ownerTwo], makeRegistry());
+  const first = await firstRouter.submit({ task: "persist owner one", ownerKeyId: ownerOne });
+  const second = await firstRouter.submit({ task: "persist owner two", ownerKeyId: ownerTwo });
+  await firstRouter.close();
+
+  const restartedRouter = createRegistryBackedTenantJobRuntimeRouter([ownerOne, ownerTwo], makeRegistry());
+  try {
+    const restoredOne = await restartedRouter.getForOwner(first.id, ownerOne);
+    const restoredTwo = await restartedRouter.getForOwner(second.id, ownerTwo);
+    assert.equal(restoredOne?.ownerKeyId, ownerOne);
+    assert.equal(restoredTwo?.ownerKeyId, ownerTwo);
+    assert.equal(await restartedRouter.getForOwner(second.id, ownerOne), undefined);
+    assert.equal(await restartedRouter.getForOwner(first.id, ownerTwo), undefined);
+    const all = await restartedRouter.list();
+    assert.deepEqual(all.map(job => job.ownerKeyId).sort(), [ownerOne, ownerTwo]);
+  } finally {
+    await restartedRouter.close();
+  }
 });
