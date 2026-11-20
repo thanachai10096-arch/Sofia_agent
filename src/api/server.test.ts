@@ -813,3 +813,81 @@ test("API approval decision gates the actual effectful tool execution", async ()
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("concurrent async retries reserve one idempotency key before queued persistence", async () => {
+  let releaseQueuedSave!: () => void;
+  const queuedSaveGate = new Promise<void>((resolve) => { releaseQueuedSave = resolve; });
+  let queuedSaves = 0;
+  let providerCalls = 0;
+  const apiKey = "concurrent-idempotency-key";
+  const server = createSofiaApi({
+    provider: {
+      generate: async () => {
+        providerCalls += 1;
+        return { text: "one execution" };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: { [apiKey]: ["agent:run", "agent:read"] },
+    runStore: {
+      async save(record) {
+        if (record.status === "queued") {
+          queuedSaves += 1;
+          await queuedSaveGate;
+        }
+      },
+      async remove() {},
+      loadAllSync() { return []; },
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  const submit = () => fetch(base + "/v1/agent/runs", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer " + apiKey,
+      "content-type": "application/json",
+      "idempotency-key": "same-client-operation",
+    },
+    body: JSON.stringify({ task: "perform one operation", async: true }),
+  });
+
+  try {
+    const firstRequest = submit();
+    for (let attempt = 0; attempt < 100 && queuedSaves === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert.equal(queuedSaves, 1, "the first request must reach queued persistence");
+
+    const secondRequest = submit();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      queuedSaves,
+      1,
+      "a concurrent retry must wait on the reserved key instead of creating a second queued run",
+    );
+
+    releaseQueuedSave();
+    const [first, second] = await Promise.all([firstRequest, secondRequest]);
+    assert.equal(first.status, 202);
+    assert.equal(second.status, 200);
+    const firstRun = await first.json() as { id: string };
+    const secondRun = await second.json() as { id: string };
+    assert.equal(secondRun.id, firstRun.id);
+    assert.equal(queuedSaves, 1);
+
+    for (let attempt = 0; attempt < 100 && providerCalls === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert.equal(providerCalls, 1, "the idempotency retry must not launch a second agent execution");
+  } finally {
+    releaseQueuedSave();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
