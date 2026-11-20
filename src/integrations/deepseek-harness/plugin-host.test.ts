@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SofiaPluginHost } from "./plugin-host.js";
+import { SofiaPluginHost, type SofiaPluginContext } from "./plugin-host.js";
 import type { SofiaTool } from "../../tools/types.js";
 
 function tool(name: string): SofiaTool {
@@ -288,7 +288,7 @@ test("plugin hosts expose an immutable process, run, or principal ownership boun
 
 test("plugin setup contexts cannot mutate or read host services after installation", () => {
   const host = new SofiaPluginHost();
-  let retained: Parameters<NonNullable<Parameters<typeof host.use>[0]["install"]>>[0] | undefined;
+  let retained: SofiaPluginContext | undefined;
   host.use({
     id: "context.lifetime",
     install(ctx) {
