@@ -464,3 +464,35 @@ test("cron scheduler close aborts active work, drains executions, and rejects la
   assert.equal(submitted, 1);
   assert.deepEqual(await scheduler.recover(), { reconciled: 0, monitoring: 0, indeterminate: 0 });
 });
+
+
+test("Cron scheduler close drains an already-admitted schedule mutation", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const runtime = { async submit() { throw new Error("unused"); } } as unknown as JobRuntime;
+  let authorizeStarted!: () => void;
+  let releaseAuthorization!: (allowed: boolean) => void;
+  const started = new Promise<void>(resolve => { authorizeStarted = resolve; });
+  const authorization = new Promise<boolean>(resolve => { releaseAuthorization = resolve; });
+  const scheduler = new CronScheduler(runtime, {
+    store,
+    authorize: async () => { authorizeStarted(); return authorization; },
+  });
+  const creating = scheduler.create({
+    name: "admitted", task: "task", runAt: "2030-01-01T00:00:00.000Z",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice");
+  await started;
+  let closeFinished = false;
+  const closing = scheduler.close().then(() => { closeFinished = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(closeFinished, false);
+  releaseAuthorization(true);
+  await creating;
+  await closing;
+  assert.equal(state.schedules.length, 1);
+  await assert.rejects(() => scheduler.create({
+    name: "late", task: "task", runAt: "2030-01-02T00:00:00.000Z",
+    timeZone: "UTC", ownerKeyId: "alice",
+  }, "alice"), /closed/i);
+});
