@@ -1269,3 +1269,72 @@ test("DurableJobRuntime dispatches queued jobs left behind by a stopped process"
     await rm(stateFile, { force: true });
   }
 });
+
+
+test("DurableJobRuntime restores and resumes a checkpoint only for its persisted owner after restart", async () => {
+  const namespace = "job-runtime-owner-restart-resume-" + randomUUID();
+  const owner = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const otherOwner = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const snapshot = {
+    version: 1,
+    runId: "owner-restart-" + randomUUID(),
+    task: "owner-bound restart resume",
+    understanding: {},
+    plan: {},
+    acceptanceCriteria: [],
+    completedStepIds: ["step-before-restart"],
+    checkpointId: "owner-bound-checkpoint",
+    usage: { steps: 1, toolCalls: 0, modelCalls: 1, reservedOrUsedTokens: 0, replans: 0 },
+    observations: [],
+    diagnoses: [],
+    decisions: [],
+    recoveryRounds: 0,
+    trace: [],
+  } as unknown as import("./run-state.js").BrainRunSnapshot;
+
+  const firstRuntime = new DurableJobRuntime(({ onRunSnapshot }) => ({
+    run: async () => {
+      await onRunSnapshot?.(snapshot);
+      return { completed: false, state: "failed" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+  const submitted = await firstRuntime.submit({ task: snapshot.task, ownerKeyId: owner });
+
+  let failed = await firstRuntime.get(submitted.id);
+  for (let attempt = 0; attempt < 100 && failed?.status !== "failed"; attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    failed = await firstRuntime.get(submitted.id);
+  }
+  assert.equal(failed?.status, "failed");
+  assert.equal(failed?.snapshot?.checkpointId, snapshot.checkpointId);
+  await firstRuntime.close();
+
+  let resumedPrincipal: string | undefined;
+  let resumedCheckpoint: string | undefined;
+  const restartedRuntime = new DurableJobRuntime(() => ({
+    run: async (input: {
+      principalId?: string;
+      resume?: import("./run-state.js").BrainRunSnapshot;
+    }) => {
+      resumedPrincipal = input.principalId;
+      resumedCheckpoint = input.resume?.checkpointId;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain), undefined, namespace);
+
+  try {
+    assert.equal(await restartedRuntime.getForOwner(submitted.id, otherOwner), undefined);
+    await assert.rejects(
+      () => restartedRuntime.resumeForOwner(submitted.id, otherOwner),
+      /unknown job/i,
+    );
+    const completed = await restartedRuntime.resumeForOwner(submitted.id, owner);
+    assert.equal(completed.status, "completed");
+    assert.equal(resumedPrincipal, owner, "the persisted owner must become the Brain principal on resume");
+    assert.equal(resumedCheckpoint, snapshot.checkpointId, "restart must resume from the persisted checkpoint");
+    assert.equal((await restartedRuntime.getForOwner(submitted.id, owner))?.status, "completed");
+    assert.equal(await restartedRuntime.getForOwner(submitted.id, otherOwner), undefined);
+  } finally {
+    await restartedRuntime.close();
+  }
+});
