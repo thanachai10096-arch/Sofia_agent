@@ -15,6 +15,7 @@ type TenantJobRuntimeFactory = (ownerKeyId: string) => JobRuntime | Promise<JobR
 export class TenantJobRuntimeRouter implements JobRuntime {
   private readonly allowedOwners: Set<string>;
   private readonly runtimes = new Map<string, Promise<JobRuntime>>();
+  private readonly runtimeOwners = new WeakMap<JobRuntime, string>();
   private closed = false;
   private closePromise?: Promise<void>;
 
@@ -31,7 +32,15 @@ export class TenantJobRuntimeRouter implements JobRuntime {
     if (!this.allowedOwners.has(ownerKeyId)) throw new Error("Unknown job owner.");
     const existing = this.runtimes.get(ownerKeyId);
     if (existing) return existing;
-    const pending = Promise.resolve().then(() => this.factory(ownerKeyId)).catch((error: unknown) => {
+    const pending = Promise.resolve().then(async () => {
+      const runtime = await this.factory(ownerKeyId);
+      const existingOwner = this.runtimeOwners.get(runtime);
+      if (existingOwner && existingOwner !== ownerKeyId) {
+        throw new Error("Tenant JobRuntime factory returned a shared runtime instance for multiple owners.");
+      }
+      this.runtimeOwners.set(runtime, ownerKeyId);
+      return runtime;
+    }).catch((error: unknown) => {
       this.runtimes.delete(ownerKeyId);
       throw error;
     });
@@ -56,13 +65,17 @@ export class TenantJobRuntimeRouter implements JobRuntime {
 
   async getForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined> {
     const runtime = await this.runtimeFor(ownerKeyId);
-    return runtime.getForOwner ? runtime.getForOwner(id, ownerKeyId) : undefined;
+    if (!runtime.getForOwner) return undefined;
+    const record = await runtime.getForOwner(id, ownerKeyId);
+    return record?.ownerKeyId === ownerKeyId ? record : undefined;
   }
 
   async resumeForOwner(id: string, ownerKeyId: string, signal?: AbortSignal): Promise<JobRecord> {
     const runtime = await this.runtimeFor(ownerKeyId);
     if (!runtime.resumeForOwner) throw new Error("Owner-scoped job resume is unavailable.");
-    return runtime.resumeForOwner(id, ownerKeyId, signal);
+    const record = await runtime.resumeForOwner(id, ownerKeyId, signal);
+    if (record.ownerKeyId !== ownerKeyId) throw new Error("Tenant job runtime returned a mismatched owner during resume.");
+    return record;
   }
 
   async cancelForOwner(id: string, ownerKeyId: string): Promise<boolean> {
