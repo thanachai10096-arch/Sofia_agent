@@ -87,8 +87,11 @@ export class TenantJobRuntimeRouter implements JobRuntime {
   }
 
   async list(): Promise<JobRecord[]> {
+    // Materialize every configured owner runtime so each can load and recover its
+    // own persisted jobs after restart before the API returns an aggregate list.
+    const pending = await Promise.all([...this.allowedOwners].map((owner) => this.runtimeFor(owner)));
     const records: JobRecord[] = [];
-    for (const pending of this.runtimes.values()) records.push(...await (await pending).list());
+    for (const runtime of pending) records.push(...await runtime.list());
     return records;
   }
 
