@@ -145,3 +145,22 @@ test("plugin manifests are exposed as defensive metadata copies", () => {
   assert.equal(manifest?.version, "1.2.0");
   assert.equal(host.getPluginManifest("missing"), undefined);
 });
+
+test("plugin services are visible only to the provider and declared dependents", () => {
+  const host = new SofiaPluginHost();
+  host.use({
+    id: "service.provider",
+    manifest: { version: "1.0.0", capabilities: [] },
+    install(ctx) { ctx.provideService("private.counter", { value: 3 }); },
+  });
+  host.use({
+    id: "unrelated",
+    manifest: { version: "1.0.0", capabilities: [] },
+    install(ctx) { assert.throws(() => ctx.getService("private.counter"), /must declare "service.provider" as a dependency/); },
+  });
+  host.use({
+    id: "consumer",
+    manifest: { version: "1.0.0", capabilities: [], dependencies: ["service.provider"] },
+    install(ctx) { assert.deepEqual(ctx.getService("private.counter"), { value: 3 }); },
+  });
+});
