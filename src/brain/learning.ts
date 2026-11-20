@@ -17,22 +17,32 @@ export interface SkillLedger {
   list(): readonly LearnedSkillCandidate[];
 }
 
+function copyLearnedSkillCandidate(candidate: LearnedSkillCandidate): LearnedSkillCandidate {
+  return {
+    ...candidate,
+    procedure: [...candidate.procedure],
+    verification: [...candidate.verification],
+    evidenceIds: [...candidate.evidenceIds],
+  };
+}
+
 export class InMemorySkillLedger implements SkillLedger {
   private readonly entries = new Map<string, LearnedSkillCandidate>();
 
   record(candidate: LearnedSkillCandidate): void {
+    const safe = copyLearnedSkillCandidate(candidate);
     const key = createHash("sha256")
       .update(JSON.stringify({
-        name: candidate.name,
-        category: candidate.category,
-        procedure: candidate.procedure,
+        name: safe.name,
+        category: safe.category,
+        procedure: safe.procedure,
       }))
       .digest("hex");
-    if (!this.entries.has(key)) this.entries.set(key, candidate);
+    if (!this.entries.has(key)) this.entries.set(key, safe);
   }
 
   list(): readonly LearnedSkillCandidate[] {
-    return [...this.entries.values()];
+    return [...this.entries.values()].map(copyLearnedSkillCandidate);
   }
 }
 
