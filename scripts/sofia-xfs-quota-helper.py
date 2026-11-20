@@ -135,7 +135,7 @@ def locked_state(state_root):
     lock_path = state_root / "allocations.lock"
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     info = os.fstat(fd)
-    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
         os.close(fd)
         fail("allocation lock is not a private root-owned regular file")
     fcntl.flock(fd, fcntl.LOCK_EX)
@@ -148,7 +148,7 @@ def load_allocations(state_root):
         info = path.lstat()
     except FileNotFoundError:
         return {}
-    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077:
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
         fail("allocation state is not a private root-owned regular file")
     if info.st_size > 4 * 1024 * 1024:
         fail("allocation state is too large")
@@ -164,7 +164,7 @@ def load_allocations(state_root):
         project_id = entry.get("project_id")
         if type(project_id) is not int or not PROJECT_ID_MIN <= project_id <= PROJECT_ID_MAX or project_id in seen_ids:
             fail("allocation state contains an invalid or duplicate project ID")
-        if not isinstance(entry.get("workspace"), str):
+        if not isinstance(entry.get("workspace"), str) or not entry["workspace"].startswith("/"):
             fail("allocation state contains an invalid workspace path")
         if type(entry.get("bytes")) is not int or entry["bytes"] < 1024 * 1024:
             fail("allocation state contains an invalid byte quota")
@@ -178,6 +178,10 @@ def load_allocations(state_root):
 
 def assert_workspace_registry_consistent(root, allocations):
     expected = {"run-" + run_id for run_id in allocations}
+    for run_id, entry in allocations.items():
+        canonical_workspace = root / ("run-" + run_id)
+        if not isinstance(entry, dict) or entry.get("workspace") != str(canonical_workspace):
+            fail("allocation registry workspace does not match its canonical run path")
     for child in root.iterdir():
         if child.name not in expected:
             fail("workspace root contains an untracked entry; refusing quota allocation or cleanup")
