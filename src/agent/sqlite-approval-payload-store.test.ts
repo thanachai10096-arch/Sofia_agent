@@ -89,3 +89,28 @@ test("SQLite approval payload store rejects oversized plaintext and invalid cont
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+
+test("atomic approval creation rolls back metadata when encryption fails", {
+  skip: !supportsNodeSqlite,
+}, async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "sofia-approval-atomic-"));
+  const file = path.join(root, "approvals.sqlite");
+  const metadata = await SqliteApprovalStore.open(file);
+  const payloads = await SqliteApprovalPayloadStore.open(file);
+  const brokenCipher = {
+    encrypt() { throw new Error("simulated encryption failure"); },
+    decrypt() { throw new Error("not used"); },
+  };
+  try {
+    assert.equal(payloads.createPendingWithPayload(
+      record, JSON.stringify({ private: true }), context, brokenCipher, 2_000,
+    ), false);
+    assert.deepEqual(metadata.history(record.principalId), []);
+    assert.equal(payloads.load(context, new Aes256GcmApprovalPayloadCipher(randomBytes(32), "unused"), 2_001), null);
+  } finally {
+    payloads.close();
+    metadata.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
