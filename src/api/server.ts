@@ -893,6 +893,22 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (cronTimer) clearInterval(cronTimer);
       cronTimer = undefined;
     });
+    // Stop the timer as soon as shutdown is requested. Once HTTP connections
+    // have drained, await startup recovery and every tenant scheduler before
+    // invoking the caller's close callback (which may close JobRuntime).
+    const closeHttpServer = server.close.bind(server);
+    server.close = ((callback?: Parameters<typeof server.close>[0]) => {
+      cronClosed = true;
+      if (cronTimer) clearInterval(cronTimer);
+      cronTimer = undefined;
+      return closeHttpServer(() => {
+        void (async () => {
+          await cronInitialization.catch(() => undefined);
+          await Promise.allSettled([...cronSchedulers.values()].map(scheduler => scheduler.close()));
+          callback?.();
+        })();
+      });
+    }) as typeof server.close;
   }
   server.on("close", () => {
     void (async () => {
