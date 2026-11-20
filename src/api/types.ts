@@ -2,6 +2,7 @@ import type { AgentResult } from "../agent/types.js";
 import type { RunRecordStore } from "./run-record-store.js";
 import type { DiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
 import type { AgentDependencies } from "../agent/types.js";
+import type { TenantDependencyRegistry } from "../platform/tenant-dependency-registry.js";
 
 export interface AgentRunInput {
   task: string;
@@ -43,6 +44,8 @@ export interface SofiaApiConfig {
   apiKeys: Record<string, string[]>;
   /** Server-side resolver for dependencies belonging to an authenticated API owner. */
   dependenciesForOwner?: (ownerKeyId: string) => Promise<AgentDependencies>;
+  /** Preferred resolver-backed registry. The API derives the principal from its authenticated API key. */
+  tenantDependencyRegistry?: TenantDependencyRegistry;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
