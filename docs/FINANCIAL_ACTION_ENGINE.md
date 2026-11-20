@@ -21,6 +21,15 @@ Sofia now has a provider-neutral payment execution foundation. It deliberately d
 - `processing`, `unknown`, and interrupted `submitting` records can be reconciled by owner + idempotency key; terminal `succeeded` / `failed` records are returned unchanged.
 - Amounts are integer minor units (for THB, satang); currency is an uppercase ISO 4217 code.
 
+## Sofia tool integration
+
+`createFinancialActionTools(dependencies)` exposes two tools for composition with the normal `createToolRegistry([...createBuiltinTools(), ...createFinancialActionTools(dependencies)])` path:
+
+- `finance.payment.execute` — marked `network` + `destructive`; the existing policy gateway must allow both effects and require transaction approval. The injected `FinancialApprovalVerifier` independently checks the approval is bound to the exact owner and transaction fingerprint.
+- `finance.payment.reconcile` — marked `network`; it only queries provider verification and never creates a second payment.
+
+The factory intentionally requires dependencies from the host. It does not silently create a fake provider, approval verifier, or production store. The caller must derive `ownerId` from the authenticated principal, not trust a model-supplied owner string; validate this at the application boundary before exposing the tools. Export is available from the package entry point as `createFinancialActionTools`.
+
 ## Production integration gates
 
 `MemoryFinancialActionStore` and `MemoryFinancialLedger` are test/reference implementations only. A production adapter must provide durable, owner-scoped atomic reservation, immutable append-only ledger writes, and crash-safe state transitions. The store reservation and ledger append should share a database transaction or an outbox pattern. Provider adapter must implement the provider official create/verify APIs and signature rules, with secrets held server-side. Add provider sandbox integration tests, reconciliation for `unknown` and `processing`, refunds/disputes, merchant identity checks, and operational alerting before enabling real payments.
