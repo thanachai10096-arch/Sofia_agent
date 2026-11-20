@@ -19,6 +19,7 @@ agent, a second server, or a child CLI.
 - Service injection is restricted to the provider plugin and explicitly declared dependents.
 - Plugin install/uninstall lifecycle events are bridged into the active Sofia Agent run event stream.
 - Manifest metadata is snapshotted at install time; registered tool objects and declared effects are frozen after capability validation.
+- Capability validation uses Sofia's effective effect classifier, including reserved tool namespaces and the destructive-by-default fallback for undeclared custom tools. Omitting `effects` cannot downgrade a privileged tool.
 - Cleanup continues across failures; teardown reports aggregated cleanup errors.
 - Plugin tools enter Sofia's existing Tool Registry and continue through the
   existing Tool Gateway, approval, execution policy, audit, and workspace
