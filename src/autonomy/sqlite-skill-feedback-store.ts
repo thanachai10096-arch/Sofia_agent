@@ -12,6 +12,7 @@ function restrictFile(filePath: string): void {
 }
 /** Durable SQLite adapter; BEGIN IMMEDIATE makes idempotent read-modify-write atomic. */
 export class SqliteSkillFeedbackStore implements SkillFeedbackStore {
+  private queue: Promise<void> = Promise.resolve();
   private constructor(private readonly db: SqliteDatabase, private readonly filePath: string) {}
   static async open(filePath: string): Promise<SqliteSkillFeedbackStore> {
     if (!path.isAbsolute(filePath)) throw new Error("Skill feedback database path must be absolute.");
@@ -41,6 +42,19 @@ export class SqliteSkillFeedbackStore implements SkillFeedbackStore {
     } catch (error) { db.close(); throw error; }
   }
   async transact<T>(scope: string, operation: (state: SkillFeedbackState) => T | Promise<T>): Promise<T> {
+    const previous = this.queue;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    this.queue = previous.then(() => gate);
+    await previous;
+    try {
+      return await this.transactLocked(scope, operation);
+    } finally {
+      release();
+    }
+  }
+
+  private async transactLocked<T>(scope: string, operation: (state: SkillFeedbackState) => T | Promise<T>): Promise<T> {
     if (!scope?.trim() || scope.length > 512) throw new Error("Skill feedback scope is invalid.");
     this.db.exec("BEGIN IMMEDIATE");
     try {
