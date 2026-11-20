@@ -8,6 +8,65 @@ import { spawn, spawnSync } from "node:child_process";
 import { DurableJobRuntime } from "./job-runtime.js";
 import type { SofiaBrain } from "./executor.js";
 
+
+test("DurableJobRuntime atomically deduplicates concurrent submissions by owner and idempotency key", async () => {
+  const namespace = "job-runtime-idempotency-" + randomUUID();
+  let executions = 0;
+  let started!: () => void;
+  const didStart = new Promise<void>(resolve => { started = resolve; });
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const brain = {
+    run: async () => {
+      executions += 1;
+      started();
+      await gate;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+  const firstRuntime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const secondRuntime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const submission = {
+    task: "send one notification",
+    ownerKeyId: "owner-a",
+    idempotencyId: createHash("sha256").update("owner-a:key-123").digest("hex"),
+    requestFingerprint: createHash("sha256").update("same-request").digest("hex"),
+  };
+  const [first, second] = await Promise.all([
+    firstRuntime.submit(submission),
+    secondRuntime.submit(submission),
+  ]);
+  assert.equal(first.id, second.id, "both callers must receive the same durable job");
+  await didStart;
+  assert.equal(executions, 1, "only the process that atomically created the record may dispatch it");
+  release();
+  await firstRuntime.close();
+  await secondRuntime.close();
+  assert.equal((await firstRuntime.get(first.id))?.status, "completed");
+});
+
+test("DurableJobRuntime rejects reuse of an idempotency key for a different request", async () => {
+  const namespace = "job-runtime-idempotency-conflict-" + randomUUID();
+  const brain = {
+    run: async () => ({ completed: true, state: "completed" }),
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  const idempotencyId = createHash("sha256").update("owner-a:key-456").digest("hex");
+  await runtime.submit({
+    task: "first task",
+    ownerKeyId: "owner-a",
+    idempotencyId,
+    requestFingerprint: createHash("sha256").update("first").digest("hex"),
+  });
+  await assert.rejects(() => runtime.submit({
+    task: "different task",
+    ownerKeyId: "owner-a",
+    idempotencyId,
+    requestFingerprint: createHash("sha256").update("second").digest("hex"),
+  }), /idempotency_key_reused_with_different_request/);
+  await runtime.close();
+});
+
 test("DurableJobRuntime marks an interrupted persisted job recoverable after restart", async () => {
   const namespace = "job-runtime-restart-" + randomUUID();
   const hangingBrain = {
