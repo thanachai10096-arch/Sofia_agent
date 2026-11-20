@@ -1188,7 +1188,11 @@ test("DurableJobRuntime requires the exact unresolved step before reconciliation
     failed = await runtime.get(submitted.id);
   }
   await assert.rejects(
-    () => runtime.reconcile(submitted.id, "different-step", "retry", "owner-a"),
+    () => runtime.reconcile(submitted.id, "send-step", "retry", "owner-a"),
+    /explicit confirmation that no external side effect occurred/i,
+  );
+  await assert.rejects(
+    () => runtime.reconcile(submitted.id, "different-step", "retry", "owner-a", undefined, { noSideEffect: true }),
     /does not match the unresolved in-flight step/i,
   );
 });
