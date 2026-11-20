@@ -172,7 +172,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function unknownToolDiagnostic(name: string, tools: ToolGateway): string {
+export function unknownToolDiagnostic(name: string, tools: ToolGateway): string {
   const available = tools.listTools?.() ?? [];
   const namespace = name.includes(".") ? name.slice(0, name.indexOf(".") + 1) : "";
   const sameNamespace = namespace ? available.filter((tool) => tool.name.startsWith(namespace)) : [];
