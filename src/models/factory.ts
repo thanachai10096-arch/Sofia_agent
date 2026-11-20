@@ -220,9 +220,9 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
 
 /** Create Agent dependencies with durable PostgreSQL skill registry + feedback wired into Brain. */
 export async function createSofiaAgentDependenciesWithPostgresSkillFeedback(
-  workspace = process.cwd(),
-  approval: AgentDependencies["approval"] | undefined,
   options: PostgresSkillFeedbackRuntimeOptions,
+  workspace = process.cwd(),
+  approval?: AgentDependencies["approval"],
 ): Promise<AgentDependencies> {
   const skillFeedback = await createPostgresSkillFeedbackHostConfig(options);
   return createSofiaAgentDependencies(workspace, approval, skillFeedback);
