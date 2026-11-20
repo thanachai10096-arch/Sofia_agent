@@ -9,6 +9,7 @@ import type { BrainRunSnapshot } from "../brain/run-state.js";
 import type { SecurityController } from "../security/controller.js";
 import type { SecurityAuditSink } from "../security/audit.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { SofiaPluginHost } from "../integrations/deepseek-harness/plugin-host.js";
 export interface AgentRequest {
   task: string;
   context?: string;
@@ -39,6 +40,7 @@ export interface AgentDependencies {
  reviewer:{review(task:string,output:string):Promise<{approved:boolean;reason:string}>};
  runtime?:WorkspaceRuntime;
  tools?:ToolRegistry;
+ pluginHost?: SofiaPluginHost;
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
  brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
