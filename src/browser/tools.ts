@@ -14,7 +14,13 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
     const managedProfileSession = activeProfileId !== undefined;
     session = undefined;
     activeProfileId = undefined;
+    const openPages = [...pages.values()];
     pages.clear();
+    // A persistent authenticated profile outlives the Brain run, but page
+    // handles do not. Close every run-owned tab before detaching the session.
+    if (managedProfileSession) {
+      await Promise.allSettled(openPages.map((value) => value.close()));
+    }
     if (closing && !managedProfileSession) await closing.close();
   };
   registerCleanup?.(dispose);
