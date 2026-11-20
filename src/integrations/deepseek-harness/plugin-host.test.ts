@@ -285,3 +285,22 @@ test("plugin hosts expose an immutable process, run, or principal ownership boun
   assert.throws(() => new SofiaPluginHost({ scope: "principal" }), /requires an authenticated principalId/);
   assert.throws(() => new SofiaPluginHost({ scope: "run", principalId: "user-123" }), /only be set on a principal-scoped/);
 });
+
+test("plugin setup contexts cannot mutate or read host services after installation", () => {
+  const host = new SofiaPluginHost();
+  let retained: Parameters<NonNullable<Parameters<typeof host.use>[0]["install"]>>[0] | undefined;
+  host.use({
+    id: "context.lifetime",
+    install(ctx) {
+      retained = ctx;
+      ctx.provideService("context.private", { secret: true });
+    },
+  });
+  assert.ok(retained);
+  assert.throws(() => retained!.registerTool(tool("late.tool")), /only valid during installation/);
+  assert.throws(() => retained!.provideService("late.service", true), /only valid during installation/);
+  assert.throws(() => retained!.getService("context.private"), /only valid during installation/);
+  assert.throws(() => retained!.onDispose(() => {}), /only valid during installation/);
+  assert.deepEqual(host.listTools(), []);
+  assert.deepEqual(host.listPlugins(), ["context.lifetime"]);
+});
