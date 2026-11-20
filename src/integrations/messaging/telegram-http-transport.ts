@@ -6,11 +6,25 @@ interface TelegramApiResponse<T> {
   description?: string;
 }
 
+export type TelegramTransportStatus =
+  | "starting"
+  | "polling"
+  | "stopped"
+  | "webhook_conflict"
+  | "poll_conflict"
+  | "preflight_failed";
+
+export interface TelegramTransportHealth {
+  status: TelegramTransportStatus;
+  lastStatusCode?: number;
+}
+
 export interface TelegramHttpTransportOptions {
   token: string;
   fetchImpl?: typeof fetch;
   pollTimeoutSeconds?: number;
   onError?: (event: "poll_failed" | "poll_conflict" | "poll_auth_failed" | "update_failed" | "delivery_failed", status?: number, failureKind?: "network" | "invalid_json" | "http" | "unknown") => void;
+  onStatus?: (health: TelegramTransportHealth) => void;
 }
 
 /**
@@ -41,6 +55,11 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
   let controller: AbortController | undefined;
   let loop: Promise<void> | undefined;
   let stopped = true;
+  let health: TelegramTransportHealth = { status: "stopped" };
+  function setHealth(status: TelegramTransportStatus, statusCode?: number) {
+    health = { status, ...(statusCode !== undefined ? { lastStatusCode: statusCode } : {}) };
+    try { options.onStatus?.({ ...health }); } catch { /* status observers must not affect transport */ }
+  }
 
   async function request<T>(method: string, body: Record<string, unknown> | undefined, signal: AbortSignal): Promise<T> {
     let response: Response;
@@ -90,6 +109,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
           allowed_updates: ["message"],
           ...(offset === undefined ? {} : { offset }),
         }, signal);
+        if (health.status !== "polling") setHealth("polling");
         for (const update of updates) {
           if (signal.aborted || stopped) break;
           // A single malformed/poison update must not prevent later updates in
@@ -112,17 +132,20 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
         const failureKind: TelegramRequestFailureKind = error instanceof TelegramRequestError
           ? error.failureKind : "unknown";
         if (status === 401 || status === 403) {
+          setHealth("preflight_failed", status);
           // Invalid/revoked bot credentials cannot recover by retrying.
           try { options.onError?.("poll_auth_failed", status, failureKind); } catch { /* diagnostics must not terminate shutdown */ }
           break;
         }
         if (status === 409) {
+          setHealth("poll_conflict", status);
           // During Railway rolling restarts the old long-poll request may still
           // be draining when the replacement starts. Back off and retry so a
           // transient overlap self-recovers; a persistent second poller remains
           // visible as repeated conflict diagnostics without a hot retry loop.
           try { options.onError?.("poll_conflict", status, failureKind); } catch { /* diagnostics must not terminate shutdown */ }
         } else {
+          if (health.status !== "polling") setHealth("preflight_failed", status);
           try { options.onError?.("poll_failed", status, failureKind); } catch { /* logging must not terminate polling */ }
         }
         await wait(backoffMs, signal);
@@ -132,9 +155,11 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
   }
 
   return {
+    getHealth() { return { ...health }; },
     async start(signal, onUpdate) {
       if (!stopped) return;
       stopped = false;
+      setHealth("starting");
       controller = new AbortController();
       const stopFromParent = () => controller?.abort(signal.reason);
       signal.addEventListener("abort", stopFromParent, { once: true });
@@ -144,12 +169,16 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
       if (!controller.signal.aborted) {
         try {
           await request<boolean>("deleteWebhook", { drop_pending_updates: false }, controller.signal);
-        } catch {
-          // Do not log token or provider response bodies. Polling will emit a
-          // safe status-only diagnostic if Telegram still rejects getUpdates.
+        } catch (error) {
+          const status = error instanceof TelegramRequestError ? error.status : undefined;
+          if (status === 409) setHealth("webhook_conflict", status);
+          else setHealth("preflight_failed", status);
+          // Do not log token or provider response bodies. Polling may still
+          // recover if the webhook preflight failure was transient.
         }
       }
       if (controller.signal.aborted) {
+        setHealth("stopped");
         signal.removeEventListener("abort", stopFromParent);
         return;
       }
@@ -180,6 +209,7 @@ export function createTelegramHttpTransport(options: TelegramHttpTransportOption
     async stop() {
       if (stopped) return;
       stopped = true;
+      setHealth("stopped");
       controller?.abort();
       await loop?.catch(() => undefined);
       controller = undefined;
