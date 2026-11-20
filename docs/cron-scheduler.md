@@ -16,6 +16,12 @@ A crash between persisting a claim and persisting the runtime job ID remains inh
 
 Misfires at least one minute late follow the configured policy: `skip` records a skipped occurrence; `run-once` dispatches one coalesced execution and advances the next run beyond the current time. Validate file-lock behavior and recovery before unattended production use. The file store is intended for processes sharing a local filesystem, not multi-host coordination. This is a foundation, not a guarantee of exactly-once delivery.
 
+## Durable Job Runtime recovery boundary
+
+The file-backed `DurableJobRuntime` atomically persists a submitted job as `queued` before it begins the asynchronous lease claim. A process crash in that interval can leave a durable `queued` record. The current runtime reconciles expired `running` leases when jobs are read or listed, but it does not yet have a startup dispatcher that reclaims and starts orphaned `queued` records. Operators must treat such records as pending recovery rather than assuming they will execute automatically.
+
+A worker crash after an external side effect but before the terminal job result is durably saved is also indeterminate. A saved Brain snapshot can support resume, but it cannot prove whether an external action already happened. Resume/retry is therefore at-least-once for non-idempotent side effects. Integrations should persist an action-level idempotency key or use a transactional outbox before automatically retrying payments, purchases, messages, or other externally visible actions. The local file store is single-host coordination only; it is not a distributed queue.
+
 ## API routes
 
 Cron endpoints remain unavailable if no job runtime is configured.
