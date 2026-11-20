@@ -301,14 +301,20 @@ test("principal run stores isolate history and restore idempotency after API res
     });
     assert.equal(accepted.status, 202);
     runId = (await accepted.json() as { id: string }).id;
+    let completed = false;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const status = await fetch(firstUrl + "/v1/agent/runs/" + runId, {
         headers: { authorization: "Bearer tenant-one-key" },
       });
       assert.equal(status.status, 200);
-      if ((await status.json() as { status: string }).status === "completed") break;
+      const run = await status.json() as { status: string };
+      if (run.status === "completed") { completed = true; break; }
+      if (run.status === "failed" || run.status === "cancelled") {
+        throw new Error(`Tenant run ended with status ${run.status}`);
+      }
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
+    assert.equal(completed, true, "tenant run should complete before server restart");
     assert.equal(stores.size, 1);
   } finally {
     await close(firstServer);
