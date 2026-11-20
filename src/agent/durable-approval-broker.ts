@@ -5,7 +5,6 @@ import type {
   ApprovalHandler,
   PendingApproval,
 } from "./approval.js";
-import type { ApprovalPayloadCipher } from "./approval-payload-cipher.js";
 import { DurableApprovalCoordinator, type DurableApprovalTicket } from "./durable-approval-coordinator.js";
 import type { TransactionalApprovalStore } from "./sqlite-approval-store.js";
 import { SqliteApprovalPayloadStore } from "./sqlite-approval-payload-store.js";
@@ -22,7 +21,6 @@ export class DurableApprovalBroker implements ApprovalBrokerPort {
   constructor(
     private readonly approvals: TransactionalApprovalStore,
     private readonly payloads: SqliteApprovalPayloadStore,
-    private readonly cipher: ApprovalPayloadCipher,
     private readonly coordinator: DurableApprovalCoordinator,
     private readonly now: () => number = Date.now,
   ) {}
