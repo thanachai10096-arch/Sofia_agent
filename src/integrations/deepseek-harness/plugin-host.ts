@@ -63,6 +63,7 @@ export class SofiaPluginHost {
   private readonly tools = new Map<string, SofiaTool>();
   private readonly services = new Map<string, { pluginId: string; value: unknown }>();
   private readonly listeners = new Map<SofiaPluginEventName, Set<(payload: never) => void>>();
+  private readonly installing = new Set<string>();
   private disposed = false;
 
   constructor(options: SofiaPluginHostOptions = {}) {
@@ -90,7 +91,10 @@ export class SofiaPluginHost {
   use(plugin: SofiaPlugin): void {
     this.assertActive();
     if (!plugin.id.trim()) throw new Error("Sofia plugin id must not be empty.");
-    if (this.plugins.has(plugin.id)) throw new Error(`Sofia plugin "${plugin.id}" is already installed.`);
+    if (plugin.id !== plugin.id.trim()) throw new Error("Sofia plugin id must not contain surrounding whitespace.");
+    if (this.plugins.has(plugin.id) || this.installing.has(plugin.id)) {
+      throw new Error(`Sofia plugin "${plugin.id}" is already installed or being installed.`);
+    }
     const manifest = plugin.manifest ? {
       ...plugin.manifest,
       capabilities: [...plugin.manifest.capabilities],
@@ -118,6 +122,7 @@ export class SofiaPluginHost {
       registerTool: (tool) => {
         this.assertActive();
         if (!tool.name.trim()) throw new Error("Sofia plugin tool name must not be empty.");
+        if (tool.name !== tool.name.trim()) throw new Error("Sofia plugin tool name must not contain surrounding whitespace.");
         if (this.tools.has(tool.name)) throw new Error(`Sofia tool "${tool.name}" is already registered.`);
         if (manifest) {
           // Validate inferred effects too: a plugin cannot omit tool.effects to
@@ -138,6 +143,7 @@ export class SofiaPluginHost {
       provideService: <T>(name: string, service: T) => {
         this.assertActive();
         if (!name.trim()) throw new Error("Sofia plugin service name must not be empty.");
+        if (name !== name.trim()) throw new Error("Sofia plugin service name must not contain surrounding whitespace.");
         if (this.services.has(name)) throw new Error(`Sofia service "${name}" is already provided.`);
         this.services.set(name, { pluginId: plugin.id, value: service });
         installed.disposers.push(() => this.services.delete(name));
@@ -158,12 +164,15 @@ export class SofiaPluginHost {
 
     // Publish only after installation succeeds. Roll back partial registrations
     // in reverse order if a plugin fails halfway through installation.
+    this.installing.add(plugin.id);
     try {
       plugin.install(context);
       this.plugins.set(plugin.id, installed);
     } catch (error) {
       try { this.runDisposers(installed); } catch { /* preserve the original install error */ }
       throw error;
+    } finally {
+      this.installing.delete(plugin.id);
     }
     this.emit("plugin:installed", { pluginId: plugin.id });
   }
