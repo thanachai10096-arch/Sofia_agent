@@ -51,13 +51,19 @@ function waitForNextPoll(milliseconds: number, signal?: AbortSignal): Promise<vo
       resolve();
       return;
     }
+    let settled = false;
     const finish = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", finish);
       resolve();
     };
     const timer = setTimeout(finish, milliseconds);
     signal?.addEventListener("abort", finish, { once: true });
+    // Abort may happen after the initial check but before the listener is attached.
+    // Re-checking closes that race without waiting for the next poll interval.
+    if (signal?.aborted) finish();
   });
 }
 
