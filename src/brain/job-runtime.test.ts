@@ -1226,3 +1226,46 @@ test("DurableJobRuntime close aborts a resumed execution without waiting on its 
   assert.equal(resumed.status, "cancelled");
   assert.equal((await runtime.get(first.id))?.status, "cancelled");
 });
+
+
+test("DurableJobRuntime dispatches queued jobs left behind by a stopped process", async () => {
+  const namespace = "job-runtime-queued-recovery-" + randomUUID();
+  const jobId = "queued-recovery-" + randomUUID();
+  const stateDirectory = path.join(os.tmpdir(), "sofia-agents-jobs");
+  const stateFile = path.join(
+    stateDirectory,
+    createHash("sha256").update(namespace).digest("hex") + ".json",
+  );
+  const now = new Date().toISOString();
+  await mkdir(stateDirectory, { recursive: true });
+  await writeFile(stateFile, JSON.stringify([{
+    id: jobId,
+    status: "queued",
+    createdAt: now,
+    updatedAt: now,
+    task: "recover queued work after restart",
+  }]), { encoding: "utf8", mode: 0o600 });
+
+  let executions = 0;
+  const brain = {
+    run: async () => {
+      executions += 1;
+      return { completed: true, state: "completed" };
+    },
+  } as unknown as SofiaBrain;
+  const runtime = new DurableJobRuntime(() => brain, undefined, namespace);
+  try {
+    assert.equal(await runtime.recoverQueued(), 1);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const recovered = await runtime.get(jobId);
+      if (recovered?.status === "completed") break;
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal((await runtime.get(jobId))?.status, "completed");
+    assert.equal(executions, 1);
+    assert.equal(await runtime.recoverQueued(), 0, "terminal jobs must not be dispatched again");
+  } finally {
+    await runtime.close();
+    await rm(stateFile, { force: true });
+  }
+});
