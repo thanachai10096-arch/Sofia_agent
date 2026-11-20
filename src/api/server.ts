@@ -148,9 +148,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const maxRunsPerKeyPerDay = integerSetting("maxRunsPerKeyPerDay", config.maxRunsPerKeyPerDay, 100, 0, 1_000_000);
   const maxToolCallsPerKeyPerDay = integerSetting("maxToolCallsPerKeyPerDay", config.maxToolCallsPerKeyPerDay, 1000, 0, 1_000_000);
   const usage = new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, config.usageStorePath);
-  const countToolCall = (keyId: string, controller: AbortController, event: { type: string }): boolean => {
+  const principalUsageLimiters = new Map<string, Promise<UsageLimiter>>();
+  const resolveUsageLimiter = async (principalId: string): Promise<UsageLimiter> => {
+    if (!config.resolvePrincipalUsageStorePath) return usage;
+    let pending = principalUsageLimiters.get(principalId);
+    if (!pending) {
+      pending = config.resolvePrincipalUsageStorePath(principalId).then((storePath) =>
+        new UsageLimiter(maxRunsPerKeyPerDay, maxToolCallsPerKeyPerDay, storePath));
+      principalUsageLimiters.set(principalId, pending);
+      pending.catch(() => { if (principalUsageLimiters.get(principalId) === pending) principalUsageLimiters.delete(principalId); });
+    }
+    return pending;
+  };
+  const countToolCall = (limiter: UsageLimiter, keyId: string, controller: AbortController, event: { type: string }): boolean => {
     if (event.type !== "tool.started") return true;
-    try { usage.consumeToolCall(keyId); return true; }
+    try { limiter.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
   // A single scheduler over the fallback dependency graph must never run
@@ -282,7 +294,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     return undefined;
   };
 
-  const startRun = (run: ActiveRun, input: AgentRunInput, runAgent: SofiaAgent = agent) => {
+  const startRun = (run: ActiveRun, input: AgentRunInput, runAgent: SofiaAgent = agent, usageLimiter: UsageLimiter = usage) => {
     void (async () => {
       run.status = "running";
       run.updatedAt = Date.now();
@@ -299,7 +311,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.maxSteps ? { maxSteps: input.maxSteps } : {}),
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
-          onEvent: (event) => { countToolCall(run.ownerKeyId, run.controller, event); },
+          onEvent: (event) => { countToolCall(usageLimiter, run.ownerKeyId, run.controller, event); },
         });
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -376,6 +388,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         : deps;
       const requestAgent = getAgent(requestDeps);
       const requestRunStore = await resolveRunStore(auth.keyId);
+      const requestUsage = await resolveUsageLimiter(auth.keyId);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
@@ -558,7 +571,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const selectionError = modelSelectionError(input, requestDeps);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
-        try { usage.consume(auth.keyId); } catch {
+        try { requestUsage.consume(auth.keyId); } catch {
           return json(res, 429, { error: "quota_exceeded" }, origin, config);
         }
         const runId = randomUUID();
@@ -592,7 +605,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
             signal: controller.signal,
             onEvent: (event) => {
-              if (!countToolCall(auth.keyId, controller, event)) return;
+              if (!countToolCall(requestUsage, auth.keyId, controller, event)) return;
               send({ type: "event", runId, event });
             },
           });
@@ -692,7 +705,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
               ? { context: typeof input.context === "string" ? input.context : JSON.stringify(input.context) }
               : {}),
             ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
-          }, requestAgent);
+          }, requestAgent, requestUsage);
           return json(res, 202, publicResponse(run), origin, config);
         }
 
