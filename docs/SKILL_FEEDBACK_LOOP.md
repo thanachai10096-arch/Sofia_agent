@@ -22,3 +22,7 @@ Execution feedback is an evidence stream for review, not a self-approval mechani
 - Any disable/rollback decision is an explicit controlled operation, not an automatic side effect of a model-generated recommendation.
 - The in-memory feedback store is for tests and single-process development only. Production requires a durable transactional adapter and retention policy.
 - The current implementation does not automatically instrument every ToolGateway execution. The host must explicitly record verified outcomes at the integration point.
+
+## PostgreSQL adapter
+
+`PostgresSkillFeedbackStore` implements the transactional store contract with a tenant-scoped JSONB row and `SELECT ... FOR UPDATE`. Run `ensureSchema()` from an explicit host migration/startup path before accepting feedback. The adapter is not wired into the production API or worker by this change. The reference in-memory store remains test/development-only.
