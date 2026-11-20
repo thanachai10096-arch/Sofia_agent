@@ -45,6 +45,20 @@ test("SQLite approval store allows only one decision across independent connecti
   });
 });
 
+test("SQLite approval state is visible to the originating worker through another connection", { skip: !supportsNodeSqlite }, async () => {
+  await withStores(async (origin, reviewer) => {
+    assert.equal(origin.createPending(record), true);
+    assert.equal(origin.get("owner-a", record.id)?.status, "pending");
+    assert.equal(origin.get("owner-b", record.id), null);
+    assert.equal(reviewer.settlePending(record.id, "owner-a", record.actionHash, "approved", 2_000), true);
+    const observed = origin.get("owner-a", record.id);
+    assert.equal(observed?.status, "approved");
+    assert.equal(observed?.actionHash, record.actionHash);
+    assert.equal(observed?.principalId, "owner-a");
+    assert.equal(reviewer.get("owner-b", record.id), null);
+  });
+});
+
 test("SQLite approval store binds decisions to owner and exact action hash", { skip: !supportsNodeSqlite }, async () => {
   await withStores(async (first, second) => {
     assert.equal(first.createPending(record), true);
