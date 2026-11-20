@@ -269,6 +269,12 @@ test("read-only browser tools can run without interactive approval while page ac
       async execute() { return { url: "https://example.com/" }; },
     },
     {
+      name: "browser.navigate",
+      description: "Navigate using the legacy-compatible alias",
+      inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" } }, required: ["pageId", "url"] },
+      async execute() { return { url: "https://example.com/" }; },
+    },
+    {
       name: "browser.observe",
       description: "Read page content",
       inputSchema: { type: "object", properties: { pageId: { type: "string" } }, required: ["pageId"] },
@@ -286,6 +292,7 @@ test("read-only browser tools can run without interactive approval while page ac
 
   assert.deepEqual(gateway.describe("browser.observe")?.effects, ["read"]);
   assert.deepEqual(gateway.describe("browser.goto")?.effects, ["network", "read"]);
+  assert.deepEqual(gateway.describe("browser.navigate")?.effects, ["network", "read"]);
   assert.deepEqual(gateway.describe("browser.click")?.effects, ["browser", "network"]);
 
   const read = await gateway.execute(
@@ -294,6 +301,12 @@ test("read-only browser tools can run without interactive approval while page ac
   );
   assert.equal(read.ok, true);
   assert.equal(observed, true);
+
+  const navigationAlias = await gateway.execute(
+    { tool: "browser.navigate", input: { pageId: "page-1", url: "https://example.com/" } },
+    { runId: "browser-navigation-alias-test", principalId: "test-user", signal: new AbortController().signal, requireApproval: false, notifyApproval() {} },
+  );
+  assert.equal(navigationAlias.ok, true);
 
   const interaction = await gateway.execute(
     { tool: "browser.click", input: { pageId: "page-1", selector: "button" } },
