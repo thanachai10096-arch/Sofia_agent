@@ -350,6 +350,67 @@ test("run cleanup waits for an in-flight browser launch before disposing it", as
   assert.equal(closed, 1, "late-created session must be closed by run cleanup");
 });
 
+test("switching away from a saved profile drains its active page actions", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "sofia-browser-switch-"));
+  try {
+    const manager = new BrowserProfileSessionManager(new BrowserProfileStore(root), {
+      launch: async () => {
+        const persistent = launchCount === 0;
+        launchCount++;
+        return {
+          id: persistent ? "saved-session" : "temporary-session",
+          newPage: async () => ({
+            id: persistent ? "saved-page" : "temporary-page",
+            url: async () => "https://example.com/",
+            title: async () => "Example",
+            content: async () => "",
+            goto: async () => {},
+            click: async () => persistent
+              ? new Promise<void>((resolve) => { finishClick = resolve; })
+              : undefined,
+            type: async () => {},
+            select: async () => {},
+            scroll: async () => {},
+            wait: async () => {},
+            press: async () => {},
+            back: async () => {},
+            forward: async () => {},
+            reload: async () => {},
+            screenshot: async () => "",
+            close: async () => { if (persistent) savedPageClosed = true; },
+          }),
+          close: async () => { if (persistent) savedSessionClosed = true; },
+        };
+      },
+    } as never);
+    let launchCount = 0;
+    let finishClick!: () => void;
+    let savedPageClosed = false;
+    let savedSessionClosed = false;
+    const tools = createBrowserTools(
+      { launch: async () => { throw new Error("temporary launch should use injected runtime"); } },
+      undefined,
+      { profileSessions: manager, ownerId: "principal-switch", allowLogin: true },
+    );
+    const get = (name: string) => tools.find((item) => item.name === name)!;
+    const login = await get("browser.login").execute({ url: "https://example.com/login" }, {} as never) as { profileId: string };
+    const opened = await get("browser.open").execute({ profileId: login.profileId }, {} as never) as { pageId: string };
+    const clicking = get("browser.click").execute({ pageId: opened.pageId, selector: "button" }, {} as never);
+    await Promise.resolve();
+    const switching = get("browser.open").execute({}, {} as never);
+    await Promise.resolve();
+    assert.equal(savedPageClosed, false, "saved page must remain alive while its action is running");
+    finishClick();
+    await clicking;
+    await switching;
+    assert.equal(savedPageClosed, true);
+    assert.equal(savedSessionClosed, false, "switching profiles must preserve the saved login session");
+    await manager.closeAll();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("browser.login keeps the authenticated session available across Brain runs", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-browser-login-"));
   try {
