@@ -374,14 +374,20 @@ test("switching away from a saved profile drains its active page actions", async
     screenshot: async () => "",
     close: async () => { onClose(); },
   } satisfies BrowserPage);
+  let savedPageNumber = 0;
   const persistentRuntime: BrowserRuntime = {
     launch: async () => ({
       id: "saved-session",
-      newPage: async () => makePage(
-        "saved-page",
-        () => { savedPageClosed = true; },
-        () => new Promise<void>((resolve) => { finishClick = resolve; }),
-      ),
+      newPage: async () => {
+        const pageNumber = ++savedPageNumber;
+        return makePage(
+          "saved-page-" + pageNumber,
+          () => { savedPageClosed = true; },
+          () => pageNumber === 2
+            ? new Promise<void>((resolve) => { finishClick = resolve; })
+            : Promise.resolve(),
+        );
+      },
       close: async () => { savedSessionClosed = true; },
     }),
   };
