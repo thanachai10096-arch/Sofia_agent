@@ -304,3 +304,44 @@ test("plugin setup contexts cannot mutate or read host services after installati
   assert.deepEqual(host.listTools(), []);
   assert.deepEqual(host.listPlugins(), ["context.lifetime"]);
 });
+
+test("registered tool schemas are defensive immutable snapshots", () => {
+  const host = new SofiaPluginHost();
+  const required = ["query"];
+  const properties: Record<string, unknown> = {
+    query: { type: "string", minLength: 1 },
+  };
+  const schema: Record<string, unknown> = {
+    type: "object",
+    properties,
+    required,
+    additionalProperties: false,
+  };
+  host.use({
+    id: "schema.snapshot",
+    install(ctx) {
+      ctx.registerTool({
+        ...tool("snapshot.search"),
+        inputSchema: schema,
+      });
+    },
+  });
+
+  required.push("admin");
+  properties.admin = { type: "boolean" };
+  const registered = host.listTools()[0]!;
+  assert.deepEqual(registered.inputSchema.required, ["query"]);
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(
+      registered.inputSchema.properties as Record<string, unknown>,
+      "admin",
+    ),
+    false,
+  );
+  assert.equal(Object.isFrozen(registered.inputSchema), true);
+  assert.equal(Object.isFrozen(registered.inputSchema.required), true);
+  assert.equal(Object.isFrozen(registered.inputSchema.properties), true);
+  assert.throws(() => {
+    (registered.inputSchema.required as string[]).push("mutated");
+  }, TypeError);
+});
