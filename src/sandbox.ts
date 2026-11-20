@@ -197,7 +197,7 @@ export interface ContainerSandboxOptions {
 
 export type ContainerCommandRunner = (
   args: string[],
-  options: { timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal },
+  options: { timeoutMs: number; maxOutputBytes: number; signal?: AbortSignal; allowedEnvironmentVariables?: string[] },
 ) => Promise<{ stdout: string; stderr: string; code: number }>;
 
 function runContainerCli(
@@ -212,7 +212,7 @@ function runContainerCli(
     shell: false,
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
-    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => new Set(["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG"]).has(key.toUpperCase()))),
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => new Set(["PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "APPDATA", "LOCALAPPDATA", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", ...allowedEnv]).has(key.toUpperCase()))),
   });
 
   return new Promise((resolve, reject) => {
@@ -339,7 +339,7 @@ export class ContainerSandbox implements Sandbox {
     ];
     try {
       // Preserve non-zero container exit codes for verification by the caller.
-      return await this.runner(dockerArgs, { timeoutMs, maxOutputBytes, signal });
+      return await this.runner(dockerArgs, { timeoutMs, maxOutputBytes, signal, allowedEnvironmentVariables: limits.allowedEnvironmentVariables });
     } catch (error) {
       // Killing the Docker CLI on timeout/abort can leave the container running.
       // Best-effort cleanup is deliberately independent of the aborted task signal.
