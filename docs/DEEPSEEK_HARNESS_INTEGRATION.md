@@ -18,6 +18,8 @@ agent, a second server, or a child CLI.
 - Dependency ordering: required plugins must be installed first, and providers cannot be unloaded while installed dependents remain.
 - Service injection is restricted to the provider plugin and explicitly declared dependents.
 - Plugin install/uninstall lifecycle events are bridged into the active Sofia Agent run event stream.
+- Hosts declare an immutable lifetime/ownership scope: process, run, or principal. Principal-scoped hosts require an authenticated `principalId`, and installed plugins receive that binding in their context.
+- Stateful browser/desktop adapters are composed in a fresh run host; authenticated runs bind that host to the current principal, while anonymous local runs use run scope.
 - Manifest metadata is snapshotted at install time; registered tool objects and declared effects are frozen after capability validation.
 - Capability validation uses Sofia's effective effect classifier, including reserved tool namespaces and the destructive-by-default fallback for undeclared custom tools. Omitting `effects` cannot downgrade a privileged tool.
 - Cleanup continues across failures; teardown reports aggregated cleanup errors.
@@ -34,8 +36,10 @@ agent loops, sessions, model routing, tool execution, and host runtimes. That
 would create two competing authorities rather than one unified Sofia.
 
 This first integration therefore ports the plugin lifecycle boundary only.
-Sofia's existing Agent, durable jobs, sessions, tenant isolation, Model Router,
-Tool Gateway, and approval/security layers remain authoritative. No upstream
+Sofia's existing Agent, durable jobs, sessions, Model Router, Tool Gateway,
+and approval/security layers remain authoritative. Explicit host scope is a
+composition boundary, not a substitute for authorization or complete tenant
+isolation of process-level trusted plugins. No upstream
 web/desktop application, CLI launcher, or independent agent loop is embedded.
 
 ## Upstream attribution
@@ -54,9 +58,11 @@ copy of Cordis source.
 
 1. Move messaging and MCP adapters behind native plugins so every capability
    uses the same registration lifecycle. Browser and desktop tools are already
-   registered in a short-lived host per Brain run.
-2. Bridge plugin lifecycle events to Sofia's existing run/step/tool event stream.
-3. Add tenant-scoped process plugin instances, principal-bound grants, and scoped service injection. Manifest declarations are metadata/validation, not a replacement for host authorization.
-4. Add per-plugin capability manifests and approval metadata.
+   registered in a short-lived run host, principal-bound for authenticated runs.
+2. Add authenticated principal grants and authorization checks for dynamically
+   installed plugins; scope labels alone do not grant access.
+3. Add tenant-aware persistence for plugin configuration, secrets, and service
+   state before enabling user-installed process-level plugins.
+4. Add per-plugin approval metadata and lifecycle audit records.
 5. Evaluate selective upstream source vendoring only where it is compatible
    with Sofia's Node >=20 runtime and does not duplicate core authority.
