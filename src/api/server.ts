@@ -122,6 +122,19 @@ function pathId(url: string): string | null {
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
+  // Keep one Agent instance per cached dependency graph. SofiaAgent owns
+  // per-session turn serialization, so recreating it for every HTTP request
+  // would allow concurrent requests for the same tenant/session to race.
+  const principalAgents = new WeakMap<AgentDependencies, SofiaAgent>();
+  const getAgent = (agentDeps: AgentDependencies): SofiaAgent => {
+    if (agentDeps === deps) return agent;
+    let instance = principalAgents.get(agentDeps);
+    if (!instance) {
+      instance = new SofiaAgent(agentDeps);
+      principalAgents.set(agentDeps, instance);
+    }
+    return instance;
+  };
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
   const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
@@ -333,7 +346,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       const requestDeps = config.resolvePrincipalDependencies
         ? await config.resolvePrincipalDependencies(auth.keyId)
         : deps;
-      const requestAgent = requestDeps === deps ? agent : new SofiaAgent(requestDeps);
+      const requestAgent = getAgent(requestDeps);
       const requestRunStore = await resolveRunStore(auth.keyId);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
@@ -663,7 +676,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const runId = randomUUID();
         try {
-          const result = await agent.run({
+          const result = await requestAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
