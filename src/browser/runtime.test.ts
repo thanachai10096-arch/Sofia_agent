@@ -119,3 +119,52 @@ test("browser egress proxy blocks CONNECT requests to private IP literals", asyn
     await proxy.close();
   }
 });
+
+
+test("browser egress proxy rejects mixed public/private DNS answers for HTTP and CONNECT", async () => {
+  const resolver = async () => [
+    { address: "93.184.216.34", family: 4 },
+    { address: "127.0.0.1", family: 4 },
+  ];
+  const proxy = await createBrowserEgressProxy({ resolver: resolver as never });
+  const address = new URL(proxy.url);
+  try {
+    const httpStatus = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest({
+        host: address.hostname,
+        port: Number(address.port),
+        method: "GET",
+        path: "http://rebinding.example/",
+        headers: { host: "rebinding.example" },
+      }, (response) => {
+        response.resume();
+        response.once("end", () => resolve(response.statusCode ?? 0));
+      });
+      request.once("error", reject);
+      request.end();
+    });
+    assert.equal(httpStatus, 403);
+
+    const connectResponse = await new Promise<string>((resolve, reject) => {
+      const socket = connectTcp(Number(address.port), address.hostname);
+      let output = "";
+      const timer = setTimeout(() => socket.destroy(new Error("Timed out waiting for mixed-DNS CONNECT rejection.")), 3000);
+      socket.once("connect", () => socket.write("CONNECT rebinding.example:443 HTTP/1.1\\r\\nHost: rebinding.example:443\\r\\n\\r\\n"));
+      socket.on("data", (chunk) => {
+        output += chunk.toString("utf8");
+        if (output.includes("\\r\\n\\r\\n")) {
+          clearTimeout(timer);
+          socket.destroy();
+          resolve(output);
+        }
+      });
+      socket.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+    assert.match(connectResponse, /^HTTP\\/1\\.1 403 Forbidden/);
+  } finally {
+    await proxy.close();
+  }
+});
