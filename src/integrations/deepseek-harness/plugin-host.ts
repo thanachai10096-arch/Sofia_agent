@@ -68,7 +68,11 @@ export class SofiaPluginHost {
     this.assertActive();
     if (!plugin.id.trim()) throw new Error("Sofia plugin id must not be empty.");
     if (this.plugins.has(plugin.id)) throw new Error(`Sofia plugin "${plugin.id}" is already installed.`);
-    const manifest = plugin.manifest;
+    const manifest = plugin.manifest ? {
+      ...plugin.manifest,
+      capabilities: [...plugin.manifest.capabilities],
+      dependencies: [...(plugin.manifest.dependencies ?? [])],
+    } : undefined;
     if (manifest) {
       if (!manifest.version.trim()) throw new Error(`Sofia plugin "${plugin.id}" must declare a manifest version.`);
       const capabilities = new Set<ToolEffect>(manifest.capabilities);
@@ -97,7 +101,11 @@ export class SofiaPluginHost {
             }
           }
         }
-        this.tools.set(tool.name, tool);
+        const registeredTool: SofiaTool = Object.freeze({
+          ...tool,
+          ...(tool.effects ? { effects: Object.freeze([...tool.effects]) } : {}),
+        });
+        this.tools.set(tool.name, registeredTool);
         installed.disposers.push(() => this.tools.delete(tool.name));
       },
       provideService: <T>(name: string, service: T) => {
