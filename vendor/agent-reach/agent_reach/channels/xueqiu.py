@@ -19,6 +19,7 @@ from agent_reach.runtime.result import (
     make_item,
 )
 from agent_reach.runtime.run import http_request
+from agent_reach.utils.url import safe_build_opener
 
 from .base import Action, Channel, Param
 
@@ -40,7 +41,7 @@ _XUEQIU_HOME = "https://xueqiu.com"
 # --------------- cookie-aware HTTP helpers --------------- #
 
 _cookie_jar = http.cookiejar.CookieJar()
-_opener = urllib.request.build_opener(
+_opener = safe_build_opener(
     urllib.request.HTTPCookieProcessor(_cookie_jar),
 )
 _cookies_initialized = False
