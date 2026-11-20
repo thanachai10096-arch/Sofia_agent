@@ -112,7 +112,7 @@ def load_config():
 
 def project_quota_is_enforced(state):
     section = re.search(
-        r"Project quota state:[\s\S]*?(?=\n(?:User|Group) quota state:|\Z)",
+        r"Project quota state[\s\S]*?(?=\n(?:User|Group) quota state|\Z)",
         state,
         re.IGNORECASE,
     )
