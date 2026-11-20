@@ -153,7 +153,13 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
     try { usage.consumeToolCall(keyId); return true; }
     catch { controller.abort(new Error("API tool-call quota exceeded.")); return false; }
   };
-  const cronScheduler = deps.jobRuntime ? new CronScheduler(deps.jobRuntime) : undefined;
+  // A single scheduler over the fallback dependency graph must never run
+  // when authenticated requests are resolved into tenant-specific graphs.
+  // Tenant cron remains unavailable until a per-principal scheduler lifecycle
+  // and recovery loop are composed here.
+  const cronScheduler = !config.resolvePrincipalDependencies && deps.jobRuntime
+    ? new CronScheduler(deps.jobRuntime)
+    : undefined;
   let cronTimer: NodeJS.Timeout | undefined;
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
