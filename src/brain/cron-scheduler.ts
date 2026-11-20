@@ -397,8 +397,8 @@ export class CronScheduler {
         if (activeExecutions >= this.maxConcurrent) return undefined;
         const due = state.schedules.filter(s =>
           s.status === "enabled" &&
-            Date.parse(s.nextRunAt) <= now.getTime() &&
-            !state.history.some(item => item.scheduleId === s.id && (item.status === "claimed" || item.status === "running"))
+          Date.parse(s.nextRunAt) <= now.getTime() &&
+          !state.history.some(item => item.scheduleId === s.id && (item.status === "claimed" || item.status === "running"))
         ).sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))[0];
         if (!due) return undefined;
         const scheduledFor = due.nextRunAt;
@@ -412,29 +412,29 @@ export class CronScheduler {
         } else {
           // One-time schedules are disabled atomically with their claim.
           due.status = "disabled";
-          }
+        }
         due.updatedAt = now.toISOString();
         const previous = state.history.find(h => h.scheduleId === due.id && h.scheduledFor === scheduledFor);
         if (previous) return undefined;
         if (isMisfire && due.misfirePolicy === "skip") {
           state.history.push({
             id: randomUUID(), scheduleId: due.id, scheduledFor, startedAt: now.toISOString(),
-              finishedAt: now.toISOString(), status: "skipped", attempt: 0,
-              error: "Missed occurrence skipped by misfire policy",
-      });
-        await this.recordAudit(state, { at: now.toISOString(), actor: "scheduler", action: "schedule.misfire.skipped", scheduleId: due.id, detail: scheduledFor });
+            finishedAt: now.toISOString(), status: "skipped", attempt: 0,
+            error: "Missed occurrence skipped by misfire policy",
+          });
+          await this.recordAudit(state, { at: now.toISOString(), actor: "scheduler", action: "schedule.misfire.skipped", scheduleId: due.id, detail: scheduledFor });
           return { skipped: true as const };
-          }
+        }
         const execution: CronExecution = {
-            id: randomUUID(), scheduleId: due.id, scheduledFor, startedAt: now.toISOString(),
+          id: randomUUID(), scheduleId: due.id, scheduledFor, startedAt: now.toISOString(),
           status: "claimed", attempt: 0,
-          };
+        };
         state.history.push(execution);
         await this.recordAudit(state, {
           at: now.toISOString(), actor: "scheduler",
           action: isMisfire ? "schedule.misfire.run_once" : "schedule.claimed",
           scheduleId: due.id, detail: scheduledFor,
-      });
+        });
         return { schedule: { ...due, nextRunAt: scheduledFor }, executionId: execution.id, scheduledFor };
       });
       if (!claim) break;
@@ -446,7 +446,6 @@ export class CronScheduler {
       this.trackTask(this.executeClaim(claim.schedule, claim.executionId, claim.scheduledFor, controller), this.activeTasks);
     }
   }
-
   async tick(): Promise<void> {
     if (this.closed || this.ticking) return;
     this.ticking = true;
