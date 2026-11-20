@@ -1,6 +1,10 @@
 """Unit tests for Sofia's read-only Agent-Reach boundary."""
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sofia_bridge import _read_youtube, is_mutating_action
 
