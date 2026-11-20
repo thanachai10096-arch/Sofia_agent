@@ -320,6 +320,8 @@ def dispose(root, state_root, request, abort=False):
     # Reset limits before returning the project ID, even after interrupted removal.
     # A failed reset preserves the registry entry.
     run(["xfs_quota", "-x", "-c", "limit -p bhard=0 ihard=0 " + str(entry["project_id"]), str(root)])
+    # Do not release a project ID until both hard limits are read back as zero.
+    verify_quota(root, entry["project_id"], 0, 0)
     allocations.pop(run_id, None)
     save_allocations(state_root, allocations)
     return {"ok": True, "runId": run_id}
