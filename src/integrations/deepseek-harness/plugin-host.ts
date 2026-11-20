@@ -1,5 +1,5 @@
 import type { SofiaTool } from "../../tools/types.js";
-import type { ToolEffect } from "../../security/policy.js";
+import { effectiveToolEffects, type ToolEffect } from "../../security/policy.js";
 
 /**
  * Sofia's in-process plugin host.
@@ -95,9 +95,11 @@ export class SofiaPluginHost {
         if (!tool.name.trim()) throw new Error("Sofia plugin tool name must not be empty.");
         if (this.tools.has(tool.name)) throw new Error(`Sofia tool "${tool.name}" is already registered.`);
         if (manifest) {
-          for (const effect of tool.effects ?? []) {
+          // Validate inferred effects too: a plugin cannot omit tool.effects to
+          // conceal a privileged action behind a read-only manifest.
+          for (const effect of effectiveToolEffects(tool.name, tool.effects)) {
             if (!manifest.capabilities.includes(effect)) {
-              throw new Error(`Sofia plugin "${plugin.id}" does not declare tool capability "${effect}" required by "${tool.name}".`);
+              throw new Error(`Sofia plugin "${plugin.id}" does not declare effective tool capability "${effect}" required by "${tool.name}".`);
             }
           }
         }
