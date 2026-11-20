@@ -334,6 +334,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         ? await config.resolvePrincipalDependencies(auth.keyId)
         : deps;
       const requestAgent = requestDeps === deps ? agent : new SofiaAgent(requestDeps);
+      const requestRunStore = await resolveRunStore(auth.keyId);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
@@ -476,7 +477,6 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         // whose in-memory map has not seen a run accepted by the previous one.
         // Rehydrate from the shared persistent store, and refresh newer records
         // so status polling follows updates written by the original process.
-        const requestRunStore = await resolveRunStore(auth.keyId);
         const stored = requestRunStore?.load?.(id);
         if (stored && (!run || stored.updatedAt > run.updatedAt)) {
           run = {
