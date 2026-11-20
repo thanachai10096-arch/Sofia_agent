@@ -85,6 +85,38 @@ def normalize_public_http_url(url: str) -> str:
     return parsed.geturl()
 
 
+
+def assert_public_http_url(
+    url: str,
+    *,
+    resolver=socket.getaddrinfo,
+) -> str:
+    """Validate URL syntax and reject hostnames with any non-public DNS answer.
+
+    This is a DNS preflight only. It does not pin the address used by urllib or
+    external subprocesses, so callers still need an enforced outbound network
+    boundary to prevent DNS rebinding between validation and connection.
+    """
+    normalized = normalize_public_http_url(url)
+    parsed = urlsplit(normalized)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if _literal_ip_address(host) is not None:
+        return normalized
+    try:
+        answers = resolver(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)
+    except OSError:
+        raise ValueError("public HTTP(S) URL host could not be resolved safely") from None
+    if not answers:
+        raise ValueError("public HTTP(S) URL host has no DNS addresses")
+    for answer in answers:
+        try:
+            address = ipaddress.ip_address(answer[4][0].split("%", 1)[0])
+        except (IndexError, TypeError, ValueError):
+            raise ValueError("public HTTP(S) URL host returned an invalid DNS address") from None
+        if not address.is_global:
+            raise ValueError("public HTTP(S) URL host resolves to a non-public address")
+    return normalized
+
 def domain_matches(host: str, *domains: str) -> bool:
     """Match a hostname/cookie domain exactly or as a real subdomain."""
     normalized_host = str(host or "").lower().lstrip(".").rstrip(".")
@@ -126,14 +158,14 @@ class PublicOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Revalidate every redirect hop so a public URL cannot redirect to a local host."""
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        normalize_public_http_url(newurl)
+        assert_public_http_url(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 def safe_urlopen(url_or_request, *args, **kwargs):
     """Open only public HTTP(S) URLs and enforce the same rule on redirects."""
     raw_url = url_or_request.full_url if isinstance(url_or_request, urllib.request.Request) else url_or_request
-    normalize_public_http_url(raw_url)
+    assert_public_http_url(raw_url)
     opener = urllib.request.build_opener(PublicOnlyRedirectHandler())
     return opener.open(url_or_request, *args, **kwargs)
 
