@@ -172,7 +172,7 @@ class QuotaHelperTests(unittest.TestCase):
             self.assertTrue(workspace.is_dir())
             self.assertEqual(HELPER.load_allocations(state)[run_id]["status"], "needs_recovery")
 
-            with patch.object(HELPER, "run", return_value="") as run_mock:
+            with patch.object(HELPER, "run", return_value="") as run_mock, patch.object(HELPER, "verify_quota"):
                 reply = HELPER.dispose(root, state, {
                     "runId": run_id,
                 }, abort=True)
@@ -216,7 +216,7 @@ class QuotaHelperTests(unittest.TestCase):
             self.assertFalse(workspace.exists())
             self.assertIn(run_id, HELPER.load_allocations(state))
 
-            with patch.object(HELPER, "run", return_value=""):
+            with patch.object(HELPER, "run", return_value=""), patch.object(HELPER, "verify_quota"):
                 reply = HELPER.dispose(root, state, {
                     "runId": run_id,
                         "workspacePath": str(workspace),
@@ -261,7 +261,7 @@ class QuotaHelperTests(unittest.TestCase):
             self.assertFalse(workspace.exists())
             self.assertIn(run_id, HELPER.load_allocations(state))
 
-            with patch.object(HELPER, "run", return_value="") as run_mock:
+            with patch.object(HELPER, "run", return_value="") as run_mock, patch.object(HELPER, "verify_quota"):
                 reply = HELPER.dispose(root, state, {
                     "runId": run_id,
                     "workspacePath": str(workspace),
