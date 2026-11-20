@@ -20,14 +20,11 @@ Designed to be importable from channels (e.g. YouTubeChannel.transcribe).
 
 from __future__ import annotations
 
-import ipaddress
 import math
 import re
-import socket
 import subprocess
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlparse
 
 import requests
 
@@ -171,82 +168,26 @@ def _run(cmd: List[str], timeout: int = 600) -> None:
         )
 
 
-def _literal_ip(host: str):
-    """Return the address a literal host denotes, or None for a real hostname.
+def _assert_safe_public_url(url: str) -> str:
+    """Return the canonical public HTTP(S) URL used by the shared URL guard.
 
-    ``ipaddress`` only accepts the canonical dotted-quad form, but the C
-    resolver behind yt-dlp accepts the whole ``inet_aton`` grammar: ``127.1``,
-    ``2130706433``, ``0x7f000001`` and ``0177.0.0.1`` all reach 127.0.0.1, and
-    ``0xA9FEA9FE`` reaches the cloud metadata endpoint. Parsing with the same
-    grammar keeps those shorthands from slipping past the private-address
-    check. This is literal parsing only — no name is resolved here.
+    This deliberately shares the same literal-IP and authority checks as web
+    reads. Hostname DNS resolution and subprocess egress are still enforced by
+    the worker's network boundary; this helper alone cannot prevent rebinding.
     """
+    from agent_reach.utils.url import normalize_public_http_url
+
     try:
-        return ipaddress.ip_address(host)
-    except ValueError:
-        pass
-    try:
-        packed = socket.inet_aton(host)
-    except OSError:
-        return None
-    return ipaddress.IPv4Address(packed)
-
-
-def _is_private_ip(value: str) -> bool:
-    ip = _literal_ip(value)
-    if ip is None:
-        return False
-    return any(
-        (
-            ip.is_private,
-            ip.is_loopback,
-            ip.is_link_local,
-            ip.is_reserved,
-            ip.is_multicast,
-            ip.is_unspecified,
-        )
-    )
-
-
-def _assert_safe_public_url(url: str) -> None:
-    """Reject literal local/internal URLs without DNS-resolving public hosts."""
-    if "://" not in url:
-        before_slash = url.split("/", 1)[0]
-        if ":" in before_slash:
-            host_part, port_part = before_slash.rsplit(":", 1)
-            if not host_part or not port_part.isdigit():
-                raise TranscribeError("SSRF blocked: only public http(s) URLs are allowed")
-        normalized_url = f"https://{url}"
-        parsed = urlparse(normalized_url)
-    else:
-        normalized_url = url
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"}:
-            raise TranscribeError("SSRF blocked: only public http(s) URLs are allowed")
-
-    raw_authority = normalized_url.split("://", 1)[1]
-    raw_authority = raw_authority.split("/", 1)[0]
-    raw_authority = raw_authority.split("?", 1)[0]
-    raw_authority = raw_authority.split("#", 1)[0]
-    if "\\" in raw_authority or "%" in raw_authority:
-        raise TranscribeError("SSRF blocked: encoded or ambiguous URL host")
-
-    raw_host = (parsed.hostname or "").strip().rstrip(".")
-    if not raw_host:
-        raise TranscribeError("SSRF blocked: URL host is missing")
-    try:
-        host = raw_host.encode("idna").decode("ascii").lower().rstrip(".")
-    except UnicodeError:
-        raise TranscribeError("SSRF blocked: URL host is invalid") from None
-    if host in _BLOCKED_HOSTS or host.endswith(".localhost"):
-        raise TranscribeError("SSRF blocked: internal host is not allowed")
-    if _is_private_ip(host):
-        raise TranscribeError("SSRF blocked: private/internal IP is not allowed")
+        return normalize_public_http_url(url)
+    except (TypeError, ValueError):
+        raise TranscribeError(
+            "SSRF blocked: only public http(s) URLs are allowed"
+        ) from None
 
 
 def download_audio(url: str, out_dir: Path) -> Path:
     """Download audio with yt-dlp into out_dir; return the resulting file path."""
-    _assert_safe_public_url(url)
+    safe_url = _assert_safe_public_url(url)
     import sys
 
     from agent_reach.channels.youtube import ytdlp_tls_args
@@ -269,7 +210,7 @@ def download_audio(url: str, out_dir: Path) -> Path:
             "-o",
             str(template),
             "--",
-            url,
+            safe_url,
         ],
         timeout=1800,  # long podcasts over slow networks — generous but bounded
     )
