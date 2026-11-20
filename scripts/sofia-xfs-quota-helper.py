@@ -74,9 +74,11 @@ def load_config():
         fail("configuration must be a root-owned regular file not writable by group/others")
     if info.st_size > 4096:
         fail("configuration file is too large")
-    config = json.loads(CONFIG.read_text(encoding="utf-8"))
+    config = strict_json_loads(CONFIG.read_text(encoding="utf-8"))
     if not isinstance(config, dict) or set(config) != {"workspace_root", "state_root"}:
         fail("configuration has an unexpected schema")
+    if not isinstance(config["workspace_root"], str) or not isinstance(config["state_root"], str):
+        fail("configured paths must be strings")
     root_input = Path(config["workspace_root"])
     state_input = Path(config["state_root"])
     if not root_input.is_absolute() or not state_input.is_absolute():
@@ -143,7 +145,7 @@ def load_allocations(state_root):
     for run_id, entry in data.items():
         if validate_run_id(run_id) != run_id or not isinstance(entry, dict):
             fail("allocation state contains an invalid run record")
-        if set(entry) - {"project_id", "workspace", "bytes", "inodes", "status", "needs_recovery"}:
+        if set(entry) - {"project_id", "workspace", "bytes", "inodes", "status"}:
             fail("allocation state contains unknown record fields")
         project_id = entry.get("project_id")
         if type(project_id) is not int or not PROJECT_ID_MIN <= project_id <= PROJECT_ID_MAX or project_id in seen_ids:
