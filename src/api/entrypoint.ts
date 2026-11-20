@@ -41,6 +41,7 @@ let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | und
 let discordGatewayTransport: ReturnType<typeof createDiscordGatewayTransport> | undefined;
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
+let discordRecoveryTask: Promise<void> | undefined;
 
 if (discordConfigured) {
   if (!discordPublicKey || !discordBotToken) {
@@ -191,6 +192,7 @@ if (discordConfigured) {
     if (!deps.jobRuntime || !discordTransport || discordAbort.signal.aborted) return;
     const recoveredJobs = await deps.jobRuntime.list();
     for (const job of recoveredJobs) {
+      if (discordAbort.signal.aborted) return;
       if (!job.ownerKeyId?.startsWith("discord:") || !job.notificationChannelId ||
           job.notificationDelivered || job.status === "queued" || job.status === "running" ||
           Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
@@ -210,9 +212,18 @@ if (discordConfigured) {
       }
     }
   };
-  await notifyRecoveredJobs();
+  const runRecovery = (): Promise<void> => {
+    if (discordRecoveryTask) return discordRecoveryTask;
+    const task = notifyRecoveredJobs();
+    discordRecoveryTask = task;
+    void task.finally(() => {
+      if (discordRecoveryTask === task) discordRecoveryTask = undefined;
+    }).catch(() => undefined);
+    return task;
+  };
+  await runRecovery();
   discordRecoveryTimer = setInterval(() => {
-    void notifyRecoveredJobs().catch(() => undefined);
+    void runRecovery().catch(() => undefined);
   }, 5_000);
   discordRecoveryTimer.unref?.();
 }
@@ -233,6 +244,7 @@ const shutdown = (): Promise<void> => {
   shutdownPromise = (async () => {
     discordAbort.abort();
     if (typeof discordRecoveryTimer !== "undefined") clearInterval(discordRecoveryTimer);
+    await discordRecoveryTask?.catch(() => undefined);
 
     // Stop external intake before closing the Agent so no integration can enqueue
     // fresh work while the durable runtime and its stores are shutting down.
