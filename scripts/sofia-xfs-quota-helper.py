@@ -233,6 +233,14 @@ def create(root, state_root, request):
     if project_id is None:
         fail("project ID allocation range exhausted")
     workspace = root / ("run-" + run_id)
+    # Refuse pre-existing paths before recording ownership. The workspace root
+    # is root-only, so no untrusted principal can race mkdir after this check.
+    try:
+        workspace.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        fail("workspace path already exists; refusing to adopt or delete it")
     # Persist the reservation before any filesystem side effect. A crash at
     # any later point is therefore recoverable by the adapter's abort call.
     allocation = {"project_id": project_id, "workspace": str(workspace), "bytes": byte_limit, "inodes": inode_limit, "status": "allocating"}
