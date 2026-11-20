@@ -203,6 +203,7 @@ if (discordConfigured) {
           : job.snapshot
             ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
             : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
+        if (discordAbort.signal.aborted) return;
         await discordTransport.sendMessage(job.notificationChannelId, message);
         await deps.jobRuntime.markNotificationDelivered?.(job.id);
       } catch {
