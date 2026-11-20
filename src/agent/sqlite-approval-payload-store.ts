@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { ApprovalPayloadContext, EncryptedApprovalPayload } from "./approval-payload-cipher.js";
+import type { ApprovalPayloadCipher, ApprovalPayloadContext, EncryptedApprovalPayload } from "./approval-payload-cipher.js";
 
 type SqliteDatabase = import("node:sqlite").DatabaseSync;
 
@@ -74,11 +74,13 @@ export class SqliteApprovalPayloadStore {
     }
   }
 
-  save(context: ApprovalPayloadContext, envelope: EncryptedApprovalPayload, now = Date.now()): boolean {
-    if (!validContext(context) || !validEnvelope(envelope) || !Number.isSafeInteger(now)) return false;
-    const serialized = JSON.stringify(envelope);
-    if (Buffer.byteLength(serialized, "utf8") > MAX_ENVELOPE_BYTES) return false;
+  save(plaintext: string, context: ApprovalPayloadContext, cipher: ApprovalPayloadCipher, now = Date.now()): boolean {
+    if (typeof plaintext !== "string" || !validContext(context) || !Number.isSafeInteger(now)) return false;
     try {
+      const envelope = cipher.encrypt(plaintext, context);
+      if (!validEnvelope(envelope)) return false;
+      const serialized = JSON.stringify(envelope);
+      if (Buffer.byteLength(serialized, "utf8") > MAX_ENVELOPE_BYTES) return false;
       const result = this.db.prepare(`
         INSERT INTO approval_payloads(approval_id, envelope_json, created_at)
         SELECT ?, ?, ?
@@ -96,7 +98,7 @@ export class SqliteApprovalPayloadStore {
     }
   }
 
-  load(context: ApprovalPayloadContext, now = Date.now()): EncryptedApprovalPayload | null {
+  load(context: ApprovalPayloadContext, cipher: ApprovalPayloadCipher, now = Date.now()): string | null {
     if (!validContext(context) || !Number.isSafeInteger(now)) return null;
     try {
       const row = this.db.prepare(`
@@ -109,7 +111,7 @@ export class SqliteApprovalPayloadStore {
         context.actionHash, context.expiresAt, now) as { envelope_json: string } | undefined;
       if (!row || Buffer.byteLength(row.envelope_json, "utf8") > MAX_ENVELOPE_BYTES) return null;
       const parsed: unknown = JSON.parse(row.envelope_json);
-      return validEnvelope(parsed) ? parsed : null;
+      return validEnvelope(parsed) ? cipher.decrypt(parsed, context) : null;
     } catch {
       return null;
     }
