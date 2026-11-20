@@ -355,3 +355,51 @@ test("principal run stores isolate history and restore idempotency after API res
     await close(secondServer);
   }
 });
+
+
+test("tenant mode disables the process-wide cron scheduler and fails cron routes closed", async () => {
+  const calls = { list: 0, submit: 0 };
+  const sharedRuntime = {
+    async list() { calls.list += 1; return []; },
+    async submit() { calls.submit += 1; throw new Error("must not submit"); },
+    async get() { return undefined; },
+    async resume() { throw new Error("must not resume"); },
+    async cancel() { return false; },
+  };
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: new ModelRouter([route]),
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    jobRuntime: sharedRuntime as never,
+  }, {
+    apiKeys: { "cron-tenant-key": ["agent:run", "cron:read", "cron:manage"] },
+    resolvePrincipalDependencies: async () => ({
+      provider: { generate: async () => ({ text: "tenant" }) },
+      router: new ModelRouter([route]),
+      reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    }),
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  try {
+    const list = await fetch(baseUrl + "/v1/cron/schedules", {
+      headers: { authorization: "Bearer cron-tenant-key" },
+    });
+    assert.equal(list.status, 503);
+    assert.deepEqual(await list.json(), { error: "principal_cron_runtime_unavailable" });
+
+    const create = await fetch(baseUrl + "/v1/cron/schedules", {
+      method: "POST",
+      headers: { authorization: "Bearer cron-tenant-key", "content-type": "application/json" },
+      body: JSON.stringify({ name: "tenant task", task: "run", timeZone: "UTC", runAt: "2030-01-01T00:00:00.000Z" }),
+    });
+    assert.equal(create.status, 503);
+    assert.deepEqual(await create.json(), { error: "principal_cron_runtime_unavailable" });
+    assert.deepEqual(calls, { list: 0, submit: 0 });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
