@@ -45,6 +45,8 @@ export interface SofiaApiConfig {
   resolvePrincipalDependencies?: (authenticatedPrincipalId: string) => Promise<AgentDependencies>;
   /** Resolve a durable run-record store inside the authenticated principal workspace. */
   resolvePrincipalRunStore?: (authenticatedPrincipalId: string) => Promise<RunRecordStore>;
+  /** Resolve an isolated durable quota file path inside the authenticated principal workspace. */
+  resolvePrincipalUsageStorePath?: (authenticatedPrincipalId: string) => Promise<string>;
   resolvePrincipalCronScheduler?: (authenticatedPrincipalId: string, dependencies: AgentDependencies) => Promise<CronScheduler>;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
