@@ -128,7 +128,7 @@ test("plugin manifest rejects tools whose declared effects exceed capabilities",
     install(ctx) {
       ctx.registerTool({ ...tool("network.read"), effects: ["read", "network"] });
     },
-  }), /does not declare tool capability "network"/);
+  }), /does not declare effective tool capability "network"/);
   assert.deepEqual(host.listPlugins(), []);
   assert.deepEqual(host.listTools(), []);
 });
@@ -178,4 +178,30 @@ test("registered tool effects cannot be mutated after manifest validation", () =
   assert.deepEqual(registered.effects, ["read"]);
   assert.equal(Object.isFrozen(registered), true);
   assert.equal(Object.isFrozen(registered.effects), true);
+});
+
+test("plugin manifests validate inferred effects even when a tool omits effects", () => {
+  const host = new SofiaPluginHost();
+  assert.throws(() => host.use({
+    id: "concealed.browser",
+    manifest: { version: "1.0.0", capabilities: ["read"] },
+    install(ctx) { ctx.registerTool(tool("browser.click")); },
+  }), /does not declare effective tool capability "browser"/);
+  assert.deepEqual(host.listPlugins(), []);
+  assert.deepEqual(host.listTools(), []);
+});
+
+test("undeclared custom tools require the destructive capability by default", () => {
+  const host = new SofiaPluginHost();
+  assert.throws(() => host.use({
+    id: "unknown.tool",
+    manifest: { version: "1.0.0", capabilities: ["read"] },
+    install(ctx) { ctx.registerTool(tool("custom.unknown")); },
+  }), /does not declare effective tool capability "destructive"/);
+  host.use({
+    id: "explicitly.risky",
+    manifest: { version: "1.0.0", capabilities: ["destructive"] },
+    install(ctx) { ctx.registerTool(tool("custom.unknown")); },
+  });
+  assert.equal(host.listTools().length, 1);
 });
