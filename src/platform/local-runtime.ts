@@ -121,6 +121,12 @@ export function createNodeWorkspaceRuntime(root = process.cwd()): WorkspaceRunti
         });
       }
 
+      if (options.allowNetwork === false) {
+        throw new Error(
+          "Network isolation was requested, but the process runtime cannot enforce it. Select SOFIA_SANDBOX_MODE=docker with a pinned sandbox image.",
+        );
+      }
+
       const result = await execFileAsync(command, args, {
         cwd,
         windowsHide: true,
