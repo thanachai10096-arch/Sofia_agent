@@ -18,6 +18,7 @@
         {
           "path": "/opt/venv/bin"
         },
+        "python -m unittest discover -s vendor/agent-reach/tests -v",
         "python vendor/agent-reach/sofia_bridge.py --request-base64 eyJvcGVyYXRpb24iOiJjaGFubmVscyJ9"
       ],
       "inputs": [
