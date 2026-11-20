@@ -30,6 +30,10 @@ export function assertSecurityConfiguration(policy:ExecutionPolicy):void{
  if(production&&(policy.allowNetwork||policy.allowBrowser)&&policy.allowedHosts.length===0)throw new Error("SOFIA_ALLOWED_HOSTS is required when network/browser access is enabled in production.");
 }
 export function assertSafeStep(policy:ExecutionPolicy,step:number):void{if(step>policy.maxSteps)throw new Error("Agent step limit exceeded");}
+export function shouldCreateBrowserTools(policy: Pick<ExecutionPolicy, "allowNetwork" | "allowBrowser">): boolean {
+  // Read-only navigation is classified as network; interactive page actions remain browser-gated.
+  return policy.allowNetwork || policy.allowBrowser;
+}
 export function toolPermission(policy:ExecutionPolicy,name:string,effects:readonly ToolEffect[]):ToolPermission{
   const override=policy.permissions[name]??{};
   if(override.allow===false)return override;
