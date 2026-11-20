@@ -87,6 +87,27 @@ test("transaction finalization rejects changed checkout content", async () => {
   assert.equal(clicks, 0);
 });
 
+test("post-checkout confirmation inspection requires the expected phrase and order reference", async () => {
+  let html = "<main><h1>Thank you for your order</h1><p>Order #A-1042</p></main>";
+  const runtime: BrowserRuntime = { launch: async () => ({ id: "confirm-session", newPage: async () => ({
+    id: "confirm-page", url: async () => "https://shop.example/orders/A-1042", title: async () => "Order confirmation", content: async () => html,
+    goto: async () => {}, click: async () => {}, type: async () => {}, select: async () => {}, scroll: async () => {}, wait: async () => {},
+    press: async () => {}, back: async () => {}, forward: async () => {}, reload: async () => {}, screenshot: async () => "", close: async () => {}
+  }), close: async () => {} }) };
+  const tools = createBrowserTools(runtime), get = (name: string) => tools.find((item) => item.name === name)!;
+  await get("browser.open").execute({}, {} as never);
+  const inspect = get("browser.transaction.confirmation.inspect");
+  assert.deepEqual(inspect.effects, ["read"]);
+  const result = await inspect.execute({ pageId: "confirm-page", confirmationText: "Thank you for your order", orderReference: "A-1042" }, {} as never) as { confirmed: boolean; checks: Record<string, boolean>; limitation: string };
+  assert.equal(result.confirmed, true);
+  assert.equal(result.checks.confirmationFound, true);
+  assert.equal(result.checks.orderReferenceFound, true);
+  assert.match(result.limitation, /not proof that a payment settled/i);
+  html = "<main><h1>Something went wrong</h1></main>";
+  const failed = await inspect.execute({ pageId: "confirm-page", confirmationText: "Thank you for your order", orderReference: "A-1042" }, {} as never) as { confirmed: boolean };
+  assert.equal(failed.confirmed, false);
+});
+
 test("browser.close closes only the requested page when pageId is provided", async () => {
   const harness = setup();
   const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
