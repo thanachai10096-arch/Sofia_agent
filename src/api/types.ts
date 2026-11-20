@@ -42,6 +42,8 @@ export interface SofiaApiConfig {
   apiKeys: Record<string, string[]>;
   /** Resolve isolated dependencies using only the principal ID derived from successful API-key authentication. */
   resolvePrincipalDependencies?: (authenticatedPrincipalId: string) => Promise<AgentDependencies>;
+  /** Resolve a durable run-record store inside the authenticated principal workspace. */
+  resolvePrincipalRunStore?: (authenticatedPrincipalId: string) => Promise<RunRecordStore>;
   maxBodyBytes?: number;
   maxRunsPerKeyPerDay?: number;
   maxToolCallsPerKeyPerDay?: number;
