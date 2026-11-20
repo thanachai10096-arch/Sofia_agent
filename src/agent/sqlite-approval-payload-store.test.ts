@@ -61,7 +61,7 @@ test("SQLite approval payload store encrypts before persistence and decrypts onl
       }
     }
     assert.equal(metadata.settlePending(record.id, record.principalId, record.actionHash, "approved", 3_000), true);
-    assert.equal(payloads.load(context, cipher, 3_001), null);
+    assert.equal(payloads.load(context, cipher, 3_001), secret); // The origin worker decrypts only after the decision is approved.
     assert.equal(payloads.delete(record.id), true);
     assert.equal(payloads.load(context, cipher, 3_001), null);
   } finally {
