@@ -66,7 +66,12 @@ def _read_youtube(target: str, timeout: float) -> dict[str, Any]:
             timeout=min(40, remaining),
         )
     source = "youtube_subtitles"
-    if not captions.get("ok"):
+    caption_items = captions.get("items") or []
+    has_caption_text = any(
+        isinstance(item, dict) and str(item.get("text") or "").strip()
+        for item in caption_items
+    )
+    if not captions.get("ok") or not has_caption_text:
         # Audio transcription is optional and only runs when the user configured a provider.
         remaining = deadline - time.monotonic()
         transcript = (
@@ -74,7 +79,12 @@ def _read_youtube(target: str, timeout: float) -> dict[str, Any]:
             if remaining > 1
             else {"ok": False, "error": {"message": "YouTube read time budget exhausted before speech transcription."}}
         )
-        if transcript.get("ok"):
+        transcript_items = transcript.get("items") or []
+        has_transcript_text = any(
+            isinstance(item, dict) and str(item.get("text") or "").strip()
+            for item in transcript_items
+        )
+        if transcript.get("ok") and has_transcript_text:
             captions = transcript
             source = "speech_transcription"
         else:
