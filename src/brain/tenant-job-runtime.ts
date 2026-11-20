@@ -1,0 +1,120 @@
+import type { BrainRunInput } from "./executor.js";
+import type { JobRecord, JobRuntime } from "./job-runtime.js";
+
+type TenantJobRuntimeFactory = (ownerKeyId: string) => JobRuntime | Promise<JobRuntime>;
+
+/**
+ * Routes durable jobs to one runtime per authenticated API owner.
+ *
+ * The host factory must bind each runtime to that owner's Brain/dependencies and
+ * give it a physically separate durable namespace and RunStore. The router never
+ * accepts an owner from a job payload except the server-derived ownerKeyId supplied
+ * by the trusted API boundary.
+ */
+export class TenantJobRuntimeRouter implements JobRuntime {
+  private readonly allowedOwners: Set<string>;
+  private readonly runtimes = new Map<string, Promise<JobRuntime>>();
+  private closed = false;
+  private closePromise?: Promise<void>;
+
+  constructor(ownerKeyIds: readonly string[], private readonly factory: TenantJobRuntimeFactory) {
+    this.allowedOwners = new Set(ownerKeyIds);
+    if (this.allowedOwners.size !== ownerKeyIds.length ||
+        ownerKeyIds.some((owner) => !/^[a-f0-9]{32}$/u.test(owner))) {
+      throw new Error("Tenant job runtime requires unique server-derived 32-character owner IDs.");
+    }
+  }
+
+  private runtimeFor(ownerKeyId: string): Promise<JobRuntime> {
+    if (this.closed) throw new Error("Tenant job runtime router is closed.");
+    if (!this.allowedOwners.has(ownerKeyId)) throw new Error("Unknown job owner.");
+    const existing = this.runtimes.get(ownerKeyId);
+    if (existing) return existing;
+    const pending = Promise.resolve().then(() => this.factory(ownerKeyId)).catch((error: unknown) => {
+      this.runtimes.delete(ownerKeyId);
+      throw error;
+    });
+    this.runtimes.set(ownerKeyId, pending);
+    return pending;
+  }
+
+  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & {
+    ownerKeyId?: string;
+    notificationChannelId?: string;
+    sessionKey?: string;
+    sessionTask?: string;
+  }): Promise<JobRecord> {
+    if (!input.ownerKeyId) throw new Error("A server-derived ownerKeyId is required for tenant job submission.");
+    const runtime = await this.runtimeFor(input.ownerKeyId);
+    const job = await runtime.submit(input);
+    if (job.ownerKeyId !== input.ownerKeyId) {
+      throw new Error("Tenant job runtime returned a job with a mismatched owner.");
+    }
+    return job;
+  }
+
+  async getForOwner(id: string, ownerKeyId: string): Promise<JobRecord | undefined> {
+    const runtime = await this.runtimeFor(ownerKeyId);
+    return runtime.getForOwner ? runtime.getForOwner(id, ownerKeyId) : undefined;
+  }
+
+  async resumeForOwner(id: string, ownerKeyId: string, signal?: AbortSignal): Promise<JobRecord> {
+    const runtime = await this.runtimeFor(ownerKeyId);
+    if (!runtime.resumeForOwner) throw new Error("Owner-scoped job resume is unavailable.");
+    return runtime.resumeForOwner(id, ownerKeyId, signal);
+  }
+
+  async cancelForOwner(id: string, ownerKeyId: string): Promise<boolean> {
+    const runtime = await this.runtimeFor(ownerKeyId);
+    if (!runtime.cancelForOwner) return false;
+    return runtime.cancelForOwner(id, ownerKeyId);
+  }
+
+  async get(id: string): Promise<JobRecord | undefined> {
+    for (const pending of this.runtimes.values()) {
+      const record = await (await pending).get(id);
+      if (record) return record;
+    }
+    return undefined;
+  }
+
+  async resume(_id: string, _signal?: AbortSignal): Promise<JobRecord> {
+    throw new Error("Unscoped job resume is disabled by TenantJobRuntimeRouter.");
+  }
+
+  async cancel(_id: string): Promise<boolean> {
+    throw new Error("Unscoped job cancellation is disabled by TenantJobRuntimeRouter.");
+  }
+
+  async list(): Promise<JobRecord[]> {
+    const records: JobRecord[] = [];
+    for (const pending of this.runtimes.values()) records.push(...await (await pending).list());
+    return records;
+  }
+
+  async markNotificationDelivered(id: string): Promise<void> {
+    const record = await this.get(id);
+    if (!record?.ownerKeyId) return;
+    const runtime = await this.runtimeFor(record.ownerKeyId);
+    await runtime.markNotificationDelivered?.(id);
+  }
+
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
+    this.closePromise = (async () => {
+      const settled = await Promise.allSettled([...this.runtimes.values()]);
+      const failures: unknown[] = [];
+      for (const result of settled) {
+        if (result.status === "rejected") {
+          failures.push(result.reason);
+          continue;
+        }
+        try { await result.value.close?.(); } catch (error) { failures.push(error); }
+      }
+      this.runtimes.clear();
+      if (failures.length) throw new AggregateError(failures, "One or more tenant job runtimes failed to close.");
+    })();
+    return this.closePromise;
+  }
+}
