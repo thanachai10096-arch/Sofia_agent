@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { RiskLevel } from "../security/guard.js";
 import type { ApprovalAuditRecord, ApprovalAuditStatus, ApprovalRequest } from "./approval.js";
 import type { ApprovalPayloadCipher, ApprovalPayloadContext } from "./approval-payload-cipher.js";
 import type { TransactionalApprovalStore } from "./sqlite-approval-store.js";
@@ -91,7 +90,7 @@ export class DurableApprovalCoordinator {
     const expiresAt = createdAt + this.ttlMs;
     const record: ApprovalAuditRecord = {
       id, runId: request.runId, principalId, toolName: request.toolName,
-      actionHash: request.actionHash, risk: request.risk as RiskLevel,
+      actionHash: request.actionHash, risk: request.risk,
       status: "pending", createdAt, expiresAt,
     };
     const context: ApprovalPayloadContext = {
@@ -122,7 +121,7 @@ export class DurableApprovalCoordinator {
     if (!owner || owner !== ticket.context.principalId || ticket.id !== ticket.context.approvalId) return null;
     const record = this.approvals.get(owner, ticket.id, this.now());
     if (!record || record.status !== "pending" || !this.matches(record, ticket.context)) return null;
-    return this.decode(ticket.context, this.payloads.load(ticket.context, this.cipher, this.now()));
+    return this.decode(this.payloads.load(ticket.context, this.cipher, this.now()));
   }
 
   /** Wait only for this owner's exact approval; only the originating worker gets the action back. */
@@ -142,7 +141,7 @@ export class DurableApprovalCoordinator {
       if (!record || !this.matches(record, ticket.context)) return { status: "interrupted" };
       if (terminal.has(record.status)) {
         if (record.status !== "approved") return { status: record.status as Exclude<ApprovalAuditStatus, "pending"> };
-        const input = this.decode(ticket.context, this.payloads.load(ticket.context, this.cipher, now));
+        const input = this.decode(this.payloads.load(ticket.context, this.cipher, now));
         return input ? { status: "approved", input } : { status: "interrupted" };
       }
       const remaining = ticket.context.expiresAt - now;
@@ -161,7 +160,7 @@ export class DurableApprovalCoordinator {
       record.actionHash === context.actionHash && record.expiresAt === context.expiresAt;
   }
 
-  private decode(context: ApprovalPayloadContext, serialized: string | null): Record<string, unknown> | null {
+  private decode(serialized: string | null): Record<string, unknown> | null {
     if (serialized === null) return null;
     try {
       const value: unknown = JSON.parse(serialized);
