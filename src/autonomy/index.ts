@@ -18,3 +18,4 @@ export * from "./skill-registry.js";
 export * from "./postgres-skill-registry-store.js";
 export * from "./skill-runtime.js";
 export * from "./skill-feedback.js";
+export * from "./postgres-skill-feedback-store.js";
