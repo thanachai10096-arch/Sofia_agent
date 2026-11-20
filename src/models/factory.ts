@@ -47,12 +47,25 @@ import { CompositeSecurityAudit } from "../security/audit.js";
 import { DesktopRuntime, createDesktopPrincipal } from "../desktop/runtime.js";
 import { createDesktopTools } from "../desktop/tools.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import { createBrainSkillFeedbackRecorder } from "../autonomy/brain-skill-feedback-adapter.js";
+import type { SkillFeedbackLedger } from "../autonomy/skill-feedback.js";
+import type { SkillRegistryStore } from "../autonomy/skill-registry.js";
+import type { SkillExecutionResultEvent } from "../brain/executor.js";
+
+export interface SkillFeedbackHostConfig {
+  registry: SkillRegistryStore;
+  ledger: SkillFeedbackLedger;
+  /** Resolve a tenant/project scope from the authenticated principal; never from model output. */
+  resolveScope(principalId: string): string | Promise<string>;
+  /** Return incidents observed by the trusted host safety monitor for this event. */
+  resolveSafetyIncidentCount(event: SkillExecutionResultEvent): number | Promise<number>;
+}
 
 function intEnv(name:string,fallback:number,minimum=0){const value=Number(process.env[name]);return Number.isSafeInteger(value)&&value>=minimum?value:fallback;}
 const NO_COST_CAP=9_000_000_000_000_000_000n;
 function bigintEnv(name:string,fallback:bigint){const value=process.env[name];if(!value)return fallback;try{const parsed=BigInt(value);return parsed>=0n?parsed:fallback;}catch{return fallback;}}
 
-function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager}):NonNullable<AgentDependencies["brainFactory"]>{
+function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,provider:SofiaModelGateway,workspace:string,evolution:EvolutionEngine,dependencies:{runtime:ReturnType<typeof createNodeWorkspaceRuntime>;tools:ReturnType<typeof createToolRegistry>;policy:ReturnType<typeof loadExecutionPolicyFromEnv>;approval?:AgentDependencies["approval"];security:SecurityController;audit:import("../security/audit.js").SecurityAuditSink;profileSessions?:BrowserProfileSessionManager;skillFeedback?:SkillFeedbackHostConfig}):NonNullable<AgentDependencies["brainFactory"]>{
   const routeAdapters=new Map(config.routes.map(route=>[route.id,createInternalRoute({modelProvider:provider,route})]));
   const checkpointManager=new DurableCheckpointManager(dependencies.runtime,workspace);
   const runStore=new FileRunStore(workspace);
@@ -183,11 +196,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       maxContextBytes:intEnv("SOFIA_SUBAGENT_MAX_CONTEXT_BYTES",32768,256),
     });
     const limits:Partial<BrainLimits>={maxSteps:maxSteps??dependencies.policy.maxSteps,maxToolCalls:intEnv("SOFIA_BRAIN_MAX_TOOL_CALLS",100,1),maxReplans:intEnv("SOFIA_BRAIN_MAX_REPLANS",4,0),maxModelCalls:runLimit.maxCalls,maxTokens:runLimit.maxTokens,maxContextTokens:intEnv("SOFIA_BRAIN_MAX_CONTEXT_TOKENS",16000,1),maxOutputTokens:intEnv("SOFIA_BRAIN_MAX_OUTPUT_TOKENS",2048,1),timeoutMs:intEnv("SOFIA_BRAIN_TIMEOUT_MS",120000,1)};
-    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,...(autonomyAuthorizer ? {autonomyAuthorizer} : {}),allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{if(sandboxSupervisor && sandboxIdentity) await sandboxSupervisor.disposeRun(sandboxIdentity).catch(()=>undefined);await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
+    return createSofiaBrain({dependencies:{reasoner,tools:toolGateway,subagents,skillLedger,onSkillCandidate,...(dependencies.skillFeedback ? {onSkillExecutionResult:createBrainSkillFeedbackRecorder(dependencies.skillFeedback)} : {}),...(autonomyAuthorizer ? {autonomyAuthorizer} : {}),allowShell:dependencies.policy.allowShell,allowNetwork:dependencies.policy.allowNetwork,projectContextLoader:()=>discoverProjectContext(dependencies.runtime),repositoryMapLoader:task=>buildRepositoryMap(dependencies.runtime,task),runStore,projectMemory,evolution,onRunSnapshot,onEvent,onFinally:async()=>{if(sandboxSupervisor && sandboxIdentity) await sandboxSupervisor.disposeRun(sandboxIdentity).catch(()=>undefined);await Promise.allSettled(browserCleanups.map((cleanup)=>cleanup()));}},limits});
   };
 }
 
-export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"]):AgentDependencies{
+export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:AgentDependencies["approval"],skillFeedback?:SkillFeedbackHostConfig):AgentDependencies{
   const config=loadModelConfigFromEnv(); const runtime=createNodeWorkspaceRuntime(workspace); const policy=loadExecutionPolicyFromEnv(); assertSecurityConfiguration(policy); const security=new SecurityController(); const memoryAudit=new MemorySecurityAudit(); const auditSecret=process.env.SOFIA_AUDIT_SECRET; const audit=auditSecret?new CompositeSecurityAudit([memoryAudit,new EncryptedFileAudit(path.join(workspace,".sofia","security-audit.log"),auditSecret)]):memoryAudit;
   // Process-wide tools must be stateless. Browser tools are created per Brain run
   // inside createBrainFactory to isolate pages, cookies, and authenticated contexts.
@@ -198,7 +211,7 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
     process.env.SOFIA_BROWSER_HEADLESS === "false" && process.env.SOFIA_BROWSER_PROFILE_DIR?.trim()
       ? new BrowserProfileSessionManager(new BrowserProfileStore(process.env.SOFIA_BROWSER_PROFILE_DIR), () => new PlaywrightBrowserRuntime())
       : undefined;
-  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions});
+  const brainFactory=createBrainFactory(config,provider,workspace,evolution,{runtime,tools,policy,approval,security,audit,profileSessions,skillFeedback});
   const jobRuntime=new DurableJobRuntime(brainFactory,new FileRunStore(workspace),workspace);
   const userMemoryStore = new FileUserMemoryStore();
   return{router:new ModelRouter(config.routes),provider,reviewer:new Reviewer(),runtime,tools,policy,brainFactory,jobRuntime,securityController:security,securityAudit:memoryAudit,userMemoryStore,learningDiagnostics:()=>evolution.getDiagnostics(),closeBrowserProfiles:()=>profileSessions?.closeAll() ?? Promise.resolve()};
