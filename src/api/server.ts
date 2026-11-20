@@ -126,6 +126,10 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   // Per-owner agents are created only through a server-side resolver after authentication.
   const tenantAgents = new Map<string, Promise<{ agent: SofiaAgent; dependencies: AgentDependencies }>>();
   const agentForOwner = async (ownerKeyId: string): Promise<SofiaAgent> => {
+    if (config.tenantDependencyRegistry) {
+      const tenantDependencies = await config.tenantDependencyRegistry.getForPrincipal(ownerKeyId);
+      return new SofiaAgent(tenantDependencies);
+    }
     if (!config.dependenciesForOwner) return agent;
     let pending = tenantAgents.get(ownerKeyId);
     if (!pending) {
@@ -898,6 +902,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         try { await item.value.dependencies.close?.(); } catch { /* continue closing remaining tenants */ }
       }
       tenantAgents.clear();
+      try { await config.tenantDependencyRegistry?.close(); } catch { /* registry owns tenant bundle cleanup */ }
     })();
   });
   return server;
