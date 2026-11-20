@@ -116,3 +116,39 @@ class ReadOnlyDispatchBoundaryTests(unittest.TestCase):
             })
         self.assertEqual(result, expected)
         dispatch.assert_called_once_with(channel, "search", {"query": "Sofia"}, timeout=30.0)
+
+
+class PublicUrlBoundaryTests(unittest.TestCase):
+    def test_read_rejects_local_and_private_urls_before_channel_dispatch(self):
+        for url in (
+            "http://localhost/admin", "http://127.0.0.1/", "http://10.0.0.5/",
+            "http://169.254.169.254/latest/meta-data/", "http://[::1]/",
+        ):
+            with self.subTest(url=url), patch("sofia_bridge.get_channel") as get_channel_mock:
+                with self.assertRaisesRegex(ValueError, "public HTTP"):
+                    handle({"operation": "read", "url": url})
+                get_channel_mock.assert_not_called()
+
+    def test_action_rejects_private_url_nested_in_params_before_dispatch(self):
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action"
+        ) as dispatch:
+            with self.assertRaisesRegex(ValueError, "public HTTP"):
+                handle({
+                    "channel": "web", "action": "read",
+                    "params": {"target": "http://192.168.1.1/admin"},
+                })
+            dispatch.assert_not_called()
+
+    def test_action_allows_public_url_nested_in_params(self):
+        channel = object()
+        expected = {"ok": True, "items": []}
+        with patch("sofia_bridge.get_channel", return_value=channel), patch(
+            "sofia_bridge.run_action", return_value=expected
+        ) as dispatch:
+            result = handle({
+                "channel": "web", "action": "read",
+                "params": {"target": "https://example.com/article"},
+            })
+        self.assertEqual(result, expected)
+        dispatch.assert_called_once()
