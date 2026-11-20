@@ -54,6 +54,13 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       async execute(input) { const p = page(String(input.pageId)); await p.goto(String(input.url)); return { url: await p.url(), title: await p.title() }; },
     },
     {
+      // Backward-compatible alias used by agent plans and external tool callers.
+      name: "browser.navigate",
+      description: "Navigate an existing browser page (alias of browser.goto).",
+      inputSchema: { type: "object", properties: { pageId: { type: "string" }, url: { type: "string" } }, required: ["pageId", "url"], additionalProperties: false },
+      async execute(input) { const p = page(String(input.pageId)); await p.goto(String(input.url)); return { url: await p.url(), title: await p.title() }; },
+    },
+    {
       name: "browser.click",
       description: "Click a page selector.",
       inputSchema: { type: "object", properties: { pageId: { type: "string" }, selector: { type: "string" } }, required: ["pageId", "selector"], additionalProperties: false },
