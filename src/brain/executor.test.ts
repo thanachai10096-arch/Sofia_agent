@@ -1002,3 +1002,63 @@ test("explicit Thai file-edit requests stay on the action path even if the model
   assert.ok(!phases.includes("respond"));
   assert.ok(report.usage.toolCalls > 0);
 });
+
+
+test("Brain refuses to replay a tool step whose outcome was uncertain at restart", async () => {
+  let writes = 0;
+  const controller = new AbortController();
+  let saved: import("./run-state.js").BrainRunSnapshot | undefined;
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.write_file") writes += 1;
+    return originalExecute(call, context);
+  };
+
+  const first = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+      onRunSnapshot(snapshot) {
+        if (snapshot.inFlightStepId) {
+          saved = snapshot;
+          controller.abort(new Error("simulated worker interruption"));
+        }
+      },
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  await first.run({ task: "Create hello.txt", signal: controller.signal });
+  assert.ok(saved);
+  assert.equal(writes, 0);
+
+  const resumed = createSofiaBrain({
+    dependencies: { reasoner: makeReasoner(), tools, allowShell: false, allowNetwork: false },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+  const report = await resumed.run({ task: "Create hello.txt", resume: saved });
+  assert.equal(report.completed, false);
+  assert.match(report.summary, /Cannot safely resume.*may have completed an external side effect/i);
+  assert.equal(writes, 0);
+});
