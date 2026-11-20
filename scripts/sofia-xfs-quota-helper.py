@@ -68,7 +68,13 @@ def secure_directory(path):
 def load_config():
     if os.geteuid() != 0:
         fail("helper must run as root")
-    secure_directory(CONFIG.parent)
+    current = CONFIG.parent
+    while True:
+        secure_directory(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
     info = CONFIG.lstat()
     if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
         fail("configuration must be a root-owned regular file not writable by group/others")
@@ -86,7 +92,6 @@ def load_config():
     root = root_input.resolve(strict=True)
     if str(root_input) != str(root):
         fail("workspace root must be canonical and contain no symlink components")
-    state_input.mkdir(mode=0o700, parents=True, exist_ok=True)
     state = state_input.resolve(strict=True)
     if str(state_input) != str(state):
         fail("state root must be canonical and contain no symlink components")
