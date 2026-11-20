@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSofiaApi } from "./server.js";
+import { idempotencyFingerprint } from "./idempotency.js";
 import { MemorySessionStore } from "../session/store.js";
 import { ApprovalBroker, InMemoryApprovalDecisionStore } from "../agent/approval-broker.js";
 import { ModelRouter } from "../models/router.js";
@@ -888,6 +889,77 @@ test("concurrent async retries reserve one idempotency key before queued persist
     assert.equal(providerCalls, 1, "the idempotency retry must not launch a second agent execution");
   } finally {
     releaseQueuedSave();
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+
+test("async idempotency keys survive API restart and never replay interrupted runs", async () => {
+  const apiKey = "restart-idempotency-owner";
+  const ownerKeyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
+  const clientKey = "purchase-order-2026-001";
+  const idempotencyId = createHash("sha256").update(ownerKeyId).update(":").update(clientKey).digest("hex");
+  const request = { task: "submit one purchase order", async: true };
+  const requestFingerprint = idempotencyFingerprint({ task: request.task });
+  const interruptedRunId = "a1234567-1234-4234-8234-123456789abc";
+  let providerCalls = 0;
+  const server = createSofiaApi({
+    provider: {
+      generate: async () => {
+        providerCalls += 1;
+        return { text: "must not replay an interrupted request" };
+      },
+    },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { [apiKey]: ["agent:run", "agent:read"] },
+    runStore: {
+      async save() {},
+      async remove() {},
+      loadAllSync: () => [{
+        id: interruptedRunId,
+        status: "running" as const,
+        createdAt: Date.now() - 2_000,
+        updatedAt: Date.now() - 1_000,
+        ownerKeyId,
+        desktopCapabilities: [],
+        idempotencyId,
+        requestFingerprint,
+      }],
+    },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const base = "http://127.0.0.1:" + address.port;
+  const submit = (task: string) => fetch(base + "/v1/agent/runs", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer " + apiKey,
+      "content-type": "application/json",
+      "idempotency-key": clientKey,
+    },
+    body: JSON.stringify({ task, async: true }),
+  });
+
+  try {
+    const retry = await submit(request.task);
+    assert.equal(retry.status, 200);
+    const recovered = await retry.json() as { id: string; status: string; error?: string };
+    assert.equal(recovered.id, interruptedRunId);
+    assert.equal(recovered.status, "failed");
+    assert.match(recovered.error ?? "", /interrupted by server restart/i);
+
+    const conflictingReuse = await submit("submit a different purchase order");
+    assert.equal(conflictingReuse.status, 409);
+    assert.deepEqual(await conflictingReuse.json(), {
+      error: "idempotency_key_reused",
+      message: "This idempotency key was already used with a different request.",
+    });
+    assert.equal(providerCalls, 0, "a retry after restart must not replay the interrupted external action");
+  } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
