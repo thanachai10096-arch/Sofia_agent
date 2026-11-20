@@ -16,8 +16,9 @@ Sofia now has a provider-neutral payment execution foundation. It deliberately d
 - No configured provider returns `configured: false` and performs no submission.
 - Replaying the same owner + key + request returns the existing record and never submits again.
 - Reusing a key with a different request is rejected.
-- A timeout or uncertain submission is recorded as `unknown`, not `failed`. Reconcile with the provider before any new attempt; do not generate a fresh key to blindly retry.
+- A timeout or uncertain submission is recorded as `unknown`, not `failed`. `reconcileFinancialAction` re-queries the provider and never creates a second payment. Reconcile before any new attempt; do not generate a fresh key to blindly retry.
 - Approval is distinct from provider authorization/capture. A successful checkout click or UI message is not payment evidence.
+- `processing`, `unknown`, and interrupted `submitting` records can be reconciled by owner + idempotency key; terminal `succeeded` / `failed` records are returned unchanged.
 - Amounts are integer minor units (for THB, satang); currency is an uppercase ISO 4217 code.
 
 ## Production integration gates
