@@ -1,4 +1,4 @@
-import type { ExpectedPayment, PaymentVerificationResult } from "./verification.js";
+import { verifyPayment, type ExpectedPayment, type PaymentVerificationAdapter } from "./verification.js";
 
 export type FinancialOrderStatus = "prepared" | "order_submitted" | "payment_pending" | "paid" | "payment_failed" | "payment_review" | "cancelled";
 export interface FinancialOrder extends ExpectedPayment {
@@ -49,7 +49,7 @@ export class FinancialActionEngine {
   }
 
   /** Records verified provider evidence only. This method does not initiate or capture a payment. */
-  async recordPaymentVerification(id: string, result: PaymentVerificationResult): Promise<FinancialOrder> {
+  async recordPaymentVerification(id: string, adapter?: PaymentVerificationAdapter): Promise<FinancialOrder> {
     const current = await this.requireOrder(id);
     if (current.status !== "order_submitted" && current.status !== "payment_pending" && current.status !== "payment_review" && current.status !== "payment_failed") {
       throw new Error("Payment evidence can only be reconciled after order submission and before cancellation or fulfillment.");
