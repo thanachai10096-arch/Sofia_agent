@@ -23,6 +23,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install vendored Agent-Reach dependencies
+        run: python -m pip install --disable-pip-version-check -r vendor/agent-reach/requirements.txt
+
+      - name: Verify vendored Agent-Reach bridge
+        run: python vendor/agent-reach/sofia_bridge.py --request-json '{"operation":"channels"}'
+
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
