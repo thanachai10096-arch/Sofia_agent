@@ -31,7 +31,10 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
     }
     if (closing && !managedProfileSession) await closing.close();
   };
-  registerCleanup?.(dispose);
+  // Queue final cleanup behind in-flight session mutations. Brain's abortable
+  // wrapper may stop awaiting a tool before its underlying browser promise
+  // settles; this barrier prevents a late launch from leaking past onFinally.
+  registerCleanup?.(() => withSessionLock(dispose));
 
   const page = (id: string) => {
     const value = pages.get(id);
