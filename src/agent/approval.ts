@@ -77,6 +77,15 @@ export class FileApprovalJournal implements ApprovalJournal {
   }
 }
 
+export interface ApprovalBrokerPort {
+  handle: ApprovalHandler;
+  pending(principalId: string): PendingApproval[];
+  history(principalId: string): ApprovalAuditRecord[];
+  decide(decision: ApprovalDecision): boolean;
+  cancelRun(runId: string, principalId: string): number;
+  interruptAll?(): number;
+}
+
 export interface ApprovalDecision {
   approvalId:string;
   principalId:string;
@@ -89,7 +98,7 @@ export interface ApprovalDecision {
  * recorded before a decision can settle. On restart all formerly-pending items
  * become "interrupted" audit records and are never rehydrated as executable work.
  */
-export class ApprovalBroker {
+export class ApprovalBroker implements ApprovalBrokerPort {
   private readonly pendingRequests = new Map<string, {
     request:PendingApproval;
     settle:(approved:boolean)=>void;
