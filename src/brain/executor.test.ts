@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createSofiaBrain } from "./executor.js";
+import { createSofiaBrain, unknownToolDiagnostic } from "./executor.js";
 import { InMemorySkillLedger } from "./learning.js";
 import type { BrainReasoner, ToolGateway, ToolResult } from "./types.js";
 import type { SubagentRuntime } from "./subagents.js";
@@ -112,6 +112,14 @@ function makeTools(): ToolGateway {
   };
 }
 
+
+test("unknown tool diagnostics suggest exact registered names in the same namespace", () => {
+  const tools = makeTools();
+  const message = unknownToolDiagnostic("workspace.list_file", tools);
+  assert.match(message, /Unknown or unavailable tool: workspace\.list_file/);
+  assert.match(message, /workspace\.list_files/);
+  assert.match(message, /exact registered tool names/);
+});
 
 test("Brain retries one malformed plan with the strict call schema before failing", async () => {
   let planCalls = 0;
