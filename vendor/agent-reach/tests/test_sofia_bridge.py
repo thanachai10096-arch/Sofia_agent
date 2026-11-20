@@ -227,7 +227,7 @@ class YouTubeUrlValidationTests(unittest.TestCase):
 
     def test_video_url_rejects_non_public_and_malformed_targets(self):
         from agent_reach.channels.youtube import _video_url
-        from agent_reach.channels.base import ReachError
+        from agent_reach.runtime.result import ReachError
 
         for target in (
             "http://127.0.0.1.evil.test/watch?v=jNQXAC9IVRw",
