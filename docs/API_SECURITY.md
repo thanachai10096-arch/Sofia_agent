@@ -66,6 +66,10 @@ The API entrypoint can enable the built-in broker with SOFIA_APPROVAL_ENABLED=tr
 - Redis mode uses UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN (or REDIS_REST_URL and REDIS_REST_TOKEN), with atomic Lua scripts for create/resolve and a principal-hashed inbox index. SOFIA_APPROVAL_REDIS_PREFIX optionally namespaces keys. All Redis script keys share a cluster hash tag. The adapter tests mock the REST contract; validate the real token permissions and Redis behavior in staging before enabling it in production.
 - The SQLite database and sidecars are restricted to owner-only POSIX permissions where supported. Back up and persist the database directory. For production effectful tools, the gateway also reads back and verifies the exact `approval_approved` audit event before allowing the side effect; a missing or mismatched event blocks execution.
 
+
+
+For effectful tool execution, `execution_started` is a write-ahead receipt, not proof that the external action did or did not happen. If a tool throws after invocation begins, Sofia records the outcome as `indeterminate` and leaves the start receipt unresolved for manual/provider-side reconciliation. It must not be interpreted as a confirmed failure or automatically retried: a provider timeout can occur after the provider accepted the purchase, transfer, or command. Only a verified `completed` receipt or a confirmed `failed` outcome closes the receipt. This audit mechanism detects uncertainty; it is not an atomic distributed idempotency ledger, and multi-host action deduplication remains future work.
+
 The feature remains disabled unless explicitly enabled. Redis mode is the preferred shared store for multi-replica Railway deployments. Do not grant approval:manage to browser/mobile clients that should not approve actions.
 
 ## Per-user project workspaces
