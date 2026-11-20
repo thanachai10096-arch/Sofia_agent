@@ -145,8 +145,42 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   let cronClosed = false;
   const runs = new Map<string, ActiveRun>();
   const runStore = config.runStore;
-  const persist = (run: ActiveRun): Promise<void> => {
-    if (!runStore) return Promise.resolve();
+  const principalRunStores = new Map<string, Promise<RunRecordStore>>();
+  const loadedPrincipalRuns = new Set<string>();
+  const resolveRunStore = async (ownerKeyId: string): Promise<RunRecordStore | undefined> => {
+    if (!config.resolvePrincipalRunStore) return runStore;
+    let pending = principalRunStores.get(ownerKeyId);
+    if (!pending) {
+      pending = config.resolvePrincipalRunStore(ownerKeyId);
+      principalRunStores.set(ownerKeyId, pending);
+      pending.catch(() => { if (principalRunStores.get(ownerKeyId) === pending) principalRunStores.delete(ownerKeyId); });
+    }
+    const store = await pending;
+    if (!loadedPrincipalRuns.has(ownerKeyId)) {
+      for (const record of store.loadAllSync()) {
+        if (record.ownerKeyId !== ownerKeyId) continue;
+        const interrupted = record.status === "queued" || record.status === "running";
+        const restored: ActiveRun = {
+          id: record.id, status: interrupted ? "failed" : record.status,
+          ...(record.result ? { result: record.result as unknown as AgentRunResponse["result"] } : {}),
+          ...(interrupted ? { error: "Run interrupted by server restart." } : record.error ? { error: record.error } : {}),
+          controller: new AbortController(), createdAt: record.createdAt,
+          updatedAt: interrupted ? Date.now() : record.updatedAt, ownerKeyId: record.ownerKeyId,
+          desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
+          ...(record.idempotencyId ? { idempotencyId: record.idempotencyId } : {}),
+          ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
+        };
+        runs.set(restored.id, restored);
+        if (restored.idempotencyId && restored.requestFingerprint) idempotency.set(restored.idempotencyId, { runId: restored.id, fingerprint: restored.requestFingerprint });
+        if (interrupted) await store.save({ id: restored.id, status: restored.status, ...(restored.error ? { error: restored.error } : {}), createdAt: restored.createdAt, updatedAt: restored.updatedAt, ownerKeyId, desktopCapabilities: [...restored.desktopCapabilities], ...(restored.idempotencyId ? { idempotencyId: restored.idempotencyId } : {}), ...(restored.requestFingerprint ? { requestFingerprint: restored.requestFingerprint } : {}) });
+      }
+      loadedPrincipalRuns.add(ownerKeyId);
+    }
+    return store;
+  };
+  const persist = async (run: ActiveRun): Promise<void> => {
+    const store = await resolveRunStore(run.ownerKeyId);
+    if (!store) return;
     const record: RunRecord = {
       id: run.id, status: run.status,
       ...(run.result ? { result: run.result as unknown as import("../agent/types.js").AgentResult } : {}),
@@ -155,9 +189,9 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ...(run.idempotencyId ? { idempotencyId: run.idempotencyId } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
     };
-    return runStore.save(record);
+    return store.save(record);
   };
-  if (runStore) for (const record of runStore.loadAllSync()) {
+  if (!config.resolvePrincipalRunStore && runStore) for (const record of runStore.loadAllSync()) {
     const interrupted = record.status === "queued" || record.status === "running";
     const validStatus = ["queued","running","completed","failed","cancelled"].includes(record.status);
     if (!validStatus || !Number.isFinite(record.createdAt) || !Number.isFinite(record.updatedAt) ||
@@ -254,7 +288,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
   const prune = () => {
     const cutoff = Date.now() - retention;
     for (const [id, run] of runs) {
-      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); if (runStore) void runStore.remove(id); }
+      if (run.updatedAt < cutoff && !["queued", "running"].includes(run.status)) { runs.delete(id); void resolveRunStore(run.ownerKeyId).then((store) => store?.remove(id)).catch(() => undefined); }
     }
     for (const [key, entry] of idempotency) {
       if (!runs.has(entry.runId)) idempotency.delete(key);
@@ -442,7 +476,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         // whose in-memory map has not seen a run accepted by the previous one.
         // Rehydrate from the shared persistent store, and refresh newer records
         // so status polling follows updates written by the original process.
-        const stored = runStore?.load?.(id);
+        const requestRunStore = await resolveRunStore(auth.keyId);
+        const stored = requestRunStore?.load?.(id);
         if (stored && (!run || stored.updatedAt > run.updatedAt)) {
           run = {
             id: stored.id,
