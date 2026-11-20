@@ -133,7 +133,7 @@ def check_xfs(root):
 
 def locked_state(state_root):
     lock_path = state_root / "allocations.lock"
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     info = os.fstat(fd)
     if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077 or info.st_nlink != 1:
         os.close(fd)
@@ -148,8 +148,8 @@ def load_allocations(state_root):
         info = path.lstat()
     except FileNotFoundError:
         return {}
-    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
-        fail("allocation state is not a private root-owned regular file")
+    if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077 or info.st_nlink != 1:
+        fail("allocation state is not a private, singly-linked regular file")
     if info.st_size > 4 * 1024 * 1024:
         fail("allocation state is too large")
     data = strict_json_loads(path.read_text(encoding="utf-8"))
