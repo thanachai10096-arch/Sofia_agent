@@ -1,7 +1,9 @@
 import type { SofiaTool } from "../tools/types.js";
 
 const text = (description: string) => ({ type: "string", description });
-const blockedActions = new Set(["post", "publish", "comment", "like", "follow", "unfollow", "send", "dm", "delete", "upload", "create", "buy", "purchase"]);
+const readOnlyActionPrefixes = ["search", "read", "get", "list", "fetch", "retrieve", "show", "view", "info", "metadata", "subtitle", "transcript", "query", "status"];
+const isReadOnlyAction = (action: string) =>
+  readOnlyActionPrefixes.some((prefix) => action === prefix || action.startsWith(prefix + "_"));
 
 async function invokeReach(runtime: Parameters<SofiaTool["execute"]>[1]["runtime"], request: Record<string, unknown>) {
   const python = runtime.platform === "windows" ? "python" : "python3";
@@ -71,7 +73,7 @@ export function createAgentReachTools(): SofiaTool[] {
       async execute(input, { runtime }) {
         const channel = String(input.channel ?? "");
         const action = String(input.action ?? "").toLowerCase();
-        if (blockedActions.has(action)) throw new Error("This action is not enabled in Sofia's read-only Internet Reach integration.");
+        if (!isReadOnlyAction(action)) throw new Error("This action is not enabled in Sofia's read-only Internet Reach integration.");
         const timeout = typeof input.timeout === "number" ? input.timeout : 30;
         if (!Number.isFinite(timeout) || timeout < 1 || timeout > 1800) throw new Error("timeout must be between 1 and 1800 seconds.");
         const result = await invokeReach(runtime, { channel, action, params: input.params, timeout });
