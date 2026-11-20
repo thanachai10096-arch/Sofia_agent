@@ -53,6 +53,29 @@ function setup() {
   };
 }
 
+test("browser.navigate creates a page when pageId is omitted", async () => {
+  const harness = setup();
+  const result = await harness.tool("browser.navigate").execute({ url: "https://example.com" }, {} as never) as {
+    pageId: string; url: string; title: string;
+  };
+  assert.equal(result.pageId, "page-1");
+  assert.equal(result.url, "about:blank");
+  assert.equal(result.title, "");
+  assert.equal(harness.counts().launchCount, 1);
+  await harness.tool("browser.observe").execute({ pageId: result.pageId }, {} as never);
+});
+
+test("browser.navigate reuses the requested existing page", async () => {
+  const harness = setup();
+  const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
+  const result = await harness.tool("browser.navigate").execute({
+    pageId: opened.pageId, url: "https://example.com/docs",
+  }, {} as never) as { pageId: string };
+  assert.equal(result.pageId, opened.pageId);
+  assert.equal(harness.counts().launchCount, 1);
+  await harness.tool("browser.observe").execute({ pageId: opened.pageId }, {} as never);
+});
+
 test("browser.close closes only the requested page when pageId is provided", async () => {
   const harness = setup();
   const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
