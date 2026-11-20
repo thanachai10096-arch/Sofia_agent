@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
+import { CronScheduler, FileCronStore } from "../brain/cron-scheduler.js";
 import { PrincipalWorkspaceResolver } from "../platform/principal-workspace.js";
 import { createSofiaAgentDependenciesWithSessions, createSofiaPrincipalDependencyRegistry } from "../models/factory.js";
 import { createDiscordInteractionTransport } from "../integrations/messaging/discord-interaction-transport.js";
@@ -216,6 +217,13 @@ const server = createSofiaApi(deps, {
   resolvePrincipalRunStore: async (authenticatedPrincipalId) => new FileRunRecordStore(
     await principalRunWorkspace.resolveStoreDirectory(authenticatedPrincipalId, "api-runs"),
   ),
+  resolvePrincipalCronScheduler: async (authenticatedPrincipalId, principalDeps) => {
+    if (!principalDeps.jobRuntime) throw new Error("Tenant JobRuntime is unavailable.");
+    const cronDirectory = await principalRunWorkspace.resolveStoreDirectory(authenticatedPrincipalId, "cron");
+    return new CronScheduler(principalDeps.jobRuntime, {
+      store: new FileCronStore(authenticatedPrincipalId, cronDirectory),
+    });
+  },
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
