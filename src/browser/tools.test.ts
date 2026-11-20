@@ -352,46 +352,59 @@ test("run cleanup waits for an in-flight browser launch before disposing it", as
 
 test("switching away from a saved profile drains its active page actions", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "sofia-browser-switch-"));
+  let finishClick!: () => void;
+  let savedPageClosed = false;
+  let savedSessionClosed = false;
+  let temporaryLaunchCount = 0;
+  const makePage = (id: string, onClose: () => void, click: () => Promise<void>) => ({
+    id,
+    url: async () => "https://example.com/",
+    title: async () => "Example",
+    content: async () => "",
+    goto: async () => {},
+    click,
+    type: async () => {},
+    select: async () => {},
+    scroll: async () => {},
+    wait: async () => {},
+    press: async () => {},
+    back: async () => {},
+    forward: async () => {},
+    reload: async () => {},
+    screenshot: async () => "",
+    close: async () => { onClose(); },
+  } satisfies BrowserPage);
+  const persistentRuntime: BrowserRuntime = {
+    launch: async () => ({
+      id: "saved-session",
+      newPage: async () => makePage(
+        "saved-page",
+        () => { savedPageClosed = true; },
+        () => new Promise<void>((resolve) => { finishClick = resolve; }),
+      ),
+      close: async () => { savedSessionClosed = true; },
+    }),
+  };
+  const temporaryRuntime: BrowserRuntime = {
+    launch: async () => {
+      temporaryLaunchCount++;
+      return {
+        id: "temporary-session",
+        newPage: async () => makePage("temporary-page", () => {}, async () => {}),
+        close: async () => {},
+      };
+    },
+  };
   try {
-    const manager = new BrowserProfileSessionManager(new BrowserProfileStore(root), {
-      launch: async () => {
-        const persistent = launchCount === 0;
-        launchCount++;
-        return {
-          id: persistent ? "saved-session" : "temporary-session",
-          newPage: async () => ({
-            id: persistent ? "saved-page" : "temporary-page",
-            url: async () => "https://example.com/",
-            title: async () => "Example",
-            content: async () => "",
-            goto: async () => {},
-            click: async () => persistent
-              ? new Promise<void>((resolve) => { finishClick = resolve; })
-              : undefined,
-            type: async () => {},
-            select: async () => {},
-            scroll: async () => {},
-            wait: async () => {},
-            press: async () => {},
-            back: async () => {},
-            forward: async () => {},
-            reload: async () => {},
-            screenshot: async () => "",
-            close: async () => { if (persistent) savedPageClosed = true; },
-          }),
-          close: async () => { if (persistent) savedSessionClosed = true; },
-        };
-      },
-    } as never);
-    let launchCount = 0;
-    let finishClick!: () => void;
-    let savedPageClosed = false;
-    let savedSessionClosed = false;
-    const tools = createBrowserTools(
-      { launch: async () => { throw new Error("temporary launch should use injected runtime"); } },
-      undefined,
-      { profileSessions: manager, ownerId: "principal-switch", allowLogin: true },
+    const manager = new BrowserProfileSessionManager(
+      new BrowserProfileStore(root),
+      () => persistentRuntime,
     );
+    const tools = createBrowserTools(temporaryRuntime, undefined, {
+      profileSessions: manager,
+      ownerId: "principal-switch",
+      allowLogin: true,
+    });
     const get = (name: string) => tools.find((item) => item.name === name)!;
     const login = await get("browser.login").execute({ url: "https://example.com/login" }, {} as never) as { profileId: string };
     const opened = await get("browser.open").execute({ profileId: login.profileId }, {} as never) as { pageId: string };
@@ -405,6 +418,7 @@ test("switching away from a saved profile drains its active page actions", async
     await switching;
     assert.equal(savedPageClosed, true);
     assert.equal(savedSessionClosed, false, "switching profiles must preserve the saved login session");
+    assert.equal(temporaryLaunchCount, 1);
     await manager.closeAll();
   } finally {
     await rm(root, { recursive: true, force: true });
