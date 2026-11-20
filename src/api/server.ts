@@ -478,7 +478,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (isRunCancellation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
+      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel") || req.url.endsWith("/reconcile"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
@@ -831,7 +831,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
 
-      const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
+      const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel|reconcile))?$/);
       if (jobMatch && requestDeps.jobRuntime) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
@@ -850,6 +850,33 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         if (req.method === "POST" && action === "cancel") {
           const cancelled = await requestDeps.jobRuntime!.cancel(jobId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
+        }
+        if (req.method === "POST" && action === "reconcile") {
+          if (!requestDeps.jobRuntime!.reconcile) {
+            return json(res, 501, { error: "job_reconciliation_unavailable" }, origin, config);
+          }
+          let input: unknown;
+          try { input = await body(req, maxBytes); }
+          catch { return json(res, 400, { error: "invalid_request_body" }, origin, config); }
+          if (!input || typeof input !== "object" || Array.isArray(input)) {
+            return json(res, 400, { error: "invalid_reconciliation" }, origin, config);
+          }
+          const payload = input as Record<string, unknown>;
+          const stepId = typeof payload.stepId === "string" ? payload.stepId.trim() : "";
+          const outcome = payload.outcome;
+          const note = typeof payload.note === "string" ? payload.note.trim().slice(0, 1000) : undefined;
+          if (!stepId || stepId.length > 200 || (outcome !== "completed" && outcome !== "retry")) {
+            return json(res, 400, { error: "invalid_reconciliation" }, origin, config);
+          }
+          if (outcome === "retry" && payload.confirmNoSideEffect !== true) {
+            return json(res, 400, { error: "retry_requires_no_side_effect_confirmation" }, origin, config);
+          }
+          try {
+            const reconciled = await requestDeps.jobRuntime!.reconcile(jobId, stepId, outcome, auth.keyId, note);
+            return json(res, 200, reconciled, origin, config);
+          } catch (error) {
+            return json(res, 409, { error: "job_reconciliation_failed", message: error instanceof Error ? error.message : "Reconciliation failed" }, origin, config);
+          }
         }
       }
 
