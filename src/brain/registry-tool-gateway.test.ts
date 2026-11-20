@@ -1,13 +1,116 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { RegistryToolGateway } from "./registry-tool-gateway.js";
+import { ApprovalBroker, InMemoryApprovalDecisionStore } from "../agent/approval-broker.js";
 import type { WorkspaceRuntime } from "../platform/runtime.js";
 import { createToolRegistry } from "../tools/registry.js";
 import { createBuiltinTools } from "../tools/builtin.js";
 import { defaultPolicy } from "../security/policy.js";
 import { SecurityController } from "../security/controller.js";
 import type { SecurityAuditEvent, SecurityAuditSink } from "../security/audit.js";
+import { findIndeterminateExecutions, reconcileIndeterminateExecutions } from "../security/audit.js";
 import { MapToolRegistry } from "../tools/types.js";
+
+test("receipt reconciliation flags orphaned and mismatched executions without replaying them", () => {
+  const started = (id: string, actionHash = "action-hash"): SecurityAuditEvent => ({
+    id,
+    at: "2026-11-19T00:00:00.000Z",
+    runId: "run-1",
+    principalId: "owner-1",
+    toolName: "workspace.write_file",
+    actionHash,
+    risk: "low",
+    decision: "execution_started",
+  });
+  const startCompleted = started("start-completed");
+  const startFailed = started("start-failed");
+  const orphan = started("start-orphan");
+  const mismatched = started("start-mismatched");
+  const events: SecurityAuditEvent[] = [
+    startCompleted,
+    startFailed,
+    orphan,
+    mismatched,
+    {
+      ...startCompleted,
+      id: "completed",
+      relatedEventId: startCompleted.id,
+      decision: "completed",
+    },
+    {
+      ...startFailed,
+      id: "failed",
+      relatedEventId: startFailed.id,
+      decision: "failed",
+    },
+    {
+      ...mismatched,
+      id: "wrong-action-terminal",
+      relatedEventId: mismatched.id,
+      actionHash: "different-action",
+      decision: "completed",
+    },
+  ];
+
+  assert.deepEqual(
+    findIndeterminateExecutions(events).map((event) => event.id).sort(),
+    ["start-mismatched", "start-orphan"],
+  );
+});
+
+test("receipt reconciliation keeps duplicate start IDs indeterminate even with a matching terminal event", () => {
+  const started = (actionHash: string): SecurityAuditEvent => ({
+    id: "duplicated-start-id",
+    at: "2026-11-20T00:00:00.000Z",
+    runId: "run-duplicate",
+    principalId: "owner-duplicate",
+    toolName: "external.purchase",
+    actionHash,
+    risk: "high",
+    decision: "execution_started",
+  });
+  const first = started("action-one");
+  const second = started("action-two");
+  const terminal: SecurityAuditEvent = {
+    ...first,
+    id: "terminal-one",
+    relatedEventId: first.id,
+    decision: "completed",
+  };
+  assert.deepEqual(
+    findIndeterminateExecutions([first, second, terminal]).map((event) => event.actionHash).sort(),
+    ["action-one", "action-two"],
+    "ambiguous duplicate receipt IDs must never be treated as safely resolved",
+  );
+});
+
+test("durable receipt reconciliation reads journal state and never replays actions", async () => {
+  const events: SecurityAuditEvent[] = [{
+    id: "orphaned-start",
+    at: "2026-11-19T00:00:00.000Z",
+    runId: "restart-run",
+    principalId: "owner-1",
+    toolName: "external.purchase",
+    actionHash: "action-1",
+    risk: "high",
+    decision: "execution_started",
+  }];
+  let listCalls = 0;
+  const sink: SecurityAuditSink = {
+    durable: true,
+    record() {},
+    read(id) { return events.find((event) => event.id === id); },
+    list() { listCalls += 1; return events; },
+  };
+  const unresolved = await reconcileIndeterminateExecutions(sink);
+  assert.equal(listCalls, 1);
+  assert.deepEqual(unresolved.map((event) => event.id), ["orphaned-start"]);
+  assert.equal(events.length, 1, "reconciliation must not mutate or replay the action");
+  await assert.rejects(
+    reconcileIndeterminateExecutions({ record() {}, read() { return undefined; } }),
+    /durable, enumerable audit sink/i,
+  );
+});
 
 function runtime(): WorkspaceRuntime {
   const files = new Map<string, string>([["src/app.ts", "const x = 1;"]]);
@@ -215,6 +318,247 @@ test("approval cannot mutate the action that the gateway executes", async () => 
   assert.equal(result.ok, true);
   assert.equal(executedInput?.path, "src/approved.txt");
   assert.equal(executedInput?.content, "approved content");
+});
+
+test("approved actions are audited with the exact action hash before execution", async () => {
+  let executions = 0;
+  const events: SecurityAuditEvent[] = [];
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Approved write action",
+    inputSchema: { type: "object" },
+    effects: ["write"] as const,
+    async execute() { executions += 1; return { committed: true }; },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, capabilitySecret: "approval-approved-audit-test-secret" },
+    async (request) => {
+      assert.equal(request.principalId, "principal-approval-audit");
+      assert.match(request.actionHash, /^[a-f0-9]{64}$/);
+      return true;
+    },
+    undefined,
+    undefined,
+    { record(event) { events.push(event); } },
+  );
+  const result = await gateway.execute(
+    { tool: "custom.write", input: { value: "approved" } },
+    {
+      runId: "approval-approved-audit",
+      principalId: "principal-approval-audit",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(executions, 1);
+  const approved = events.find((event) => event.decision === "approval_approved");
+  const completed = events.find((event) => event.decision === "completed");
+  assert.ok(approved);
+  assert.ok(completed);
+  assert.equal(approved.actionHash, completed.actionHash);
+  assert.equal(approved.principalId, completed.principalId);
+});
+
+test("production effectful execution persists and verifies a start receipt before invoking the tool", async () => {
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    let executions = 0;
+    const events = new Map<string, SecurityAuditEvent>();
+    const order: string[] = [];
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record(event) { events.set(event.id, event); order.push(event.decision); },
+      read(id) { return events.get(id); },
+      list() { return [...events.values()]; },
+    };
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Production write with an execution receipt",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; order.push("tool_invoked"); return { committed: true }; },
+    }]);
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "execution-start-receipt-production-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { value: "commit" } },
+      {
+        runId: "execution-start-receipt-test",
+        principalId: "authenticated-owner",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(executions, 1);
+    assert.ok(order.indexOf("execution_started") >= 0);
+    assert.ok(order.indexOf("execution_started") < order.indexOf("tool_invoked"));
+    assert.ok(order.indexOf("tool_invoked") < order.indexOf("completed"));
+    const started = [...events.values()].find((event) => event.decision === "execution_started");
+    const completed = [...events.values()].find((event) => event.decision === "completed");
+    assert.ok(started);
+    assert.ok(completed);
+    assert.equal(started.runId, completed.runId);
+    assert.equal(started.principalId, completed.principalId);
+    assert.equal(started.actionHash, completed.actionHash);
+    assert.equal(started.toolName, completed.toolName);
+    assert.equal(completed.relatedEventId, started.id, "terminal receipt must reference its exact execution-start record");
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
+test("production blocks effectful execution when its execution-start receipt cannot be read back", async () => {
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    let executions = 0;
+    const events = new Map<string, SecurityAuditEvent>();
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record(event) { events.set(event.id, event); },
+      read(id) {
+        const event = events.get(id);
+        return event?.decision === "approval_approved" ? event : undefined;
+      },
+      list() { return [...events.values()]; },
+    };
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Write blocked when execution intent cannot be verified",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; return { committed: true }; },
+    }]);
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "execution-start-receipt-missing-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { value: "must-not-run" } },
+      {
+        runId: "execution-start-receipt-missing-test",
+        principalId: "authenticated-owner",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.error?.message ?? "", /execution-start receipt/i);
+    assert.equal(executions, 0);
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
+test("production approval fails closed when the approval audit event cannot be read back", async () => {
+  let executions = 0;
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Write requiring verified approval evidence",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; return { committed: true }; },
+    }]);
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record() {},
+      read() { return undefined; },
+      list() { return []; },
+    };
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "production-approval-evidence-test-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { value: "must-not-run" } },
+      {
+        runId: "production-approval-evidence-missing",
+        principalId: "principal-approval-evidence",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.category, "permission_error");
+    assert.match(result.error?.message ?? "", /approval audit evidence/i);
+    assert.equal(executions, 0, "the side effect must not run without durable approval evidence");
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
+test("production blocks an approved write when approval audit readback cannot be verified", async () => {
+  let executions = 0;
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Write action whose approval evidence cannot be read back",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; return { committed: true }; },
+    }]);
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record() {},
+      read() { return undefined; },
+      list() { return []; },
+    };
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "production-approval-audit-test-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { path: "safe.txt", content: "must-not-run" } },
+      {
+        runId: "production-approval-audit-readback",
+        principalId: "authenticated-principal",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error?.category, "permission_error");
+    assert.match(result.error?.message ?? "", /approval audit evidence/i);
+    assert.equal(executions, 0, "a missing approval audit readback must block the side effect");
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
 });
 
 test("tool catalog exposes only registered tools with accurate desktop effects", () => {
@@ -648,6 +992,59 @@ test("production effectful tools fail closed when no audit sink is configured", 
 });
 
 
+
+
+test("durable completion readback rejects a receipt for a different principal or tool", async () => {
+  let executions = 0;
+  const previousSofia = process.env.SOFIA_ENV;
+  process.env.SOFIA_ENV = "production";
+  try {
+    const persisted = new Map<string, SecurityAuditEvent>();
+    const audit: SecurityAuditSink = {
+      durable: true,
+      record(event) {
+        persisted.set(event.id, event.decision === "completed"
+          ? { ...event, principalId: "different-principal" }
+          : event);
+      },
+      read(id) { return persisted.get(id); },
+      list() { return [...persisted.values()]; },
+    };
+    const registry = new MapToolRegistry([{
+      name: "custom.write",
+      description: "Write with deliberately mismatched completion evidence",
+      inputSchema: { type: "object" },
+      effects: ["write"] as const,
+      async execute() { executions += 1; return { committed: true }; },
+    }]);
+    const gateway = new RegistryToolGateway(
+      { runtime: runtime(), tools: registry },
+      { ...defaultPolicy, capabilitySecret: "completion-readback-mismatch-test-secret" },
+      async () => true,
+      undefined,
+      undefined,
+      audit,
+    );
+    const result = await gateway.execute(
+      { tool: "custom.write", input: { value: "commit" } },
+      {
+        runId: "completion-readback-mismatch",
+        principalId: "authenticated-owner",
+        signal: new AbortController().signal,
+        requireApproval: true,
+        notifyApproval() {},
+      },
+    );
+    assert.equal(executions, 1, "the side effect already completed and must not be retried");
+    assert.equal(result.ok, true);
+    assert.equal(result.evidenceId, "", "mismatched evidence must not be exposed as verified");
+    assert.match(result.warnings?.[0] ?? "", /completion audit event could not be persisted and read back/i);
+  } finally {
+    if (previousSofia === undefined) delete process.env.SOFIA_ENV;
+    else process.env.SOFIA_ENV = previousSofia;
+  }
+});
+
 test("tool evidence ID is the exact completion event confirmed by durable readback", async () => {
   const persisted = new Map<string, SecurityAuditEvent>();
   const audit: SecurityAuditSink = {
@@ -695,4 +1092,116 @@ test("tool evidence ID is empty when durable audit readback is missing", async (
   assert.equal(result.ok, true);
   assert.equal(result.evidenceId, "");
   assert.match(result.warnings?.[0] ?? "", /persisted and read back/i);
+});
+
+
+test("approval broker keeps effectful tools blocked until the exact pending action is approved", async () => {
+  const principalId = "approval-e2e-principal";
+  const broker = new ApprovalBroker({
+    store: new InMemoryApprovalDecisionStore(),
+    pollIntervalMs: 25,
+    ttlMs: 10_000,
+  });
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.write",
+    description: "Write protected data after an explicit approval decision",
+    inputSchema: { type: "object", properties: { value: { type: "string" } }, required: ["value"] },
+    effects: ["write"] as const,
+    async execute(input) {
+      executions += 1;
+      return { saved: (input as { value: string }).value };
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, capabilitySecret: "approval-broker-e2e-test-secret" },
+    broker.handle,
+  );
+
+  const execution = gateway.execute(
+    { tool: "custom.write", input: { value: "approved-value" } },
+    {
+      runId: "approval-broker-e2e-run",
+      principalId,
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  let pending = await broker.listPending(principalId);
+  for (let attempt = 0; attempt < 100 && pending.length !== 1; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    pending = await broker.listPending(principalId);
+  }
+  assert.equal(pending.length, 1, "the gateway must publish a pending approval request");
+  assert.equal(pending[0]?.runId, "approval-broker-e2e-run");
+  assert.equal(pending[0]?.toolName, "custom.write");
+  assert.equal(pending[0]?.input.value, "approved-value");
+  assert.match(pending[0]?.actionHash ?? "", /^[a-f0-9]{64}$/);
+  assert.equal(executions, 0, "the effectful tool must remain blocked while approval is pending");
+
+  const approved = await broker.approve(pending[0]!.id, pending[0]!.actionHash, principalId);
+  assert.equal(approved, true);
+  const result = await execution;
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data, { saved: "approved-value" });
+  assert.equal(executions, 1, "the tool must execute exactly once after approval");
+  assert.deepEqual(await broker.listPending(principalId), []);
+});
+
+
+test("effectful tool exceptions after invocation are indeterminate, not confirmed failures", async () => {
+  const events = new Map<string, SecurityAuditEvent>();
+  let externalEffectOccurred = false;
+  const audit: SecurityAuditSink = {
+    durable: true,
+    record(event) { events.set(event.id, event); },
+    read(id) { return events.get(id); },
+    list() { return [...events.values()]; },
+  };
+  const registry = new MapToolRegistry([{
+    name: "custom.purchase",
+    description: "Simulate an external purchase that times out after submission",
+    inputSchema: { type: "object" },
+    effects: ["write"] as const,
+    async execute() {
+      externalEffectOccurred = true;
+      throw new Error("Provider timed out before returning its receipt.");
+    },
+  }]);
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    { ...defaultPolicy, capabilitySecret: "indeterminate-purchase-test-secret" },
+    async () => true,
+    undefined,
+    undefined,
+    audit,
+  );
+
+  const result = await gateway.execute(
+    { tool: "custom.purchase", input: { orderId: "order-42" } },
+    {
+      runId: "indeterminate-purchase-run",
+      principalId: "authenticated-owner",
+      signal: new AbortController().signal,
+      requireApproval: true,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(externalEffectOccurred, true);
+  const started = [...events.values()].find((event) => event.decision === "execution_started");
+  const uncertain = [...events.values()].find((event) => event.decision === "indeterminate");
+  assert.ok(started, "the write-ahead receipt must exist before the external call");
+  assert.ok(uncertain, "a timeout after invocation must not be recorded as a confirmed failure");
+  assert.equal(uncertain.relatedEventId, started.id);
+  assert.deepEqual(
+    findIndeterminateExecutions([...events.values()]).map((event) => event.id),
+    [started.id],
+    "the action must remain in reconciliation instead of being considered safe to retry",
+  );
 });

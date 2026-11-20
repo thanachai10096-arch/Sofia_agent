@@ -1,4 +1,5 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
@@ -10,17 +11,137 @@ import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplica
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { ApprovalBroker } from "../agent/approval-broker.js";
+import { SqliteApprovalDecisionStore } from "../agent/sqlite-approval-store.js";
+import { UpstashApprovalDecisionStore } from "../agent/upstash-approval-store.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
-const apiKey = process.env.SOFIA_API_KEY?.trim();
-if (!apiKey) throw new Error("SOFIA_API_KEY is required.");
-const scopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+const apiKeys: Record<string, string[]> = Object.create(null) as Record<string, string[]>;
+const rawApiKeys = process.env.SOFIA_API_KEYS_JSON?.trim();
+if (rawApiKeys) {
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawApiKeys); }
+  catch { throw new Error("SOFIA_API_KEYS_JSON must be a JSON object mapping API keys to scope arrays."); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("SOFIA_API_KEYS_JSON must be a JSON object mapping API keys to scope arrays.");
+  }
+  for (const [key, value] of Object.entries(parsed)) {
+    if (!key.trim() || key.length > 512 || /[\x00-\x20\x7f]/u.test(key) ||
+        !Array.isArray(value) || value.length === 0 ||
+        !value.every((scope) => typeof scope === "string" && /^[a-z][a-z0-9:_-]{0,63}$/u.test(scope))) {
+      throw new Error("SOFIA_API_KEYS_JSON contains an invalid API key or scope list.");
+    }
+    apiKeys[key] = [...new Set(value as string[])];
+  }
+} else {
+  const apiKey = process.env.SOFIA_API_KEY?.trim();
+  if (!apiKey) throw new Error("Set SOFIA_API_KEY or SOFIA_API_KEYS_JSON.");
+  const fallbackScopes = (process.env.SOFIA_API_SCOPES ?? "agent:run,agent:read").split(",").map((s) => s.trim()).filter(Boolean);
+  if (fallbackScopes.length === 0 || !fallbackScopes.every((scope) => /^[a-z][a-z0-9:_-]{0,63}$/u.test(scope))) {
+    throw new Error("SOFIA_API_SCOPES contains an invalid scope.");
+  }
+  apiKeys[apiKey] = [...new Set(fallbackScopes)];
+}
+if (Object.keys(apiKeys).length === 0) throw new Error("At least one API key is required.");
+const allApiScopes = Object.values(apiKeys).flat();
+if (Object.keys(apiKeys).length > 1) {
+  // Process-mode child commands share the service account's filesystem view.
+  // Require a container boundary before accepting multiple independent tenants.
+  if (process.env.SOFIA_SANDBOX_MODE !== "docker") {
+    throw new Error("Multiple API principals require SOFIA_SANDBOX_MODE=docker; process mode does not isolate tenant filesystems.");
+  }
+  if (!/^.+@sha256:[a-f0-9]{64}$/u.test(process.env.SOFIA_SANDBOX_IMAGE?.trim() ?? "")) {
+    throw new Error("Multiple API principals require SOFIA_SANDBOX_IMAGE to be pinned by sha256 digest.");
+  }
+  if (allApiScopes.some((scope) => scope.startsWith("desktop:"))) {
+    throw new Error("Desktop scopes are disabled for multi-principal API hosts until desktop execution has a per-tenant OS boundary.");
+  }
+}
+const configuredScopes = new Set(allApiScopes);
 const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+let closeApprovalStore: (() => void) | undefined;
+let approvalBroker: ApprovalBroker | undefined;
+let approvalHandler: import("../agent/approval-broker.js").ApprovalHandler | undefined;
+if (process.env.SOFIA_APPROVAL_ENABLED?.trim().toLowerCase() === "true") {
+  if (!configuredScopes.has("approval:manage")) throw new Error("SOFIA_APPROVAL_ENABLED requires approval:manage in at least one configured API key scope list.");
+  const storeKind = (process.env.SOFIA_APPROVAL_STORE ?? "sqlite").trim().toLowerCase();
+  if (storeKind === "redis") {
+    const url = process.env.UPSTASH_REDIS_REST_URL?.trim() || process.env.REDIS_REST_URL?.trim();
+    const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim() || process.env.REDIS_REST_TOKEN?.trim();
+    if (!url || !token) throw new Error("Redis approval storage requires UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN.");
+    const store = new UpstashApprovalDecisionStore({
+      url,
+      token,
+      prefix: process.env.SOFIA_APPROVAL_REDIS_PREFIX?.trim() || "sofia",
+    });
+    approvalBroker = new ApprovalBroker({ store });
+    approvalHandler = approvalBroker.handle;
+  } else if (storeKind === "sqlite") {
+    const store = await SqliteApprovalDecisionStore.open(
+      process.env.SOFIA_APPROVAL_STORE_PATH?.trim() || path.join(workspace, ".sofia", "approvals.sqlite"),
+    );
+    closeApprovalStore = () => store.close();
+    approvalBroker = new ApprovalBroker({ store });
+    approvalHandler = approvalBroker.handle;
+  } else {
+    throw new Error("SOFIA_APPROVAL_STORE must be sqlite or redis.");
+  }
+}
+// Inject the handler before createSofiaAgentDependencies builds its Brain factory.
+// Mutating deps.approval afterwards does not update the factory's captured dependency.
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalHandler);
+if (approvalBroker) deps.approvalBroker = approvalBroker;
+
+// API users never choose a filesystem path. Their opaque project ID is mapped to
+// a private directory under a hash of the authenticated API principal.
+const userWorkspaceRoot = path.resolve(
+  process.env.SOFIA_USER_WORKSPACES_DIR ?? path.join(workspace, ".sofia", "user-workspaces"),
+);
+mkdirSync(userWorkspaceRoot, { recursive: true, mode: 0o700 });
+const restrictWorkspaceDirectory = (directory: string) => {
+  if (process.platform !== "win32") chmodSync(directory, 0o700);
+};
+restrictWorkspaceDirectory(userWorkspaceRoot);
+const maxCachedWorkspaces = (() => {
+  const value = Number(process.env.SOFIA_MAX_CACHED_WORKSPACES ?? 256);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 5000) throw new Error("SOFIA_MAX_CACHED_WORKSPACES must be an integer from 1 to 5000.");
+  return value;
+})();
+type WorkspaceDependencies = Awaited<ReturnType<typeof createSofiaAgentDependenciesWithSessions>>;
+const workspaceDependencies = new Map<string, Promise<WorkspaceDependencies>>();
+const resolveWorkspaceDependencies = async (principalId: string, workspaceId: string) => {
+  if (!/^[a-f0-9]{32}$/u.test(principalId)) throw new Error("Workspace resolution requires an authenticated API principal.");
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(workspaceId)) throw new Error("Invalid project workspace ID.");
+  const cacheKey = principalId + ":" + workspaceId;
+  let pending = workspaceDependencies.get(cacheKey);
+  if (!pending) {
+    if (workspaceDependencies.size >= maxCachedWorkspaces) throw new Error("Workspace runtime capacity reached; increase SOFIA_MAX_CACHED_WORKSPACES or restart after cleanup.");
+    const ownerRoot = path.join(userWorkspaceRoot, principalId);
+    const projectRoot = path.join(ownerRoot, createHash("sha256").update(workspaceId).digest("hex"));
+    mkdirSync(projectRoot, { recursive: true, mode: 0o700 });
+    mkdirSync(path.join(projectRoot, ".sofia"), { recursive: true, mode: 0o700 });
+    restrictWorkspaceDirectory(ownerRoot);
+    restrictWorkspaceDirectory(projectRoot);
+    restrictWorkspaceDirectory(path.join(projectRoot, ".sofia"));
+    pending = createSofiaAgentDependenciesWithSessions(
+      projectRoot,
+      approvalHandler,
+      path.join(projectRoot, ".sofia", "sessions.sqlite"),
+      deps.securityController,
+    );
+    workspaceDependencies.set(cacheKey, pending);
+    void pending.catch(() => {
+      if (workspaceDependencies.get(cacheKey) === pending) workspaceDependencies.delete(cacheKey);
+    });
+  }
+  const resolved = await pending;
+  if (approvalBroker) resolved.approvalBroker = approvalBroker;
+  return resolved;
+};
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -205,9 +326,10 @@ if (discordConfigured) {
 }
 
 const server = createSofiaApi(deps, {
-  apiKeys: { [apiKey]: scopes },
+  apiKeys,
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
+  resolveWorkspaceDependencies,
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
@@ -215,6 +337,13 @@ const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
   deps.closeSessionStore();
+  for (const pending of workspaceDependencies.values()) {
+    void pending.then(async (workspaceDeps) => {
+      workspaceDeps.closeSessionStore();
+      await workspaceDeps.closeBrowserProfiles?.();
+    }).catch(() => undefined);
+  }
+  closeApprovalStore?.();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
 server.listen(port, "0.0.0.0", () => {

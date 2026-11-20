@@ -117,6 +117,10 @@ export { createAdvancedSkillRegistry, listUnregisteredVerifiedSkills } from "./s
 export type { AdvancedSkillRegistryOptions } from "./skills/advanced-skill-registry.js";
 export { MemorySessionStore } from "./session/store.js";
 export { SqliteSessionStore } from "./session/sqlite-store.js";
+export { ApprovalBroker, InMemoryApprovalDecisionStore } from "./agent/approval-broker.js";
+export type { ApprovalRecord, ApprovalRequest, ApprovalDecision, ApprovalDecisionStore } from "./agent/approval-broker.js";
+export { SqliteApprovalDecisionStore } from "./agent/sqlite-approval-store.js";
+export { UpstashApprovalDecisionStore, APPROVAL_CREATE_SCRIPT, APPROVAL_RESOLVE_SCRIPT } from "./agent/upstash-approval-store.js";
 export type { Session } from "./session/store.js";
 export { createSofiaAgentDependenciesWithSessions } from "./models/factory.js";
 export { CoordinatedSubagentRuntime } from "./brain/coordinated-subagent-runtime.js";

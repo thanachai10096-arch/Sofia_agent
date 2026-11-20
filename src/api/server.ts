@@ -9,6 +9,8 @@ import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
 import type { RunRecord } from "./run-record-store.js";
+import type { BrainRunSnapshot } from "../brain/run-state.js";
+import { redactSecrets } from "../security/guard.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 
@@ -25,6 +27,7 @@ interface ActiveRun {
   /** Hashed owner-scoped idempotency key; raw client key is never persisted. */
   idempotencyId?: string;
   requestFingerprint?: string;
+  snapshot?: BrainRunSnapshot;
 }
 
 function headers(origin: string | undefined, config: SofiaApiConfig) {
@@ -116,12 +119,23 @@ function integerSetting(
 }
 
 function pathId(url: string): string | null {
-  const match = url.match(/^\/v1\/agent\/runs\/([^/?]+)$/);
+  const pathname = url.split("?", 1)[0] ?? url;
+  const match = pathname.match(/^\/v1\/agent\/runs\/([^/?]+)$/);
   return match?.[1] ?? null;
 }
 
 export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) {
   const agent = new SofiaAgent(deps);
+  const agentForWorkspace = async (principalId: string, workspaceId?: string): Promise<SofiaAgent> => {
+    if (!config.resolveWorkspaceDependencies) {
+      if (workspaceId !== undefined || Object.keys(config.apiKeys).length > 1) {
+        throw new Error("Per-user workspace isolation is not configured on this host.");
+      }
+      return agent;
+    }
+    const resolved = await config.resolveWorkspaceDependencies(principalId, workspaceId ?? "default");
+    return new SofiaAgent(resolved);
+  };
   const maxBytes = integerSetting("maxBodyBytes", config.maxBodyBytes, 1_000_000, 1, 10_000_000);
   const discordRoute = config.discordInteractionRoute;
   const discordRoutePath = discordRoute?.path ?? "/v1/integrations/discord/interactions";
@@ -154,6 +168,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       ownerKeyId: run.ownerKeyId, desktopCapabilities: [...run.desktopCapabilities],
       ...(run.idempotencyId ? { idempotencyId: run.idempotencyId } : {}),
       ...(run.requestFingerprint ? { requestFingerprint: run.requestFingerprint } : {}),
+      ...(run.snapshot ? { snapshot: run.snapshot } : {}),
     };
     return runStore.save(record);
   };
@@ -173,14 +188,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       desktopCapabilities: record.desktopCapabilities as DesktopCapability[],
       ...(record.idempotencyId ? { idempotencyId: record.idempotencyId } : {}),
       ...(record.requestFingerprint ? { requestFingerprint: record.requestFingerprint } : {}),
+      ...(record.snapshot ? { snapshot: record.snapshot } : {}),
     };
     runs.set(run.id, run); if (interrupted) void persist(run).catch(() => undefined);
   }
-  const idempotency = new Map<string, { runId: string; fingerprint: string }>();
+  const idempotency = new Map<string, { runId: string; fingerprint: string; ready: Promise<void> }>();
   // Rehydrate replay protection from durable run records after a server restart.
   for (const run of runs.values()) {
     if (run.idempotencyId && run.requestFingerprint) {
-      idempotency.set(run.idempotencyId, { runId: run.id, fingerprint: run.requestFingerprint });
+      idempotency.set(run.idempotencyId, { runId: run.id, fingerprint: run.requestFingerprint, ready: Promise.resolve() });
     }
   }
   const activeByKey = new Map<string, number>();
@@ -214,7 +230,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       void persist(run).catch(() => undefined);
       const timer = setTimeout(() => run.controller.abort(), requestTimeoutMs);
       try {
-        const result = await agent.run({
+        const runAgent = await agentForWorkspace(run.ownerKeyId, input.workspace);
+        const result = await runAgent.run({
           principalId: run.ownerKeyId,
           desktopCapabilities: run.desktopCapabilities,
           task: input.task,
@@ -225,6 +242,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
           ...(input.acceptanceCriteria?.length ? { acceptanceCriteria: normalizeAcceptanceCriteria(input.acceptanceCriteria) } : {}),
           signal: run.controller.signal,
           onEvent: (event) => { countToolCall(run.ownerKeyId, run.controller, event); },
+          onRunSnapshot: async (snapshot) => {
+            run.snapshot = redactSecrets(snapshot) as BrainRunSnapshot;
+            run.updatedAt = Date.now();
+            await persist(run);
+          },
         });
         if (run.controller.signal.aborted) {
           run.status = "cancelled";
@@ -296,6 +318,21 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (!auth) return json(res, 401, { error: "unauthorized" }, origin, config);
 
       const requestUrl = new URL(req.url ?? "/", "http://sofia.local");
+      // Cron schedules remain host-scoped until their dispatcher can be partitioned.
+      if (config.resolveWorkspaceDependencies &&
+          (requestUrl.pathname === "/v1/cron" || requestUrl.pathname.startsWith("/v1/cron/"))) {
+        return json(res, 503, { error: "project_scoped_cron_unavailable" }, origin, config);
+      }
+      const requestedJobWorkspace = requestUrl.searchParams.get("workspace") ?? undefined;
+      const resolveJobRuntime = async (workspaceId?: string) => {
+        if (config.resolveWorkspaceDependencies) {
+          if (!workspaceId || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u.test(workspaceId)) return undefined;
+          const projectDeps = await config.resolveWorkspaceDependencies(auth.keyId, workspaceId);
+          return projectDeps.jobRuntime;
+        }
+        if (workspaceId !== undefined) return undefined;
+        return deps.jobRuntime;
+      };
       const isMemoryRequest = requestUrl.pathname === "/v1/memory" || requestUrl.pathname.startsWith("/v1/memory/");
       if (isMemoryRequest) {
         if (!deps.userMemoryStore) return json(res, 503, { error: "user_memory_unavailable" }, origin, config);
@@ -347,6 +384,42 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         return json(res, 405, { error: "method_not_allowed" }, origin, config);
       }
 
+      const isApprovalRequest = requestUrl.pathname === "/v1/approvals" || requestUrl.pathname.startsWith("/v1/approvals/");
+      if (isApprovalRequest) {
+        if (!auth.scopes.includes("approval:manage")) {
+          return json(res, 403, { error: "forbidden", requiredScope: "approval:manage" }, origin, config);
+        }
+        const broker = deps.approvalBroker;
+        if (!broker) return json(res, 503, { error: "approval_broker_unavailable" }, origin, config);
+        if (req.method === "GET" && requestUrl.pathname === "/v1/approvals") {
+          const approvals = await broker.listPending(auth.keyId);
+          return json(res, 200, { approvals }, origin, config);
+        }
+        const decisionMatch = requestUrl.pathname.match(/^\/v1\/approvals\/([^/]+)\/(approve|deny)$/);
+        if (req.method === "POST" && decisionMatch) {
+          let approvalId: string;
+          try { approvalId = decodeURIComponent(decisionMatch[1]!); }
+          catch { return json(res, 400, { error: "invalid_approval_id" }, origin, config); }
+          if (!approvalId || approvalId.length > 128) return json(res, 400, { error: "invalid_approval_id" }, origin, config);
+          const raw = await body(req, maxBytes);
+          if (!raw || typeof raw !== "object" || Array.isArray(raw) ||
+              typeof (raw as Record<string, unknown>).actionHash !== "string" ||
+              !/^[a-f0-9]{64}$/u.test((raw as Record<string, unknown>).actionHash as string)) {
+            return json(res, 400, { error: "invalid_approval_decision" }, origin, config);
+          }
+          const record = await broker.get(approvalId);
+          // Hide requests owned by other principals rather than confirming their existence.
+          if (!record || record.principalId !== auth.keyId) return json(res, 404, { error: "approval_not_found" }, origin, config);
+          const actionHash = (raw as Record<string, unknown>).actionHash as string;
+          const accepted = decisionMatch[2] === "approve"
+            ? await broker.approve(approvalId, actionHash, auth.keyId)
+            : await broker.deny(approvalId, actionHash, auth.keyId);
+          if (!accepted) return json(res, 409, { error: "approval_not_pending_or_expired" }, origin, config);
+          return json(res, 200, { id: approvalId, status: decisionMatch[2] === "approve" ? "approved" : "denied" }, origin, config);
+        }
+        return json(res, 405, { error: "method_not_allowed" }, origin, config);
+      }
+
       const isCronRequest = requestUrl.pathname.startsWith("/v1/cron/");
       if (isCronRequest && !deps.jobRuntime) return json(res, 503, { error: "cron_scheduler_unavailable" }, origin, config);
       if (isCronRequest && req.method === "GET" && !auth.scopes.some(scope => scope === "cron:read" || scope === "cron:manage")) {
@@ -358,11 +431,11 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
 
       // Authorization scopes are enforced at the API boundary, not merely used to
       // derive desktop capabilities. Admin scopes do not implicitly grant run access.
-      const isRunRequest = req.method === "POST" && (req.url === "/v1/agent/runs" || req.url === "/v1/agent/runs/stream" || req.url === "/v1/jobs");
+      const isRunRequest = req.method === "POST" && (requestUrl.pathname === "/v1/agent/runs" || requestUrl.pathname === "/v1/agent/runs/stream" || requestUrl.pathname === "/v1/jobs");
       if (isRunRequest && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobReadRequest = req.method === "GET" && (req.url === "/v1/jobs" || (req.url?.startsWith("/v1/jobs/") === true && !req.url.endsWith("/resume") && !req.url.endsWith("/cancel")));
+      const isJobReadRequest = req.method === "GET" && (requestUrl.pathname === "/v1/jobs" || (requestUrl.pathname.startsWith("/v1/jobs/") && !requestUrl.pathname.endsWith("/resume") && !requestUrl.pathname.endsWith("/cancel")));
       if (isJobReadRequest && !auth.scopes.some((scope) => scope === "agent:read" || scope === "agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:read" }, origin, config);
       }
@@ -374,7 +447,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       if (isRunCancellation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
-      const isJobMutation = req.method === "POST" && req.url?.startsWith("/v1/jobs/") === true && (req.url.endsWith("/resume") || req.url.endsWith("/cancel"));
+      const isJobMutation = req.method === "POST" && requestUrl.pathname.startsWith("/v1/jobs/") && (requestUrl.pathname.endsWith("/resume") || requestUrl.pathname.endsWith("/cancel"));
       if (isJobMutation && !auth.scopes.includes("agent:run")) {
         return json(res, 403, { error: "forbidden", requiredScope: "agent:run" }, origin, config);
       }
@@ -444,6 +517,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             desktopCapabilities: stored.desktopCapabilities as DesktopCapability[],
             ...(stored.idempotencyId ? { idempotencyId: stored.idempotencyId } : {}),
             ...(stored.requestFingerprint ? { requestFingerprint: stored.requestFingerprint } : {}),
+            ...(stored.snapshot ? { snapshot: stored.snapshot } : {}),
           };
           runs.set(id, run);
         }
@@ -493,7 +567,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         res.on("close", abortOnDisconnect);
         try {
           run.status = "running";
-          const result = await agent.run({
+          const runAgent = await agentForWorkspace(auth.keyId, input.workspace);
+          const result = await runAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
@@ -565,7 +640,15 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             if (existing && existingRun && existing.fingerprint !== requestFingerprint) {
               return json(res, 409, { error: "idempotency_key_reused", message: "This idempotency key was already used with a different request." }, origin, config);
             }
-            if (existingRun) return json(res, 200, publicResponse(existingRun), origin, config);
+            if (existingRun && existing) {
+              // A concurrent request may arrive while the first request is still
+              // durably persisting its queued record. Wait for that acceptance
+              // before returning the existing run to the retrying client.
+              try { await existing.ready; }
+              catch { return json(res, 503, { error: "run_persistence_unavailable" }, origin, config); }
+              const acceptedRun = runs.get(existing.runId);
+              if (acceptedRun) return json(res, 200, publicResponse(acceptedRun), origin, config);
+            }
             if (existing) idempotency.delete(idempotencyId);
           }
           const active = activeByKey.get(auth.keyId) ?? 0;
@@ -588,15 +671,26 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
             ...(idempotencyId ? { idempotencyId, requestFingerprint } : {}),
           };
           runs.set(runId, run);
+          // Reserve the idempotency key synchronously before yielding to storage.
+          // Otherwise two concurrent retries can both pass the map lookup and
+          // launch separate runs while the first queued record is being persisted.
+          const acceptance = persist(run);
+          if (idempotencyId) idempotency.set(idempotencyId, {
+            runId,
+            fingerprint: requestFingerprint,
+            ready: acceptance,
+          });
           try {
             // A 202 response is an acceptance promise: persist the queued record
             // before acknowledging so a following status poll cannot race the disk write.
-            await persist(run);
+            await acceptance;
           } catch {
             runs.delete(runId);
+            if (idempotencyId && idempotency.get(idempotencyId)?.runId === runId) {
+              idempotency.delete(idempotencyId);
+            }
             return json(res, 503, { error: "run_persistence_unavailable" }, origin, config);
           }
-          if (idempotencyId) idempotency.set(idempotencyId, { runId, fingerprint: requestFingerprint });
           activeByKey.set(auth.keyId, active + 1);
           startRun(run, {
             ...input,
@@ -616,7 +710,8 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const runId = randomUUID();
         try {
-          const result = await agent.run({
+          const runAgent = await agentForWorkspace(auth.keyId, input.workspace);
+          const result = await runAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
             task: input.task,
@@ -727,45 +822,52 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
       }
 
 
-      const jobMatch = req.url.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
-      if (jobMatch && deps.jobRuntime) {
+      const jobMatch = requestUrl.pathname.match(/^\/v1\/jobs\/([^/]+)(?:\/(resume|cancel))?$/);
+      if (jobMatch) {
         const jobId = jobMatch[1];
         const action = jobMatch[2];
         if (!jobId) return json(res, 404, { error: "job_not_found" }, origin, config);
-        const job = await deps.jobRuntime.get(jobId);
-        if (!job || job.ownerKeyId !== auth.keyId) {
-          return json(res, 404, { error: "job_not_found" }, origin, config);
-        }
-        if (req.method === "GET" && !action) {
-          return json(res, 200, job, origin, config);
-        }
+        const jobRuntime = await resolveJobRuntime(requestedJobWorkspace);
+        if (!jobRuntime) return json(res, config.resolveWorkspaceDependencies ? 400 : 503,
+          { error: config.resolveWorkspaceDependencies ? "workspace_required" : "job_runtime_unavailable" }, origin, config);
+        const job = await jobRuntime.get(jobId);
+        if (!job || job.ownerKeyId !== auth.keyId) return json(res, 404, { error: "job_not_found" }, origin, config);
+        if (req.method === "GET" && !action) return json(res, 200, job, origin, config);
         if (req.method === "POST" && action === "resume") {
-          try { return json(res, 202, await deps.jobRuntime.resume(jobId), origin, config); }
+          try { return json(res, 202, await jobRuntime.resume(jobId), origin, config); }
           catch (error) { return json(res, 409, { error: "job_resume_failed", message: error instanceof Error ? error.message : "Resume failed" }, origin, config); }
         }
         if (req.method === "POST" && action === "cancel") {
-          const cancelled = await deps.jobRuntime.cancel(jobId);
+          const cancelled = await jobRuntime.cancel(jobId);
           return cancelled ? json(res, 202, { id: jobId, status: "cancelled" }, origin, config) : json(res, 409, { error: "job_not_running" }, origin, config);
         }
       }
 
-      if (req.method === "GET" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
-        const jobs = (await deps.jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
+      if (req.method === "GET" && requestUrl.pathname === "/v1/jobs") {
+        const jobRuntime = await resolveJobRuntime(requestedJobWorkspace);
+        if (!jobRuntime) return json(res, config.resolveWorkspaceDependencies ? 400 : 503,
+          { error: config.resolveWorkspaceDependencies ? "workspace_required" : "job_runtime_unavailable" }, origin, config);
+        const jobs = (await jobRuntime.list()).filter((item) => item.ownerKeyId === auth.keyId);
         return json(res, 200, { jobs }, origin, config);
       }
 
-      if (req.method === "POST" && req.url === "/v1/jobs") {
-        if (!deps.jobRuntime) return json(res, 503, { error: "job_runtime_unavailable" }, origin, config);
+      if (req.method === "POST" && requestUrl.pathname === "/v1/jobs") {
         const parsed = validateAgentRunInput(await body(req, maxBytes));
         if (!parsed.valid) return json(res, 400, { error: parsed.error }, origin, config);
         const input = parsed.input;
+        if (input.workspace !== undefined && requestedJobWorkspace !== undefined && input.workspace !== requestedJobWorkspace) {
+          return json(res, 400, { error: "workspace_selector_mismatch" }, origin, config);
+        }
+        const jobWorkspace = input.workspace ?? requestedJobWorkspace;
+        const jobRuntime = await resolveJobRuntime(jobWorkspace);
+        if (!jobRuntime) return json(res, config.resolveWorkspaceDependencies ? 400 : 503,
+          { error: config.resolveWorkspaceDependencies ? "workspace_required" : "job_runtime_unavailable" }, origin, config);
         const selectionError = modelSelectionError(input);
         if (selectionError) return json(res, selectionError.status, { error: selectionError.error }, origin, config);
         if (!input.task?.trim()) return json(res, 400, { error: "task_required" }, origin, config);
         try { usage.consume(auth.keyId); } catch { return json(res, 429, { error: "quota_exceeded" }, origin, config); }
         try {
-          const job = await deps.jobRuntime.submit({
+          const job = await jobRuntime.submit({
             task: input.task,
             ...(input.modelRouteId !== undefined ? { modelRouteId: input.modelRouteId } : {}),
             ownerKeyId: auth.keyId,

@@ -9,6 +9,7 @@ import type { BrainRunSnapshot } from "../brain/run-state.js";
 import type { SecurityController } from "../security/controller.js";
 import type { SecurityAuditSink } from "../security/audit.js";
 import type { DesktopCapability } from "../desktop/types.js";
+import type { ApprovalBroker } from "./approval-broker.js";
 export interface AgentRequest {
   task: string;
   context?: string;
@@ -23,6 +24,8 @@ export interface AgentRequest {
   useBrain?: boolean;
   signal?: AbortSignal;
   onEvent?: (event: AgentEvent) => void;
+  /** Persist versioned Brain checkpoints while this API run is executing. */
+  onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;
 }
 export interface AgentEvent { type:"run.started"|"task.classified"|"model.selected"|"model.completed"|"tool.started"|"tool.completed"|"tool.failed"|"tool.output_suspicious"|"tool.approval_required"|"review.started"|"review.completed"|"retry"|"run.completed"|"run.failed"; message:string; step?:number; metadata?:Record<string,unknown>; }
 export interface AgentResult {
@@ -41,6 +44,7 @@ export interface AgentDependencies {
  tools?:ToolRegistry;
  policy?:ExecutionPolicy;
  approval?: import("./approval.js").ApprovalHandler;
+ approvalBroker?: ApprovalBroker;
  brainFactory?: (options:{signal?:AbortSignal;maxSteps?:number;principalId?:string;modelRouteId?:string;desktopCapabilities?:DesktopCapability[];onRunSnapshot?: (snapshot: BrainRunSnapshot) => void | Promise<void>;onEvent?: (event: BrainEvent) => void})=>SofiaBrain;
  jobRuntime?: JobRuntime;
  securityController?: SecurityController;

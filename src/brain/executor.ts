@@ -974,6 +974,29 @@ export class SofiaBrain {
         if (resumed.task !== input.task) throw new Stop("Run snapshot task mismatch");
         understanding = resumed.understanding;
         currentPlan = this.validatePlan(resumed.plan);
+        if (typeof resumed.checkpointId !== "string" || !resumed.checkpointId.trim() || resumed.checkpointId.length > 256) {
+          throw new Stop("Run snapshot checkpoint ID is invalid");
+        }
+        if (!Array.isArray(resumed.completedStepIds) ||
+            resumed.completedStepIds.some((id) => typeof id !== "string" || !id.trim() || id.length > 256) ||
+            new Set(resumed.completedStepIds).size !== resumed.completedStepIds.length) {
+          throw new Stop("Run snapshot completed-step list is invalid");
+        }
+        const planStepIds = new Set(currentPlan.steps.map((step) => step.id));
+        if (resumed.completedStepIds.some((id) => !planStepIds.has(id))) {
+          throw new Stop("Run snapshot references a completed step outside the saved plan");
+        }
+        if (!resumed.usage || !["steps", "toolCalls", "modelCalls", "reservedOrUsedTokens", "replans"].every((key) => {
+          const value = resumed.usage[key as keyof typeof resumed.usage];
+          return Number.isSafeInteger(value) && value >= 0;
+        })) {
+          throw new Stop("Run snapshot usage counters are invalid");
+        }
+        if (!Number.isSafeInteger(resumed.recoveryRounds) || resumed.recoveryRounds < 0 ||
+            !Array.isArray(resumed.observations) || !Array.isArray(resumed.diagnoses) ||
+            !Array.isArray(resumed.decisions) || !Array.isArray(resumed.trace)) {
+          throw new Stop("Run snapshot recovery metadata is invalid");
+        }
         checkpointId = resumed.checkpointId;
         baselineId = resumed.baselineSnapshotId;
         completedStepIds = new Set(resumed.completedStepIds);

@@ -35,6 +35,24 @@ test("creating a schedule cannot assign it to another owner", async () => {
   assert.equal(state.schedules.length, 0);
 });
 
+test("scheduler core rejects invalid retry and timeout limits before persisting", async () => {
+  const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
+  const store: CronStore = { async transact(fn) { return fn(state); } };
+  const runtime = { async submit() { throw new Error("unused"); } } as unknown as JobRuntime;
+  const scheduler = new CronScheduler(runtime, { store });
+  const base = { name: "bounded", task: "task", runAt: "2026-10-18T00:00:00.000Z", timeZone: "UTC", ownerKeyId: "alice" };
+
+  for (const maxRetries of [NaN, Infinity, -1, 1.5, 11]) {
+    await assert.rejects(() => scheduler.create({ ...base, maxRetries }, "alice"), /maxRetries must be an integer/i);
+  }
+  for (const timeoutMs of [NaN, Infinity, 999, 1_000.5, 3_600_001]) {
+    await assert.rejects(() => scheduler.create({ ...base, timeoutMs }, "alice"), /timeoutMs must be an integer/i);
+  }
+  await assert.rejects(() => scheduler.create({ ...base, name: "x".repeat(201) }, "alice"), /name must not exceed/i);
+  await assert.rejects(() => scheduler.create({ ...base, task: "x".repeat(20_001) }, "alice"), /task must not exceed/i);
+  assert.equal(state.schedules.length, 0);
+});
+
 test("schedule quota is enforced atomically per owner", async () => {
   const state = { schedules: [] as any[], history: [] as any[], audit: [] as any[] };
   const store: CronStore = { async transact(fn) { return fn(state); } };

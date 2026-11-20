@@ -439,6 +439,35 @@ test("Brain can resume from a saved run snapshot without repeating completed ste
   assert.ok(saved);
   assert.equal(writes, 1);
 
+  const tamperedSnapshot = {
+    ...saved,
+    completedStepIds: [...saved.completedStepIds, "step-not-in-saved-plan"],
+  };
+  const guardedResume = createSofiaBrain({
+    dependencies: { reasoner: makeReasoner(), tools, allowShell: false, allowNetwork: false },
+    limits: {
+      maxSteps: 4, maxToolCalls: 10, maxReplans: 1, maxModelCalls: 4,
+      maxTokens: 1_000, maxContextTokens: 500, maxOutputTokens: 100, timeoutMs: 5_000,
+    },
+  });
+  const rejected = await guardedResume.run({
+    task: "Create hello.txt",
+    resume: tamperedSnapshot,
+    acceptanceCriteria: [
+      {
+        id: "file-exists",
+        description: "hello.txt exists",
+        probe: { tool: "workspace.list_files", input: { path: "." } },
+        evaluate(data) {
+          return { passed: Array.isArray(data) && data.includes("hello.txt"), detail: "hello.txt exists" };
+        },
+      },
+    ],
+  });
+  assert.equal(rejected.completed, false);
+  assert.match(rejected.summary, /completed step outside the saved plan/i);
+  assert.equal(writes, 1, "a tampered checkpoint must not skip arbitrary plan steps or repeat side effects");
+
   const resumed = createSofiaBrain({
     dependencies: {
       reasoner: makeReasoner(),

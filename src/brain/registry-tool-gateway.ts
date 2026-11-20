@@ -46,10 +46,10 @@ export class RegistryToolGateway implements ToolGateway {
       effect === "write" || effect === "shell" || effect === "network" ||
       effect === "browser" || effect === "destructive",
     ) ?? false;
-    if (production && effectfulForAudit && (!this.audit?.durable || !this.audit.read)) {
+    if (production && effectfulForAudit && (!this.audit?.durable || !this.audit.read || !this.audit.list)) {
       return {
         ok: false, data: null, evidenceId: "",
-        error: { category: "permission_error", message: "Production effectful tool execution requires a durable, readable security audit sink." },
+        error: { category: "permission_error", message: "Production effectful tool execution requires a durable, readable, enumerable security audit sink for recovery." },
       };
     }
     // Bind the approval hash and actual execution to one immutable input snapshot.
@@ -89,22 +89,75 @@ export class RegistryToolGateway implements ToolGateway {
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
       context.notifyApproval(true);
       try{
-        const approved=await this.approval({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk});
+        const approved=await this.approval({runId:context.runId,principalId:context.principalId,toolName:call.tool,input:structuredClone(input),actionHash:assessment.actionHash,risk:assessment.risk,signal:context.signal});
         if(!approved){
           await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_denied",reason:"Approval handler denied the exact action.",input:redactSecrets(input)});
           return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Tool execution was not approved."}};
         }
+        const approvalEvidenceId = randomUUID();
+        try {
+          await this.audit?.record({id:approvalEvidenceId,at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"approval_approved",reason:"The exact action hash was approved.",input:redactSecrets(input)});
+          if (production) {
+            const persistedApproval = await this.audit?.read?.(approvalEvidenceId);
+            if (!persistedApproval || persistedApproval.id !== approvalEvidenceId ||
+                persistedApproval.runId !== context.runId || persistedApproval.principalId !== context.principalId ||
+                persistedApproval.toolName !== call.tool || persistedApproval.actionHash !== assessment.actionHash ||
+                persistedApproval.decision !== "approval_approved") {
+              throw new Error("Approval audit readback mismatch.");
+            }
+          }
+        } catch {
+          return {ok:false,data:null,evidenceId:approvalEvidenceId,error:{category:"permission_error",message:"Approval audit evidence could not be durably verified; tool execution was blocked."}};
+        }
       }finally{context.notifyApproval(false);}
     }
     let data:unknown;
+    let executionStartReceiptId: string | undefined;
     try{
       this.security.assertRunning();
       context.signal.throwIfAborted();
       if(capabilitySecret && (!capability || !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk,actionHash:assessment.actionHash},capabilitySecret))) {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability validation failed immediately before execution."}};
       }
-      if(!capabilitySecret && (process.env.NODE_ENV==="production"||process.env.SOFIA_ENV==="production")) {
+      if(!capabilitySecret && production) {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Production tool execution requires a capability secret."}};
+      }
+      if (effectfulForAudit && this.audit) {
+        const startedId = randomUUID();
+        executionStartReceiptId = startedId;
+        try {
+          await this.audit.record({
+            id: startedId,
+            at: new Date().toISOString(),
+            runId: context.runId,
+            principalId: context.principalId,
+            toolName: call.tool,
+            actionHash: assessment.actionHash,
+            risk: assessment.risk,
+            decision: "execution_started",
+            reason: "Execution intent persisted immediately before invoking the tool.",
+            input: redactSecrets(input),
+          });
+          if (production) {
+            const persistedStart = await this.audit.read?.(startedId);
+            if (!persistedStart || persistedStart.id !== startedId ||
+                persistedStart.runId !== context.runId || persistedStart.principalId !== context.principalId ||
+                persistedStart.toolName !== call.tool || persistedStart.actionHash !== assessment.actionHash ||
+                persistedStart.risk !== assessment.risk || persistedStart.decision !== "execution_started") {
+              throw new Error("Execution-start receipt readback mismatch.");
+            }
+          }
+        } catch {
+          return {
+            ok: false,
+            data: null,
+            evidenceId: "",
+            error: {
+              category: "permission_error",
+              message: "Tool execution was blocked because its execution-start receipt could not be persisted and verified.",
+            },
+          };
+        }
       }
       const boundSignal=this.security.bindSignal(context.signal);
       try {
@@ -116,7 +169,7 @@ export class RegistryToolGateway implements ToolGateway {
       const message=String(redactSecrets(error instanceof Error?error.message:String(error)));
       const warnings:string[]=[];
       try {
-        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:redactSecrets(input)});
+        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision: executionStartReceiptId ? "indeterminate" : "failed",reason:message,input:redactSecrets(input),...(executionStartReceiptId ? {relatedEventId:executionStartReceiptId} : {})});
       } catch {
         warnings.push("Security audit could not persist the tool failure event.");
       }
@@ -128,11 +181,14 @@ export class RegistryToolGateway implements ToolGateway {
     const safeData=redactSecrets(data);
     const warnings:string[]=[];
     try {
-      await this.audit?.record({id:evidenceId,at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
+      await this.audit?.record({id:evidenceId,at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData,...(executionStartReceiptId ? {relatedEventId:executionStartReceiptId} : {})});
       if (this.audit?.durable) {
         const persisted = await this.audit.read?.(evidenceId);
         if (!persisted || persisted.id !== evidenceId || persisted.runId !== context.runId ||
-            persisted.actionHash !== assessment.actionHash || persisted.decision !== "completed") {
+            persisted.principalId !== context.principalId || persisted.toolName !== call.tool ||
+            persisted.actionHash !== assessment.actionHash || persisted.risk !== assessment.risk ||
+            persisted.decision !== "completed" ||
+            (executionStartReceiptId !== undefined && persisted.relatedEventId !== executionStartReceiptId)) {
           throw new Error("Completion audit readback did not match the executed action.");
         }
       }
