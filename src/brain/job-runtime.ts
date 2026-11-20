@@ -24,6 +24,9 @@ export interface JobRecord {
   /** Original user task before historical session context is appended. */
   sessionTask?: string;
   notificationDelivered?: boolean;
+  /** Hashed owner-scoped client idempotency key; raw key is never persisted. */
+  idempotencyId?: string;
+  requestFingerprint?: string;
   leaseOwnerToken?: string;
   leaseExpiresAt?: string;
   heartbeatAt?: string;
@@ -75,7 +78,7 @@ function publicJobRecord(record: JobRecord): JobRecord {
 
 
 export interface JobRuntime {
-  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord>;
+  submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyId?: string; requestFingerprint?: string }): Promise<JobRecord>;
   get(id: string): Promise<JobRecord | undefined>;
   /** Owner-bound accessors fail closed for jobs without a matching persisted owner. */
   getForOwner?(id: string, ownerKeyId: string): Promise<JobRecord | undefined>;
@@ -386,6 +389,26 @@ class FileJobStateStore {
     }
   }
 
+  async create(record: JobRecord): Promise<{ record: JobRecord; created: boolean }> {
+    return this.withFileLock(async () => {
+      const records = await this.read();
+      if (record.idempotencyId) {
+        const existing = records.find(item =>
+          item.ownerKeyId === record.ownerKeyId && item.idempotencyId === record.idempotencyId,
+        );
+        if (existing) {
+          if (existing.requestFingerprint !== record.requestFingerprint) {
+            throw new Error("idempotency_key_reused_with_different_request");
+          }
+          return { record: { ...existing }, created: false };
+        }
+      }
+      records.push({ ...record });
+      await this.write(records);
+      return { record: { ...record }, created: true };
+    });
+  }
+
   async save(record: JobRecord): Promise<boolean> {
     const operation = this.writes.then(() => this.withFileLock(async () => {
       const records = await this.read();
@@ -447,7 +470,7 @@ export class DurableJobRuntime implements JobRuntime {
     this.state = new FileJobStateStore(namespace);
   }
 
-  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string }): Promise<JobRecord> {
+  async submit(input: Omit<BrainRunInput, "signal" | "resume"> & { ownerKeyId?: string; notificationChannelId?: string; sessionKey?: string; sessionTask?: string; idempotencyId?: string; requestFingerprint?: string }): Promise<JobRecord> {
     this.beginAdmission();
     try {
     const id = randomUUID();
@@ -460,9 +483,16 @@ export class DurableJobRuntime implements JobRuntime {
       ...(input.sessionKey ? { sessionKey: input.sessionKey } : {}),
       ...(input.sessionTask ? { sessionTask: input.sessionTask } : {}),
       notificationDelivered: false,
+      ...(input.idempotencyId ? { idempotencyId: input.idempotencyId } : {}),
+      ...(input.requestFingerprint ? { requestFingerprint: input.requestFingerprint } : {}),
     };
+    const creation = await this.state.create(record);
+    if (!creation.created) {
+      this.jobs.set(creation.record.id, creation.record);
+      return publicJobRecord(creation.record);
+    }
+    Object.assign(record, creation.record);
     this.jobs.set(id, record);
-    await this.state.save(record);
     if (this.closed) {
       await this.state.cancel(id);
       Object.assign(record, { status: "cancelled" as const, error: "Job runtime is shutting down." });
