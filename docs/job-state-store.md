@@ -27,3 +27,18 @@ For SQL implementations, use a partial unique index for non-null idempotency key
 ## Compatibility
 
 The existing three-argument `DurableJobRuntime` constructor remains unchanged. The optional fourth argument allows a custom store to be injected without changing existing deployments.
+
+## Multi-host worker readiness: remaining runtime contract
+
+The store interface is only the persistence boundary; the current runtime still starts execution in the process that accepts `submit()`. Before a separate worker process can safely consume queued jobs, the runtime must persist a versioned, serializable execution payload with each job. At minimum that payload must preserve the BrainRunInput fields that affect execution:
+
+- `task`, `modelRouteId`, `context`, and `acceptanceCriteria`;
+- `understanding`, `plan`, and `rollbackOnFailure` when supplied;
+- the authenticated principal/owner association (never a caller-controlled replacement for it).
+
+The payload must exclude live objects such as `AbortSignal`, functions, runtime instances, and in-memory handles. It must be validated and redacted before persistence, and older records without a payload must remain readable with an explicit legacy/recovery path. Do not reconstruct a worker's input from `task` alone: that silently drops context and acceptance criteria.
+
+A separate worker service can then repeatedly list candidate queued/expired jobs, call the store's atomic `claim`, and execute only the returned claimed record. Listing is advisory; the claim is the ownership decision. Each worker needs bounded concurrency, lease heartbeats, cancellation propagation, and graceful shutdown. A worker must stop if heartbeat/fenced save fails. Polling intervals should be configurable and jittered to avoid synchronized database load.
+
+The first PostgreSQL adapter should be introduced only after the execution-payload contract and worker lifecycle are implemented and tested. Adding a database dependency before those pieces exist would provide shared storage without providing distributed execution. Integration tests must use multiple runtime/worker instances against one real database and cover concurrent idempotent submission, competing claims, lease expiry/reclaim, stale-worker writes, cancellation races, and process restart recovery.
+
