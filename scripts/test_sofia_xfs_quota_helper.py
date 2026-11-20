@@ -246,9 +246,9 @@ class QuotaHelperTests(unittest.TestCase):
                 }
             })
 
+            real_rmtree = HELPER.shutil.rmtree
             def partially_remove(path):
-                shutil = __import__("shutil")
-                shutil.rmtree(path)
+                real_rmtree(path)
                 raise OSError("simulated interruption after tree removal")
 
             with patch.object(HELPER, "run", return_value=""), patch.object(HELPER.shutil, "rmtree", side_effect=partially_remove):
