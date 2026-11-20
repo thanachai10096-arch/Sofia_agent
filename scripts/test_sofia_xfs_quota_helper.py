@@ -383,6 +383,39 @@ class QuotaHelperTests(unittest.TestCase):
             finally:
                 os.close(fd)
 
+    def test_failed_quota_reset_readback_keeps_project_id_reserved(self):
+        run_id = "123e4567-e89b-42d3-a456-426614174013"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            state = Path(temp) / "state"
+            root.mkdir()
+            state.mkdir()
+            workspace = root / ("run-" + run_id)
+            HELPER.save_allocations(state, {
+                run_id: {
+                    "project_id": HELPER.PROJECT_ID_MIN,
+                    "workspace": str(workspace),
+                    "bytes": 8 * 1024 * 1024,
+                    "inodes": HELPER.INODE_LIMIT,
+                    "status": "needs_recovery",
+                }
+            })
+
+            with patch.object(HELPER, "run", return_value=""), patch.object(
+                HELPER, "verify_quota", side_effect=HELPER.HelperError("reset read-back mismatch")
+            ):
+                with self.assertRaises(HELPER.HelperError):
+                    HELPER.dispose(root, state, {
+                        "runId": run_id,
+                        "workspacePath": str(workspace),
+                    })
+
+            self.assertIn(run_id, HELPER.load_allocations(state))
+            self.assertEqual(
+                HELPER.load_allocations(state)[run_id]["project_id"],
+                HELPER.PROJECT_ID_MIN,
+            )
+
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
         self.assertEqual(HELPER.PROJECT_ID_MAX, 299999)
