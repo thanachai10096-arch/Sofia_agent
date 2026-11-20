@@ -89,6 +89,7 @@ test("runtime lifecycle audit is captured as privacy-bounded observability event
   const first = await telemetry.summarize("tenant-user-1");
   assert.equal(first.total, 2);
   assert.equal(first.byType["research.started"], 1);
+  assert.equal(first.byOutcome.running, 1);
   assert.equal(first.byType["research.completed"], 1);
   assert.equal(first.resources.cycles, 2);
   const second = await telemetry.list("tenant-user-2");
