@@ -2,8 +2,17 @@ import type { SofiaTool } from "../tools/types.js";
 
 const text = (description: string) => ({ type: "string", description });
 const readOnlyActionPrefixes = ["search", "read", "get", "list", "fetch", "retrieve", "show", "view", "info", "metadata", "subtitle", "transcript", "query", "status"];
-const isReadOnlyAction = (action: string) =>
-  readOnlyActionPrefixes.some((prefix) => action === prefix || action.startsWith(prefix + "_"));
+const mutatingActionWords = new Set([
+  "create", "delete", "update", "edit", "post", "publish", "comment", "like", "follow",
+  "unfollow", "send", "dm", "upload", "buy", "purchase", "subscribe", "unsubscribe",
+  "join", "leave", "react", "vote", "star", "fork", "merge", "push", "commit", "reply",
+  "share", "bookmark", "save", "report",
+]);
+const isReadOnlyAction = (action: string) => {
+  const words = action.replace(/-/g, "_").split("_");
+  return !words.some((word) => mutatingActionWords.has(word)) &&
+    readOnlyActionPrefixes.some((prefix) => action === prefix || action.startsWith(prefix + "_"));
+};
 
 async function invokeReach(runtime: Parameters<SofiaTool["execute"]>[1]["runtime"], request: Record<string, unknown>) {
   const python = runtime.platform === "windows" ? "python" : "python3";
