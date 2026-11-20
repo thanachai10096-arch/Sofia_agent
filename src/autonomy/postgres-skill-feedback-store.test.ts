@@ -48,7 +48,7 @@ test("PostgreSQL feedback store creates a scoped JSONB table", async () => {
   await store(pool).ensureSchema();
   assert.match(pool.calls[0]!.sql, /CREATE TABLE IF NOT EXISTS sofia_skill_feedback/);
   assert.match(pool.calls[0]!.sql, /scope_id text PRIMARY KEY/);
-  assert.match(pool.calls[0]!.sql, /state jsonb NOT NULL/);
+  assert.match(pool.calls[0]!.sql, /state jsonb NOT NULL CHECK \\(jsonb_typeof\\(state\\) = 'object'\\)/);
 });
 
 test("feedback transactions isolate scopes and persist changes under row lock", async () => {
