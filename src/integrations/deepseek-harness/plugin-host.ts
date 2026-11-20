@@ -87,7 +87,7 @@ export class SofiaPluginHost {
       plugin.install(context);
       this.plugins.set(plugin.id, installed);
     } catch (error) {
-      this.runDisposers(installed);
+      try { this.runDisposers(installed); } catch { /* preserve the original install error */ }
       throw error;
     }
     this.emit("plugin:installed", { pluginId: plugin.id });
