@@ -19,10 +19,19 @@ export type SofiaPluginEventListener<K extends SofiaPluginEventName> =
 
 export type SofiaPluginHostScope = "process" | "run" | "principal";
 
+export interface SofiaPluginGrant {
+  /** Exact plugin identity approved by trusted server-side authorization. */
+  readonly pluginId: string;
+  /** Maximum effects this principal may grant to this plugin. */
+  readonly capabilities: readonly ToolEffect[];
+}
+
 export interface SofiaPluginHostOptions {
   readonly scope?: SofiaPluginHostScope;
   /** Required for principal-scoped hosts; never inferred from plugin input. */
   readonly principalId?: string;
+  /** Trusted grants supplied by the host application, never by plugin input. */
+  readonly grants?: readonly SofiaPluginGrant[];
 }
 
 export interface SofiaPluginContext {
@@ -71,6 +80,7 @@ export class SofiaPluginHost {
   readonly scope: SofiaPluginHostScope;
   readonly principalId?: string;
   private readonly plugins = new Map<string, InstalledPlugin>();
+  private readonly grants: ReadonlyMap<string, ReadonlySet<ToolEffect>>;
   private readonly tools = new Map<string, SofiaTool>();
   private readonly services = new Map<string, { pluginId: string; value: unknown }>();
   private readonly listeners = new Map<SofiaPluginEventName, Set<(payload: never) => void>>();
@@ -86,6 +96,20 @@ export class SofiaPluginHost {
       throw new Error("principalId may only be set on a principal-scoped Sofia plugin host.");
     }
     this.principalId = options.principalId?.trim();
+    const grants = new Map<string, ReadonlySet<ToolEffect>>();
+    for (const grant of options.grants ?? []) {
+      if (!grant.pluginId.trim() || grant.pluginId !== grant.pluginId.trim()) {
+        throw new Error("Sofia plugin grant IDs must be non-empty and have no surrounding whitespace.");
+      }
+      if (grants.has(grant.pluginId)) {
+        throw new Error(`Duplicate Sofia plugin grant for "${grant.pluginId}".`);
+      }
+      grants.set(grant.pluginId, new Set(grant.capabilities));
+    }
+    if (this.scope !== "principal" && grants.size > 0) {
+      throw new Error("Plugin grants may only be supplied to a principal-scoped host.");
+    }
+    this.grants = grants;
   }
 
   on<K extends SofiaPluginEventName>(
@@ -111,6 +135,17 @@ export class SofiaPluginHost {
       capabilities: [...plugin.manifest.capabilities],
       dependencies: [...(plugin.manifest.dependencies ?? [])],
     } : undefined;
+    if (this.scope === "principal") {
+      const grantedCapabilities = this.grants.get(plugin.id);
+      if (!manifest || !grantedCapabilities) {
+        throw new Error(`Sofia plugin install denied: principal "${this.principalId}" has no trusted grant for "${plugin.id}".`);
+      }
+      for (const capability of manifest.capabilities) {
+        if (!grantedCapabilities.has(capability)) {
+          throw new Error(`Sofia plugin install denied: "${plugin.id}" requires ungranted capability "${capability}".`);
+        }
+      }
+    }
     if (manifest) {
       if (!manifest.version.trim()) throw new Error(`Sofia plugin "${plugin.id}" must declare a manifest version.`);
       const capabilities = new Set<ToolEffect>(manifest.capabilities);
