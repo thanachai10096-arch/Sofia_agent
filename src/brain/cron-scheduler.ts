@@ -258,6 +258,7 @@ export class CronScheduler {
   private ticking = false;
   private closed = false;
   private tickPromise?: Promise<void>;
+  private closePromise?: Promise<void>;
   private readonly active = new Map<string, AbortController>();
   private readonly activeTasks = new Set<Promise<void>>();
   private readonly recoveryTasks = new Set<Promise<unknown>>();
@@ -269,15 +270,16 @@ export class CronScheduler {
   }
 
   async close(): Promise<void> {
-    if (this.closed) {
-      await Promise.allSettled([...(this.tickPromise ? [this.tickPromise] : []), ...this.activeTasks, ...this.recoveryTasks]);
-      return;
-    }
+    if (this.closePromise) return this.closePromise;
     this.closed = true;
     for (const controller of this.active.values()) controller.abort(new Error("Cron scheduler is shutting down"));
-    if (this.tickPromise) await Promise.allSettled([this.tickPromise]);
-    for (const controller of this.active.values()) controller.abort(new Error("Cron scheduler is shutting down"));
-    await Promise.allSettled([...this.recoveryTasks, ...this.activeTasks]);
+    this.closePromise = (async () => {
+      if (this.tickPromise) await Promise.allSettled([this.tickPromise]);
+      for (const controller of this.active.values()) controller.abort(new Error("Cron scheduler is shutting down"));
+      await Promise.allSettled([...this.recoveryTasks]);
+      await Promise.allSettled([...this.activeTasks]);
+    })();
+    return this.closePromise;
   }
 
   constructor(private readonly runtime: JobRuntime, options: CronSchedulerOptions = {}) {
