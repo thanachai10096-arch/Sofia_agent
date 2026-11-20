@@ -14,7 +14,8 @@ Sofia separates checkout-page evidence from authoritative payment-provider evide
 2. Read secrets only from server-side environment/secret storage. Never accept credentials, paid flags, or provider URLs from browser/client input.
 3. Verify the signature against the exact raw request bytes before parsing or trusting the event.
 4. Enforce timestamp tolerance and atomically deduplicate provider event IDs in a durable shared store. `MemoryWebhookReplayStore` is process-local and is only suitable for tests or local development.
-5. Inject a durable `FinancialOrderStore` with atomic compare-and-set semantics before production use.\n6. Retrieve or validate the payment with the provider and compare merchant/account identity, order reference, amount in minor units, currency, and final provider status.
+5. Inject a durable `FinancialOrderStore` with atomic compare-and-set semantics before production use.
+6. Retrieve or validate the payment with the provider and compare merchant/account identity, order reference, amount in minor units, currency, and final provider status.
 7. Treat pending, failed, refunded, disputed, and unknown states distinctly. A browser confirmation page is not payment settlement evidence.
 8. Add provider-specific fixtures and integration tests using sandbox credentials before enabling live payment actions.
 
