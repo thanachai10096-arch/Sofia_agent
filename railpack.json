@@ -1,0 +1,25 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "provider": "node",
+  "packages": {
+    "node": "22",
+    "python": "3.12"
+  },
+  "steps": {
+    "install": {
+      "commands": [
+        "...",
+        "python -m venv /opt/venv",
+        "/opt/venv/bin/pip install --disable-pip-version-check -r vendor/agent-reach/requirements.txt",
+        {
+          "path": "/opt/venv/bin"
+        }
+      ]
+    }
+  },
+  "deploy": {
+    "paths": [
+      "/opt/venv/bin"
+    ]
+  }
+}
