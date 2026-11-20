@@ -20,6 +20,15 @@
   "deploy": {
     "paths": [
       "/opt/venv/bin"
+    ],
+    "inputs": [
+      "...",
+      {
+        "step": "install",
+        "include": [
+          "/opt/venv"
+        ]
+      }
     ]
   }
 }
