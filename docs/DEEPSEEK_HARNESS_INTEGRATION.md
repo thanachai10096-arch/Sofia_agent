@@ -17,6 +17,7 @@ agent, a second server, or a child CLI.
 - Versioned plugin manifests with declared capabilities and install-time validation of explicitly declared tool effects.
 - Dependency ordering: required plugins must be installed first, and providers cannot be unloaded while installed dependents remain.
 - Service injection is restricted to the provider plugin and explicitly declared dependents.
+- Plugin install/uninstall lifecycle events are bridged into the active Sofia Agent run event stream.
 - Manifest metadata is snapshotted at install time; registered tool objects and declared effects are frozen after capability validation.
 - Cleanup continues across failures; teardown reports aggregated cleanup errors.
 - Plugin tools enter Sofia's existing Tool Registry and continue through the
