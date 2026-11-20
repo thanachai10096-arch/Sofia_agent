@@ -701,7 +701,7 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
         const runId = randomUUID();
         try {
-          const ownerAgent = await agentForOwner(auth.keyId);
+          const ownerAgent = await agentForOwner(auth.keyId, input.sessionId !== undefined);
           const result = await ownerAgent.run({
             principalId: auth.keyId,
             desktopCapabilities: desktopCapabilitiesFromScopes(auth.scopes),
