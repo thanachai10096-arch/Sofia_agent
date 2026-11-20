@@ -15,6 +15,7 @@ export type ApprovalDecision = "approved" | "denied" | "expired" | "cancelled";
 
 export const MAX_PENDING_APPROVALS_PER_PRINCIPAL = 50;
 export const MAX_APPROVAL_INPUT_BYTES = 64 * 1024;
+const SHA256_ACTION_HASH = /^[a-f0-9]{64}$/u;
 export interface ApprovalRecord {
   id: string;
   runId: string;
@@ -142,7 +143,8 @@ export class ApprovalBroker {
   /** Compatible with AgentDependencies.approval; callers can bind this method. */
   readonly handle: ApprovalHandler = async (request) => {
     const principalId = request.principalId?.trim();
-    if (!principalId || !request.runId.trim() || !request.toolName.trim() || !request.actionHash.trim()) return false;
+    if (!principalId || principalId.length > 256 || !request.runId.trim() || request.runId.length > 256 ||
+        !request.toolName.trim() || request.toolName.length > 256 || !SHA256_ACTION_HASH.test(request.actionHash)) return false;
     if (request.signal?.aborted) return false;
 
     const safeInput = redactSecrets(structuredClone(request.input)) as Record<string, unknown>;
@@ -202,7 +204,7 @@ export class ApprovalBroker {
   }
 
   private async resolve(id: string, actionHash: string, decision: ApprovalDecision, approverId: string): Promise<boolean> {
-    if (!id.trim() || !actionHash.trim() || !approverId.trim() || approverId.length > 256) return false;
+    if (!id.trim() || !SHA256_ACTION_HASH.test(actionHash) || !approverId.trim() || approverId.length > 256) return false;
     const record = await this.options.store.get(id);
     if (!record || record.principalId !== approverId) return false;
     return this.options.store.resolve(id, actionHash, decision, approverId, this.now());
