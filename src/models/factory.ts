@@ -94,6 +94,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
       if (!tools.length) return;
       runPluginHost.use({
         id: pluginId,
+        manifest: {
+          version: "1.0.0",
+          description: "Run-scoped browser capability adapter",
+          capabilities: ["read", "network", "browser"],
+        },
         install: (plugin) => {
           for (const tool of tools) {
             if (baseToolNames.has(tool.name)) {
@@ -125,6 +130,11 @@ function createBrainFactory(config:ReturnType<typeof loadModelConfigFromEnv>,pro
     if (runDesktopTools.length) {
       runPluginHost.use({
         id: "sofia.run.desktop",
+        manifest: {
+          version: "1.0.0",
+          description: "Run-scoped desktop capability adapter",
+          capabilities: ["read", "write", "shell", "network", "destructive"],
+        },
         install: (plugin) => {
           for (const tool of runDesktopTools) {
             if (baseToolNames.has(tool.name)) {
@@ -167,6 +177,11 @@ export function createSofiaAgentDependencies(workspace=process.cwd(),approval?:A
   });
   pluginHost.use({
     id: "sofia.agent-reach",
+    manifest: {
+      version: "1.0.0",
+      description: "Read-only public internet research adapter",
+      capabilities: ["read", "network"],
+    },
     install: (plugin) => {
       for (const tool of createAgentReachTools()) plugin.registerTool(tool);
     },
