@@ -144,6 +144,23 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       },
     },
     {
+      name: "browser.transaction.confirmation.inspect",
+      description: "Read the page after checkout and check for an expected confirmation phrase and optional order reference. Page evidence is not proof that payment settled.",
+      effects: ["read"],
+      inputSchema: { type: "object", properties: { pageId: { type: "string" }, confirmationText: { type: "string", minLength: 1 }, orderReference: { type: "string" } }, required: ["pageId", "confirmationText"], additionalProperties: false },
+      async execute(input) {
+        const p = page(String(input.pageId));
+        const { visiblePageText } = await import("./transaction.js");
+        const url = await p.url(), title = await p.title(), html = await p.content();
+        const text = visiblePageText(html);
+        const normalize = (value: string) => value.normalize("NFKC").toLocaleLowerCase().split(" ").filter(Boolean).join(" ");
+        const confirmationFound = text.includes(normalize(String(input.confirmationText)));
+        const orderReferenceFound = typeof input.orderReference !== "string" || text.includes(normalize(input.orderReference));
+        return { confirmed: confirmationFound && orderReferenceFound, url, title, checks: { confirmationFound, orderReferenceFound },
+          limitation: "A confirmation page or order reference is not proof that a payment settled, funds were captured, or the merchant will fulfill the order. Verify payment status with the merchant or payment provider." };
+      },
+    },
+    {
       name: "browser.screenshot",
       description: "Capture the current browser page.",
       inputSchema: { type:"object", properties:{pageId:{type:"string"}}, required:["pageId"], additionalProperties:false },
