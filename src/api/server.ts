@@ -910,6 +910,19 @@ export function createSofiaApi(deps: AgentDependencies, config: SofiaApiConfig) 
         }
       })();
     });
+  } else if (config.resolvePrincipalDependencies && config.resolvePrincipalCronScheduler) {
+    // Schedules must continue after an API restart even when their owner does not
+    // make another HTTP request. Bootstrap every configured API principal at startup.
+    server.on("listening", () => {
+      const configuredTokens = Object.keys(config.apiKeys);
+      void Promise.all(configuredTokens.map(async (token) => {
+        const principalId = createHash("sha256").update(token).digest("hex").slice(0, 32);
+        const principalDeps = await config.resolvePrincipalDependencies!(principalId);
+        await resolveCronScheduler(principalId, principalDeps);
+      })).catch(() => {
+        // Fail closed: a tenant whose dependencies or recovery fail gets no tick loop.
+      });
+    });
   }
   server.on("close", () => {
     cronClosed = true;
