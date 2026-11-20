@@ -9,6 +9,15 @@ import type { BrowserRuntime, BrowserSession } from "./runtime.js";
  */
 export class BrowserProfileSessionManager {
   private readonly sessions = new Map<string, Promise<BrowserSession>>();
+  // Serialize cross-run profile lifecycle changes. Per-run browser tool locks
+  // cannot protect this shared manager from another Brain run revoking a profile.
+  private lifecycleOperation: Promise<void> = Promise.resolve();
+
+  private withLifecycleLock<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.lifecycleOperation.then(operation, operation);
+    this.lifecycleOperation = result.then(() => undefined, () => undefined);
+    return result;
+  }
 
   constructor(
     private readonly store: BrowserProfileStore,
@@ -24,30 +33,34 @@ export class BrowserProfileSessionManager {
   }
 
   async create(ownerId: string): Promise<{ profile: BrowserProfile; session: BrowserSession }> {
-    const profile = await this.store.create(ownerId);
-    try {
-      const session = await this.launch(profile);
-      this.sessions.set(this.key(ownerId, profile.id), Promise.resolve(session));
-      return { profile, session };
-    } catch (error) {
-      await this.store.revoke(ownerId, profile.id).catch(() => undefined);
-      throw error;
-    }
+    return this.withLifecycleLock(async () => {
+      const profile = await this.store.create(ownerId);
+      try {
+        const session = await this.launch(profile);
+        this.sessions.set(this.key(ownerId, profile.id), Promise.resolve(session));
+        return { profile, session };
+      } catch (error) {
+        await this.store.revoke(ownerId, profile.id).catch(() => undefined);
+        throw error;
+      }
+    });
   }
 
   async acquire(ownerId: string, profileId: string): Promise<BrowserSession> {
-    const profile = await this.store.get(ownerId, profileId);
-    const key = this.key(ownerId, profileId);
-    const current = this.sessions.get(key);
-    if (current) return current;
-    const pending = this.launch(profile);
-    this.sessions.set(key, pending);
-    try {
-      return await pending;
-    } catch (error) {
-      if (this.sessions.get(key) === pending) this.sessions.delete(key);
-      throw error;
-    }
+    return this.withLifecycleLock(async () => {
+      const profile = await this.store.get(ownerId, profileId);
+      const key = this.key(ownerId, profileId);
+      const current = this.sessions.get(key);
+      if (current) return current;
+      const pending = this.launch(profile);
+      this.sessions.set(key, pending);
+      try {
+        return await pending;
+      } catch (error) {
+        if (this.sessions.get(key) === pending) this.sessions.delete(key);
+        throw error;
+      }
+    });
   }
 
   async list(ownerId: string): Promise<BrowserProfile[]> {
@@ -55,17 +68,21 @@ export class BrowserProfileSessionManager {
   }
 
   async revoke(ownerId: string, profileId: string): Promise<void> {
-    const key = this.key(ownerId, profileId);
-    const current = this.sessions.get(key);
-    this.sessions.delete(key);
-    if (current) await (await current).close();
-    await this.store.revoke(ownerId, profileId);
+    await this.withLifecycleLock(async () => {
+      const key = this.key(ownerId, profileId);
+      const current = this.sessions.get(key);
+      if (current) await (await current).close();
+      this.sessions.delete(key);
+      await this.store.revoke(ownerId, profileId);
+    });
   }
 
   async closeAll(): Promise<void> {
-    const current = [...this.sessions.values()];
-    this.sessions.clear();
-    const sessions = await Promise.allSettled(current);
-    await Promise.allSettled(sessions.filter((result): result is PromiseFulfilledResult<BrowserSession> => result.status === "fulfilled").map((result) => result.value.close()));
+    await this.withLifecycleLock(async () => {
+      const current = [...this.sessions.values()];
+      this.sessions.clear();
+      const sessions = await Promise.allSettled(current);
+      await Promise.allSettled(sessions.filter((result): result is PromiseFulfilledResult<BrowserSession> => result.status === "fulfilled").map((result) => result.value.close()));
+    });
   }
 }
