@@ -8,7 +8,7 @@ import { UsageLimiter } from "./usage.js";
 import { idempotencyFingerprint } from "./idempotency.js";
 import { handleDiscordInteractionHttpRequest } from "../integrations/messaging/discord-http-route.js";
 import { validateAgentRunInput } from "./validation.js";
-import type { RunRecord } from "./run-record-store.js";
+import type { RunRecord, RunRecordStore } from "./run-record-store.js";
 import { CronScheduler, type CronScheduleInput } from "../brain/cron-scheduler.js";
 import { createUserMemoryEntry, type UserMemoryKind } from "../brain/user-memory.js";
 
