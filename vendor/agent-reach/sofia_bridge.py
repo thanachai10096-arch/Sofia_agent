@@ -79,11 +79,11 @@ def _read_youtube(target: str, timeout: float) -> dict[str, Any]:
             return metadata
 
     caption_items = captions.get("items") or []
-    caption_text = "\\n".join(
+    caption_text = "\n".join(
         str(item.get("text") or "") for item in caption_items if item.get("text")
     ).strip()
     item = (metadata.get("items") or [{}])[0]
-    item["text"] = "\\n\\n[VIDEO TRANSCRIPT / CAPTIONS]\\n" + caption_text if caption_text else item.get("text")
+    item["text"] = "\n\n[VIDEO TRANSCRIPT / CAPTIONS]\n" + caption_text if caption_text else item.get("text")
     raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
     caption_raw = (caption_items[0].get("raw") if caption_items and isinstance(caption_items[0].get("raw"), dict) else {})
     item["raw"] = {**raw, "content_status": "transcript_available", "transcript_source": source, "transcript_language": caption_raw.get("lang")}
