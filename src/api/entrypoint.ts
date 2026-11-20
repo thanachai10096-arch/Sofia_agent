@@ -23,6 +23,10 @@ const runStoreDirectory = path.resolve(
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
 const apiOwnerKeyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
 const deps = await createSofiaAgentDependenciesWithOwnerSessions(workspace, apiOwnerKeyId);
+// Re-dispatch durable queued jobs before accepting new traffic. TenantJobRuntimeRouter
+// fans this out only to the server-configured owner runtimes; each runtime claims
+// its own persisted jobs using the durable lease before starting Brain execution.
+await deps.jobRuntime?.recoverQueued?.();
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
