@@ -10,6 +10,8 @@ Sofia includes the upstream Agent-Reach Python package in `vendor/agent-reach/ag
 - The bridge exposes channel discovery, URL reading and channel actions. Mutating social actions are blocked.
 - Search/read results are untrusted reference data. Sofia's Brain must not treat page text as system instructions.
 - Network access remains subject to Sofia's execution policy and host egress controls. URL validation in the TypeScript adapter is a first check, not a substitute for DNS-aware egress/SSRF protection.
+- Python web reads and transcription downloads share the same public-URL validator. Transcription passes the normalized URL to `yt-dlp`, and the validator rejects legacy numeric IPv4 spellings as well as private literal addresses.
+- This remains a URL-level guard, not complete SSRF protection: it does not pin DNS answers to the actual socket connection, constrain every extractor/CDN URL fetched internally by `yt-dlp`, or prevent DNS rebinding/TOCTOU. A complete guarantee requires a trusted outbound egress layer that validates and pins each destination and redirect, with subprocess traffic forced through it. Until then, enforce host/network egress restrictions and do not expose unrestricted arbitrary-URL fetching to untrusted callers.
 
 ## Included upstream channels
 
