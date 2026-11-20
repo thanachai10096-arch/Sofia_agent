@@ -53,6 +53,16 @@ function setup() {
   };
 }
 
+test("browser.navigate remains compatible with plans using the navigate tool name", async () => {
+  const harness = setup();
+  const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
+  const result = await harness.tool("browser.navigate").execute(
+    { pageId: opened.pageId, url: "https://example.com/" },
+    {} as never,
+  ) as { url: string; title: string };
+  assert.deepEqual(result, { url: "about:blank", title: "" });
+});
+
 test("browser.close closes only the requested page when pageId is provided", async () => {
   const harness = setup();
   const opened = await harness.tool("browser.open").execute({}, {} as never) as { pageId: string };
