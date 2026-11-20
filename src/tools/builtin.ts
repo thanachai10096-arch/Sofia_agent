@@ -18,6 +18,22 @@ const editOperationSchema = {
 export function createBuiltinTools(): SofiaTool[] {
   return [
     {
+      name: "payments.capabilities",
+      description: "Read-only status of Sofia's financial action engine. Reports whether a payment provider is configured; never creates or submits a payment.",
+      effects: [],
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      async execute() {
+        return {
+          engine: "financial-actions",
+          available: true,
+          providerConfigured: false,
+          canSubmitPayments: false,
+          persistence: "FileFinancialActionStore is available as a local single-process adapter; database-backed multi-process storage is not configured.",
+          nextRequirement: "Configure and sandbox-test an official payment provider adapter and trusted approval verifier before enabling payment submission.",
+        };
+      },
+    },
+    {
       name: "workspace.read_file",
       description: "Read a UTF-8 text file inside the current workspace.",
       inputSchema: {
