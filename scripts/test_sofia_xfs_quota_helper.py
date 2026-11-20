@@ -225,6 +225,53 @@ class QuotaHelperTests(unittest.TestCase):
             self.assertEqual(reply["runId"], run_id)
             self.assertNotIn(run_id, HELPER.load_allocations(state))
 
+
+    def test_partial_workspace_removal_keeps_reservation_for_safe_retry(self):
+        run_id = "123e4567-e89b-42d3-a456-426614174006"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "workspaces"
+            state = Path(temp) / "state"
+            root.mkdir()
+            state.mkdir()
+            workspace = root / ("run-" + run_id)
+            workspace.mkdir()
+            (workspace / "partial").write_text("data", encoding="utf-8")
+            HELPER.save_allocations(state, {
+                run_id: {
+                    "project_id": HELPER.PROJECT_ID_MIN,
+                    "workspace": str(workspace),
+                    "bytes": 8 * 1024 * 1024,
+                    "inodes": HELPER.INODE_LIMIT,
+                    "status": "active",
+                }
+            })
+
+            def partially_remove(path):
+                shutil = __import__("shutil")
+                shutil.rmtree(path)
+                raise OSError("simulated interruption after tree removal")
+
+            with patch.object(HELPER, "run", return_value=""), patch.object(HELPER.shutil, "rmtree", side_effect=partially_remove):
+                with self.assertRaises(OSError):
+                    HELPER.dispose(root, state, {
+                        "runId": run_id,
+                        "workspacePath": str(workspace),
+                    })
+
+            self.assertFalse(workspace.exists())
+            self.assertIn(run_id, HELPER.load_allocations(state))
+
+            with patch.object(HELPER, "run", return_value="") as run_mock:
+                reply = HELPER.dispose(root, state, {
+                    "runId": run_id,
+                    "workspacePath": str(workspace),
+                })
+
+            self.assertEqual(reply["runId"], run_id)
+            self.assertNotIn(run_id, HELPER.load_allocations(state))
+            reset_calls = [call for call in run_mock.call_args_list if "limit -p bhard=0 ihard=0" in " ".join(call.args[0])]
+            self.assertEqual(len(reset_calls), 1)
+
     def test_project_id_range_is_fixed_and_bounded(self):
         self.assertEqual(HELPER.PROJECT_ID_MIN, 200000)
         self.assertEqual(HELPER.PROJECT_ID_MAX, 299999)
