@@ -50,7 +50,7 @@ test("PostgreSQL skill registry creates a tenant-scoped state table", async () =
   await createStore(pool).ensureSchema();
   assert.match(pool.calls[0].sql, /CREATE TABLE IF NOT EXISTS sofia_skill_registry/);
   assert.match(pool.calls[0].sql, /scope_id text PRIMARY KEY/);
-  assert.match(pool.calls[0].sql, /state jsonb NOT NULL/);
+  assert.match(pool.calls[0].sql, /state jsonb NOT NULL CHECK \\(jsonb_typeof\\(state\\) = 'object'\\)/);
 });
 
 test("registry transactions lock and persist one isolated project scope", async () => {
