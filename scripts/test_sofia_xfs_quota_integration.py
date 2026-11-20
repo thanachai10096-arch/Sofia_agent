@@ -61,10 +61,12 @@ class XfsQuotaEnforcementIntegrationTests(unittest.TestCase):
         run_id = str(uuid.uuid4())
         workspace = root / ("run-" + run_id)
         created = False
+        allocation_attempted = False
         try:
             probe = helper_call({"operation": "probe", "workspaceRoot": str(root)})
             self.assertEqual(probe.get("filesystemType"), "xfs")
             self.assertIs(probe.get("projectQuotaEnabled"), True)
+            allocation_attempted = True
             response = helper_call({
                 "operation": "create",
                 "runId": run_id,
@@ -110,7 +112,7 @@ class XfsQuotaEnforcementIntegrationTests(unittest.TestCase):
         finally:
             if created or workspace.exists():
                 helper_call({"operation": "dispose", "runId": run_id, "workspacePath": str(workspace)})
-            else:
+            elif allocation_attempted:
                 helper_call({"operation": "abort", "runId": run_id, "workspaceRoot": str(root)})
 
 
