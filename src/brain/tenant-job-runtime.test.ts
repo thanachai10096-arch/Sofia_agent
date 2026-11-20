@@ -83,6 +83,28 @@ test("TenantJobRuntimeRouter rejects missing, malformed, and unconfigured owners
 });
 
 
+test("registry-backed routing rejects runtimes without owner-scoped operations", async () => {
+  const registry = {
+    async getForPrincipal() {
+      return {
+        jobRuntime: {
+          async submit() { throw new Error("unused"); },
+          async get() { return undefined; },
+          async resume() { throw new Error("unused"); },
+          async cancel() { return false; },
+          async list() { return []; },
+        },
+      };
+    },
+  } as unknown as TenantDependencyRegistry;
+  const router = createRegistryBackedTenantJobRuntimeRouter([ownerOne], registry);
+  await assert.rejects(
+    () => router.submit({ task: "must not route", ownerKeyId: ownerOne }),
+    /owner-scoped lookup, resume, and cancellation/u,
+  );
+  await router.close();
+});
+
 test("registry-backed job routing reuses the exact tenant Agent dependency bundle", async () => {
   const closed: string[] = [];
   const runtimes = new Map<string, JobRuntime>();
