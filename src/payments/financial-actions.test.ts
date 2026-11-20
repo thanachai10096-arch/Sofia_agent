@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { executeFinancialAction, MemoryFinancialActionStore, MemoryFinancialLedger, type FinancialActionRequest, type FinancialPaymentProvider } from "./financial-actions.js";
+import { executeFinancialAction, reconcileFinancialAction, MemoryFinancialActionStore, MemoryFinancialLedger, type FinancialActionRequest, type FinancialPaymentProvider } from "./financial-actions.js";
 
 const request: FinancialActionRequest = { ownerId: "user-1", idempotencyKey: "checkout-001", approvalId: "approval-1", orderReference: "ORDER-9", amountMinor: 2500, currency: "THB" };
 function deps(provider?: FinancialPaymentProvider) {
@@ -40,4 +40,14 @@ test("records provider submission exceptions as unknown, not failed", async () =
 test("does not treat an unauthenticated or processing provider result as success", async () => {
   const d = deps({ provider: "test-provider", createPayment: async () => {}, verify: async () => ({ authenticated: true, provider: "test-provider", providerPaymentId: "pay_9", orderReference: "ORDER-9", amountMinor: 2500, currency: "THB", status: "processing", observedAt: new Date().toISOString() }) });
   const result = await executeFinancialAction(request, d); assert.equal(result.record?.status, "processing"); assert.equal(result.verification?.verified, false);
+});
+test("reconciles an uncertain submission without submitting a second payment", async () => {
+  let submissions = 0, reconciled = false;
+  const provider: FinancialPaymentProvider = { provider: "test-provider", createPayment: async () => { submissions++; throw new Error("network timeout"); },
+    verify: async () => reconciled ? ({ authenticated: true, provider: "test-provider", providerPaymentId: "pay_reconciled", orderReference: "ORDER-9", amountMinor: 2500, currency: "THB", status: "succeeded", observedAt: new Date().toISOString() }) : null };
+  const d = deps(provider); const first = await executeFinancialAction(request, d);
+  assert.equal(first.record?.status, "unknown"); assert.equal(submissions, 1);
+  reconciled = true;
+  const result = await reconcileFinancialAction({ ownerId: request.ownerId, idempotencyKey: request.idempotencyKey }, d);
+  assert.equal(result.record?.status, "succeeded"); assert.equal(result.verification?.verified, true); assert.equal(submissions, 1);
 });
