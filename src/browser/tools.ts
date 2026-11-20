@@ -12,9 +12,10 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
   // not launch competing sessions or attach pages to a session being replaced.
   let sessionOperation: Promise<void> = Promise.resolve();
   let closing = false;
+  let sessionClosing = false;
   const activePageOperations = new Set<Promise<unknown>>();
   const trackPageOperation = <T>(operation: () => Promise<T>): Promise<T> => {
-    if (closing) return Promise.reject(new Error("Browser run is closing; no new page actions are accepted."));
+    if (closing || sessionClosing) return Promise.reject(new Error("Browser session is closing; no new page actions are accepted."));
     const pending = Promise.resolve().then(operation);
     activePageOperations.add(pending);
     void pending.finally(() => activePageOperations.delete(pending)).catch(() => undefined);
@@ -40,6 +41,16 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
     }
     if (closing && !managedProfileSession) await closing.close();
   };
+  const closeCurrentSession = async (): Promise<void> => {
+    sessionClosing = true;
+    try {
+      await Promise.allSettled([...activePageOperations]);
+      await dispose();
+    } finally {
+      sessionClosing = false;
+    }
+  };
+
   // Queue final cleanup behind in-flight session mutations. Brain's abortable
   // wrapper may stop awaiting a tool before its underlying browser promise
   // settles; this barrier prevents a late launch from leaking past onFinally.
@@ -52,7 +63,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
   }));
 
   const page = (id: string) => {
-    if (closing) throw new Error("Browser run is closing.");
+    if (closing || sessionClosing) throw new Error("Browser session is closing.");
     const value = pages.get(id);
     if (!value) throw new Error("Unknown browser page: " + id);
     return value;
@@ -69,13 +80,13 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
           if (closing) throw new Error("Browser run is closing.");
           if (typeof input.profileId === "string") {
             if (!options.profileSessions || !options.ownerId) throw new Error("Saved browser profiles are unavailable on this host.");
-            if (session && activeProfileId !== input.profileId) await dispose();
+            if (session && activeProfileId !== input.profileId) await closeCurrentSession();
             if (!session) {
               session = await options.profileSessions.acquire(options.ownerId, input.profileId);
               activeProfileId = input.profileId;
             }
           } else {
-            if (session && activeProfileId) await dispose();
+            if (session && activeProfileId) await closeCurrentSession();
             session ??= await runtime.launch();
           }
           const current = session;
@@ -161,7 +172,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
         }
         return withSessionLock(async () => {
           const managedProfileSession = activeProfileId !== undefined;
-          await dispose();
+          await closeCurrentSession();
           return managedProfileSession
             ? { ok: true, closed: "run-attachment", profileStillOpen: true }
             : { ok: true, closed: "session" };
@@ -176,7 +187,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       inputSchema: { type: "object", properties: { url: { type: "string" } }, required: ["url"], additionalProperties: false },
       async execute(input) {
         return withSessionLock(async () => {
-          if (session) await dispose();
+          if (session) await closeCurrentSession();
           const { profile, session: persistentSession } = await options.profileSessions!.create(options.ownerId!);
           try {
             session = persistentSession;
@@ -208,7 +219,7 @@ export function createBrowserTools(runtime: BrowserRuntime, registerCleanup?: (c
       inputSchema: { type: "object", properties: { profileId: { type: "string" } }, required: ["profileId"], additionalProperties: false },
       async execute(input) {
         return withSessionLock(async () => {
-          if (activeProfileId === String(input.profileId)) await dispose();
+          if (activeProfileId === String(input.profileId)) await closeCurrentSession();
           await options.profileSessions!.revoke(options.ownerId!, String(input.profileId));
           return { ok: true, revoked: true };
         });
