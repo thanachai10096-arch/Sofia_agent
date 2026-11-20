@@ -26,13 +26,21 @@
     }
   },
   "deploy": {
-    "paths": ["/opt/venv/bin"],
+    "paths": [
+      "/opt/venv/bin"
+    ],
     "inputs": [
       "...",
       {
         "step": "install",
-        "include": ["/opt/venv"]
+        "include": [
+          "/opt/venv"
+        ]
       }
+    ],
+    "aptPackages": [
+      "...",
+      "ffmpeg"
     ]
   }
 }
