@@ -222,6 +222,11 @@ test("plugin hosts expose an immutable process, run, or principal ownership boun
     install(ctx) { observed = { scope: ctx.scope, principalId: ctx.principalId }; },
   });
   assert.deepEqual(observed, { scope: "principal", principalId: "user-123" });
+  assert.deepEqual(principalHost.listTools("user-123"), []);
+  assert.deepEqual(principalHost.listPlugins("user-123"), ["principal.connector"]);
+  assert.throws(() => principalHost.listTools(), /access denied/);
+  assert.throws(() => principalHost.listPlugins("user-456"), /access denied/);
+  assert.throws(() => principalHost.getPluginManifest("principal.connector", "user-456"), /access denied/);
   assert.throws(() => new SofiaPluginHost({ scope: "principal" }), /requires an authenticated principalId/);
   assert.throws(() => new SofiaPluginHost({ scope: "run", principalId: "user-123" }), /only be set on a principal-scoped/);
 });
