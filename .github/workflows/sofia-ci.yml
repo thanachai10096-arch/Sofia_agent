@@ -31,6 +31,10 @@ jobs:
       - name: Install vendored Agent-Reach dependencies
         run: python -m pip install --disable-pip-version-check -r vendor/agent-reach/requirements.txt
 
+      - name: Test Sofia read-only Agent-Reach action guard
+        working-directory: vendor/agent-reach
+        run: python -m unittest discover -s tests -p 'test_*.py'
+
       - name: Verify vendored Agent-Reach bridge
         run: python vendor/agent-reach/sofia_bridge.py --request-json '{"operation":"channels"}'
 
