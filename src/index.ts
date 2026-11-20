@@ -5,6 +5,7 @@ export type { SkillLifecycleWorkflowOptions, SkillLifecycleWorkflowResult } from
 export type { SkillLifecycleStatus, SkillEvaluationCheck, SkillEvaluationResult, SkillProvenance, SkillLifecycleRecord, SkillLifecycleOptions, SkillCandidateEvaluator } from "./brain/skill-lifecycle.js";
 
 export { ApprovalBroker, FileApprovalJournal } from "./agent/approval.js";
+export type { ApprovalBrokerPort, ApprovalDecision, ApprovalHandler, ApprovalRequest, ApprovalAuditRecord, ApprovalAuditStatus, PendingApproval } from "./agent/approval.js";
 export { Aes256GcmApprovalPayloadCipher } from "./agent/approval-payload-cipher.js";
 export type { ApprovalPayloadContext, ApprovalPayloadCipher, EncryptedApprovalPayload } from "./agent/approval-payload-cipher.js";
 export { SqliteApprovalStore } from "./agent/sqlite-approval-store.js";
