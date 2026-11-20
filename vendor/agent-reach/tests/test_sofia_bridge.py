@@ -213,3 +213,28 @@ class TranscriptionPublicUrlTests(unittest.TestCase):
             with self.subTest(url=url):
                 with self.assertRaises(TranscribeError):
                     _assert_safe_public_url(url)
+
+
+
+class YouTubeUrlValidationTests(unittest.TestCase):
+    def test_video_url_accepts_public_youtube_urls(self):
+        from agent_reach.channels.youtube import _video_url
+
+        self.assertEqual(
+            _video_url("https://www.youtube.com/watch?v=jNQXAC9IVRw"),
+            "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+        )
+
+    def test_video_url_rejects_non_public_and_malformed_targets(self):
+        from agent_reach.channels.youtube import _video_url
+        from agent_reach.channels.base import ReachError
+
+        for target in (
+            "http://127.0.0.1.evil.test/watch?v=jNQXAC9IVRw",
+            "https://user:pass@www.youtube.com/watch?v=jNQXAC9IVRw",
+            "file://www.youtube.com/watch?v=jNQXAC9IVRw",
+            "http://2130706433/watch?v=jNQXAC9IVRw",
+        ):
+            with self.subTest(target=target):
+                with self.assertRaises(ReachError):
+                    _video_url(target)
