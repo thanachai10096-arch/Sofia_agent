@@ -1130,8 +1130,15 @@ test("DurableJobRuntime reconciles an uncertain tool step and audits the explici
     recoveryRounds: 0,
     trace: [],
   } as unknown as import("./run-state.js").BrainRunSnapshot;
+  let resumedSnapshot: import("./run-state.js").BrainRunSnapshot | undefined;
+  let brainCalls = 0;
   const runtime = new DurableJobRuntime(({ onRunSnapshot }) => ({
-    run: async () => {
+    run: async (input: { resume?: import("./run-state.js").BrainRunSnapshot }) => {
+      brainCalls += 1;
+      if (input.resume) {
+        resumedSnapshot = input.resume;
+        return { completed: true, state: "completed", output: "recovered" };
+      }
       await onRunSnapshot?.(snapshot);
       return { completed: false, state: "failed", output: "interrupted" };
     },
@@ -1154,6 +1161,12 @@ test("DurableJobRuntime reconciles an uncertain tool step and audits the explici
   })), [{
     stepId, outcome: "completed", actorId: "owner-a", note: "Verified in the merchant account",
   }]);
+
+  const resumed = await runtime.resume(submitted.id);
+  assert.equal(resumed.status, "completed");
+  assert.equal(brainCalls, 2);
+  assert.deepEqual(resumedSnapshot?.completedStepIds, [stepId]);
+  assert.equal(resumedSnapshot?.inFlightStepId, undefined);
 });
 
 test("DurableJobRuntime requires the exact unresolved step before reconciliation", async () => {
