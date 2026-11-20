@@ -13,6 +13,7 @@ from urllib.parse import urlencode, urlsplit
 
 from agent_reach.runtime.result import BAD_INPUT, NOT_FOUND, ReachError, make_item, unix_to_iso
 from agent_reach.utils.process import utf8_subprocess_env
+from agent_reach.utils.url import safe_urlopen
 
 from .base import Action, Channel, Param
 
@@ -49,7 +50,7 @@ def _get_json_with_urllib(url: str) -> Any:
     """Fetch JSON with Python's standard HTTP stack."""
     _validate_api_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": _UA})
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+    with safe_urlopen(req, timeout=_TIMEOUT) as resp:
         raw = resp.read(_MAX_RESPONSE_BYTES + 1)
     if len(raw) > _MAX_RESPONSE_BYTES:
         raise ValueError("V2EX API response exceeds the 1 MiB safety limit")
