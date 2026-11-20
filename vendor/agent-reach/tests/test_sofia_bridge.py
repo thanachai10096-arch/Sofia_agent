@@ -55,3 +55,30 @@ class YouTubeReadTests(unittest.TestCase):
         self.assertIn("Do not summarize the video as watched", raw["content_warning"])
 
 
+
+
+class EmptyYouTubeTranscriptTests(unittest.TestCase):
+    def test_empty_captions_fall_back_to_speech_transcription(self):
+        metadata = {"ok": True, "items": [{"title": "Short", "text": "description", "raw": {}}]}
+        empty_captions = {"ok": True, "items": []}
+        transcript = {"ok": True, "items": [{"text": "เนื้อหาที่ถอดเสียงได้", "raw": {"lang": "th"}}]}
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action", side_effect=[metadata, empty_captions, transcript]
+        ) as run:
+            result = _read_youtube("https://www.youtube.com/shorts/abcdefghijk", 180)
+        self.assertIn("เนื้อหาที่ถอดเสียงได้", result["items"][0]["text"])
+        self.assertEqual(result["items"][0]["raw"]["content_status"], "transcript_available")
+        self.assertEqual(result["items"][0]["raw"]["transcript_source"], "speech_transcription")
+        self.assertEqual(run.call_count, 3)
+
+    def test_empty_captions_and_empty_transcription_are_metadata_only(self):
+        metadata = {"ok": True, "items": [{"title": "Short", "text": "description", "raw": {}}]}
+        empty_captions = {"ok": True, "items": []}
+        empty_transcript = {"ok": True, "items": []}
+        with patch("sofia_bridge.get_channel", return_value=object()), patch(
+            "sofia_bridge.run_action", side_effect=[metadata, empty_captions, empty_transcript]
+        ):
+            result = _read_youtube("https://www.youtube.com/shorts/abcdefghijk", 180)
+        raw = result["items"][0]["raw"]
+        self.assertEqual(raw["content_status"], "metadata_only")
+        self.assertIn("Do not summarize the video as watched", raw["content_warning"])
