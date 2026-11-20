@@ -914,6 +914,7 @@ export class SofiaBrain {
     let understanding: TaskUnderstanding | undefined;
     let completedStepIds = new Set<string>();
     let inFlightStepId: string | undefined;
+    let reconciliations: NonNullable<BrainRunSnapshot["reconciliations"]> = [];
 
     const checkpointState = async (plan: ExecutionPlan | undefined): Promise<void> => {
       if (!plan || !checkpointId || !understanding) return;
@@ -926,6 +927,7 @@ export class SofiaBrain {
         acceptanceCriteria: input.acceptanceCriteria ?? [],
         completedStepIds: [...completedStepIds],
         ...(inFlightStepId ? { inFlightStepId } : {}),
+        ...(reconciliations.length ? { reconciliations: [...reconciliations] } : {}),
         checkpointId,
         baselineSnapshotId: baselineId,
         usage: { ...this.usage },
@@ -949,6 +951,7 @@ export class SofiaBrain {
         baselineId = resumed.baselineSnapshotId;
         completedStepIds = new Set(resumed.completedStepIds);
         inFlightStepId = resumed.inFlightStepId;
+        reconciliations = [...(resumed.reconciliations ?? [])];
         if (inFlightStepId) {
           throw new Stop(
             `Cannot safely resume: step "${inFlightStepId}" may have completed an external side effect before the previous worker stopped. Reconcile its outcome before retrying.`,
