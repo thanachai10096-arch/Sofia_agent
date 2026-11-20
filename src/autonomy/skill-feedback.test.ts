@@ -6,6 +6,7 @@ import {
   proposeSkillImprovement,
   type SkillFeedbackInput,
 } from "./skill-feedback.js";
+import { digestSkillCandidate } from "./skill-evaluator.js";
 
 const base: SkillFeedbackInput = {
   scope: "project-a", actor: "trusted-runtime", skillName: "repair-build",
@@ -71,17 +72,23 @@ test("concurrent duplicate events are recorded exactly once", async () => {
 
 test("feedback proposes a new candidate for evaluation without promoting it", async () => {
   const ledger = new SkillFeedbackLedger(new InMemorySkillFeedbackStore());
+  const candidate = {
+    name: "repair-build", trigger: "Build fails", category: "runtime_error" as const,
+    strategy: "fix-implementation" as const, procedure: ["inspect logs"],
+    verification: ["run tests"], evidenceIds: ["run-1"],
+  };
+  const candidateDigest = digestSkillCandidate(candidate);
   for (let i = 0; i < 5; i += 1) {
-    await ledger.record({ ...base, outcome: i < 2 ? "succeeded" : "failed", idempotencyKey: `proposal-${i}` });
+    await ledger.record({
+      ...base, candidateDigest, outcome: i < 2 ? "succeeded" : "failed",
+      idempotencyKey: `proposal-${i}`,
+    });
   }
   const summary = await ledger.summarize("project-a", "repair-build", "v1");
   assert.ok(summary);
+  assert.equal(summary?.integrityValid, true);
   const proposal = await proposeSkillImprovement(
-    {
-      name: "repair-build", trigger: "Build fails", category: "runtime_error",
-      strategy: "fix-implementation", procedure: ["inspect logs"],
-      verification: ["run tests"], evidenceIds: [],
-    },
+    candidate,
     summary!,
     async ({ current, feedback }) => ({
       candidate: {
