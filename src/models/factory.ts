@@ -312,3 +312,21 @@ export async function createSofiaAgentDependenciesWithOwnerSessions(
     throw error;
   }
 }
+
+
+/**
+ * Build resolver-validated tenant dependencies with a physically owner-partitioned
+ * SQLite transcript store. The principal must be the server-derived API owner ID.
+ */
+export async function createSofiaAgentDependenciesForTenantWithSessions(
+  resolver: TenantResourceResolver,
+  context: TenantResourceContext,
+  approval?: AgentDependencies["approval"],
+): Promise<AgentDependencies & { closeSessionStore: () => void }> {
+  resolver.assertContext(context);
+  return createSofiaAgentDependenciesWithOwnerSessions(
+    context.workspaceRoot,
+    context.principalId,
+    approval,
+  );
+}
