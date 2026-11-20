@@ -13,15 +13,15 @@ function setup(provider?: FinancialPaymentProvider): FinancialActionDependencies
 }
 
 test("registers payment tools with explicit privileged effects", () => {
-  const tools = createFinancialActionTools(setup());
+  const tools = createFinancialActionTools(setup(), "owner-1");
   assert.deepEqual(tools.map((tool) => tool.name), ["finance.payment.execute", "finance.payment.reconcile"]);
   assert.deepEqual(tools[0]?.effects, ["network", "destructive"]);
   assert.deepEqual(tools[1]?.effects, ["network"]);
 });
 
 test("payment tool reports unconfigured without attempting a charge", async () => {
-  const tools = createFinancialActionTools(setup());
-  const result = await tools[0]!.execute({ ownerId: "owner-1", orderReference: "ORDER-1", amountMinor: 100, currency: "THB", idempotencyKey: "key-1", approvalId: "approval-1" }, { runtime: {} as never });
+  const tools = createFinancialActionTools(setup(), "owner-1");
+  const result = await tools[0]!.execute({ orderReference: "ORDER-1", amountMinor: 100, currency: "THB", idempotencyKey: "key-1", approvalId: "approval-1" }, { runtime: {} as never });
   assert.deepEqual(result, { replayed: false, configured: false });
 });
 
@@ -32,8 +32,8 @@ test("payment tool submits only after exact approval and returns provider-verifi
     async createPayment() { submissions += 1; },
     async verify(expected) { return { authenticated: true, provider: "test-provider", providerPaymentId: "pay-1", ...expected, status: "succeeded", observedAt: new Date().toISOString() }; },
   };
-  const tools = createFinancialActionTools(setup(provider));
-  const input = { ownerId: "owner-1", orderReference: "ORDER-1", amountMinor: 100, currency: "THB", idempotencyKey: "key-1", approvalId: "approval-1" };
+  const tools = createFinancialActionTools(setup(provider), "owner-1");
+  const input = { orderReference: "ORDER-1", amountMinor: 100, currency: "THB", idempotencyKey: "key-1", approvalId: "approval-1" };
   const result = await tools[0]!.execute(input, { runtime: {} as never }) as { record: { status: string }; verification: { verified: boolean } };
   assert.equal(submissions, 1); assert.equal(result.record.status, "succeeded"); assert.equal(result.verification.verified, true);
   await tools[0]!.execute(input, { runtime: {} as never }); assert.equal(submissions, 1);
@@ -45,14 +45,13 @@ test("reconciliation tool never calls the payment creation method", async () => 
     provider: "test-provider", async createPayment() { submissions += 1; },
     async verify(expected) { return { authenticated: true, provider: "test-provider", providerPaymentId: "pay-1", ...expected, status: "processing", observedAt: new Date().toISOString() }; },
   };
-  const tools = createFinancialActionTools(setup(provider));
-  const input = { ownerId: "owner-1", orderReference: "ORDER-1", amountMinor: 100, currency: "THB", idempotencyKey: "key-1", approvalId: "approval-1" };
+  const tools = createFinancialActionTools(setup(provider), "owner-1");
+  const input = { orderReference: "ORDER-1", amountMinor: 100, currency: "THB", idempotencyKey: "key-1", approvalId: "approval-1" };
   await tools[0]!.execute(input, { runtime: {} as never });
-  const result = await tools[1]!.execute({ ownerId: "owner-1", idempotencyKey: "key-1" }, { runtime: {} as never }) as { record: { status: string } };
+  const result = await tools[1]!.execute({ idempotencyKey: "key-1" }, { runtime: {} as never }) as { record: { status: string } };
   assert.equal(result.record.status, "processing"); assert.equal(submissions, 1);
 });
 
-test("payment tool rejects an approval for another owner", async () => {
-  const tools = createFinancialActionTools(setup());
-  await assert.rejects(tools[0]!.execute({ ownerId: "owner-2", orderReference: "ORDER-1", amountMinor: 100, currency: "THB", idempotencyKey: "key-1", approvalId: "approval-1" }, { runtime: {} as never }), /approval/);
+test("refuses to expose finance tools without a trusted authenticated owner", () => {
+  assert.throws(() => createFinancialActionTools(setup(), " "), /authenticated owner/);
 });
