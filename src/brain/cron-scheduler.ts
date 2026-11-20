@@ -542,7 +542,13 @@ export class CronScheduler {
           break;
         }
         try {
-          const submitted = await this.runtime.submit({ task: schedule.task, ownerKeyId: schedule.ownerKeyId });
+          const submitted = await this.runtime.submit({
+            task: schedule.task,
+            ownerKeyId: schedule.ownerKeyId,
+            // Replaying the same attempt after a crash returns the original durable job.
+            // A deliberate retry gets a new key while remaining tied to this occurrence.
+            idempotencyKey: `cron:${executionId}:${attempt}`,
+          });
           job = submitted;
           if (controller.signal.aborted) {
             await this.runtime.cancel(submitted.id).catch(() => false);
