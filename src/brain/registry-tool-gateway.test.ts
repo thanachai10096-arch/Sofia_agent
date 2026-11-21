@@ -449,3 +449,47 @@ test("tool gateway redacts provider tokens, private keys, tool outputs, errors, 
     assert.equal(auditText.includes(secret), false, "audit sink must not receive " + secret);
   }
 });
+
+
+test("audit completion failure does not turn a successful side effect into a retryable tool failure", async () => {
+  let executions = 0;
+  const registry = new MapToolRegistry([{
+    name: "custom.read",
+    description: "Controlled tool whose completion audit fails",
+    inputSchema: { type: "object" },
+    effects: ["read"] as const,
+    async execute() {
+      executions += 1;
+      return { value: "completed" };
+    },
+  }]);
+  const audit: SecurityAuditSink = {
+    record(event) {
+      if (event.decision === "completed") throw new Error("audit disk full");
+    },
+  };
+  const gateway = new RegistryToolGateway(
+    { runtime: runtime(), tools: registry },
+    defaultPolicy,
+    undefined,
+    undefined,
+    undefined,
+    audit,
+  );
+
+  const result = await gateway.execute(
+    { tool: "custom.read", input: {} },
+    {
+      runId: "audit-completion-failure-test",
+      principalId: "test-principal",
+      signal: new AbortController().signal,
+      requireApproval: false,
+      notifyApproval() {},
+    },
+  );
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.data, { value: "completed" });
+  assert.ok(result.evidenceId.length > 0);
+  assert.equal(executions, 1, "an audit sink failure after execution must not invite a duplicate tool call");
+});

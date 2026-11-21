@@ -98,11 +98,22 @@ export class RegistryToolGateway implements ToolGateway {
         boundSignal.dispose();
       }
       const safeData = redactSecrets(data);
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
+      // The side effect has already happened. A failure to append the completion
+      // audit record must never turn a successful action into a retryable tool error.
+      try {
+        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
+      } catch {
+        // The pre-execution decision record remains the audit trail; preserve
+        // the actual tool outcome to prevent duplicate side effects.
+      }
       return{ok:true,data:safeData,evidenceId};
     }catch(error){
       const message=String(redactSecrets(error instanceof Error?error.message:String(error)));
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:redactSecrets(input)});
+      try {
+        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:redactSecrets(input)});
+      } catch {
+        // Preserve the original execution failure if audit persistence is unavailable.
+      }
       return{ok:false,data:null,evidenceId,error:{category:descriptor.effects.includes("network")?"network_error":"tool_error",message}};
     }
   }
