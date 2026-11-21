@@ -93,9 +93,9 @@ export interface WorkspaceSnapshot {
 }
 
 export interface ToolGateway {
-  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[] }>;
+  listTools?(): Array<{ name: string; description: string; effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive" | "desktop")[] }>;
   describe(name: string): {
-    effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive")[];
+    effects: readonly ("read" | "write" | "shell" | "network" | "browser" | "destructive" | "desktop")[];
   } | undefined;
   execute(call: ToolCall, context: ToolExecutionContext): Promise<ToolResult>;
   snapshot(signal: AbortSignal): Promise<WorkspaceSnapshot>;

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="referrer" content="no-referrer">
+  <title>Sign in · Sofia Workspace</title>
+  <link rel="stylesheet" href="./login.css">
+</head>
+<body>
+  <main>
+    <div class="mark" aria-hidden="true">S</div>
+    <div class="eyebrow">YOUR PERSONAL AI WORKSPACE</div>
+    <h1>Welcome to Sofia.</h1>
+    <p>Sign in with your authorized account to open your private cloud browser and Sofia workspace.</p>
+    <div id="error" role="alert">Sign-in could not be completed. Please try again.</div>
+    <form action="/workspace/auth/login" method="get">
+      <button type="submit">Continue with secure sign-in <span aria-hidden="true">→</span></button>
+    </form>
+    <div class="note">Your password and verification codes are handled by your identity provider. Sofia never asks you to send them in chat.</div>
+  </main>
+  <script src="./login.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,412 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createDesktopCompanionClient } from "./companion-client.js";
+import type { DesktopCommandJournal, DesktopCommandJournalEntry, DesktopCommandOutcome } from "./command-journal.js";
+import type { DesktopCompanionCredentialStore } from "./companion-client.js";
+import type { DesktopHostDriver } from "./types.js";
+
+function credentials(): DesktopCompanionCredentialStore & { value: string | null } {
+  return {
+    value: null,
+    async get() { return this.value; },
+    async set(token) { this.value = token; },
+    async delete() { this.value = null; },
+  };
+}
+
+function driver(calls: string[]): DesktopHostDriver {
+  return {
+    async captureScreen() { return { mimeType: "image/png", data: new Uint8Array(), width: 1, height: 1 }; },
+    async launchApplication(applicationId) { calls.push("launch:" + applicationId); return { launched: true, applicationId }; },
+    async click() { calls.push("click"); },
+    async typeText(text) { calls.push("type:" + text); },
+    async pressKey(key) { calls.push("key:" + key); },
+  };
+}
+
+test("Desktop Companion pairs without persisting the Sofia API key and executes approved commands", async () => {
+  const store = credentials();
+  const calls: string[] = [];
+  const requests: Array<{ url: string; authorization?: string; body?: string }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    const url = String(input);
+    const headers = init?.headers as Record<string, string> | undefined;
+    requests.push({ url, authorization: headers?.authorization, body: typeof init?.body === "string" ? init.body : undefined });
+    if (url.endsWith("/connect")) return new Response(JSON.stringify({ token: "c".repeat(43), connectedAt: 123 }), { status: 201 });
+    if (url.endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id: "00000000-0000-4000-8000-000000000001", createdAt: 123, leaseToken: "lease-token-12345678", action: { kind: "input.type", text: "hello" } },
+    }), { status: 200 });
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver(calls),
+    allowedCapabilities: ["input:control"],
+    requestApproval: async () => true,
+    fetchImpl,
+  });
+  assert.deepEqual(await client.pair("owner-api-secret"), { connectedAt: 123 });
+  assert.equal(store.value, "c".repeat(43));
+  assert.equal(requests[0]?.authorization, "Bearer owner-api-secret");
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, ["type:hello"]);
+  assert.deepEqual(JSON.parse(requests[2]!.body!), { result: { ok: true }, leaseToken: "lease-token-12345678" });
+  assert.equal(requests.some((item) => item.body?.includes("owner-api-secret")), false);
+});
+
+test("Desktop Companion retries a failed completion POST without repeating the native action", async () => {
+  const store = credentials();
+  store.value = "r".repeat(43);
+  const calls: string[] = [];
+  const completionBodies: string[] = [];
+  let completionAttempts = 0;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id: "00000000-0000-4000-8000-000000000099", createdAt: 123, action: { kind: "input.key", key: "Enter" } },
+    }), { status: 200 });
+    completionAttempts += 1;
+    completionBodies.push(String(init?.body));
+    if (completionAttempts === 1) return new Response("temporary failure", { status: 503 });
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver(calls),
+    allowedCapabilities: ["input:control"],
+    requestApproval: async () => true,
+    fetchImpl,
+  });
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, ["key:Enter"], "the local action must execute exactly once");
+  assert.equal(completionAttempts, 2);
+  assert.equal(completionBodies[0], completionBodies[1], "retry must send the exact same completion payload");
+});
+
+test("Desktop Companion replays a journaled completion without repeating a native action", async () => {
+  const store = credentials();
+  store.value = "j".repeat(43);
+  const calls: string[] = [];
+  const entries = new Map<string, DesktopCommandJournalEntry>();
+  const journal: DesktopCommandJournal = {
+    async get(id) { return entries.get(id) ?? null; },
+    async begin(id) { entries.set(id, { commandId: id, status: "started", updatedAt: Date.now() }); },
+    async complete(id, outcome: DesktopCommandOutcome) {
+      entries.set(id, { commandId: id, status: "completed", updatedAt: Date.now(), outcome });
+    },
+  };
+  let completions: unknown[] = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id: "00000000-0000-4000-8000-000000000010", createdAt: 123, action: { kind: "input.type", text: "one-time" } },
+    }), { status: 200 });
+    completions.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: driver(calls),
+    allowedCapabilities: ["input:control"], requestApproval: async () => true, journal, fetchImpl,
+  });
+  assert.equal(await client.pollOnce(), true);
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, ["type:one-time"]);
+  assert.deepEqual(completions[0], completions[1]);
+});
+
+test("Desktop Companion fails closed for a command left started by a previous process", async () => {
+  const store = credentials();
+  store.value = "k".repeat(43);
+  const calls: string[] = [];
+  const id = "00000000-0000-4000-8000-000000000011";
+  const journal: DesktopCommandJournal = {
+    async get() { return { commandId: id, status: "started", updatedAt: 123 }; },
+    async begin() { throw new Error("must not begin an existing command"); },
+    async complete() { throw new Error("must not overwrite an indeterminate command"); },
+  };
+  let completion: Record<string, unknown> | undefined;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id, createdAt: 123, action: { kind: "input.key", key: "Enter" } },
+    }), { status: 200 });
+    completion = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: driver(calls),
+    allowedCapabilities: ["input:control"], requestApproval: async () => true, journal, fetchImpl,
+  });
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, []);
+  assert.match(completion?.error as string, /outcome is unknown/);
+});
+
+test("Desktop Companion fails closed when another process wins the journal claim race", async () => {
+  const store = credentials();
+  store.value = "m".repeat(43);
+  const id = "00000000-0000-4000-8000-000000000012";
+  const calls: string[] = [];
+  let completion: Record<string, unknown> | undefined;
+  const journal: DesktopCommandJournal = {
+    async get() { return { commandId: id, status: "started", updatedAt: Date.now() }; },
+    async begin() { throw new Error("already exists"); },
+    async complete() { throw new Error("must not overwrite another process journal"); },
+  };
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id, createdAt: 123, action: { kind: "input.type", text: "do-not-duplicate" } },
+    }), { status: 200 });
+    completion = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: driver(calls),
+    allowedCapabilities: ["input:control"], requestApproval: async () => true, journal, fetchImpl,
+  });
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, []);
+  assert.match(completion?.error as string, /already claimed/);
+});
+
+test("Desktop Companion reports approval denial without performing the local action", async () => {
+  const store = credentials();
+  store.value = "d".repeat(43);
+  const calls: string[] = [];
+  const completion: { value?: Record<string, unknown> } = {};
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    if (String(_input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id: "00000000-0000-4000-8000-000000000002", createdAt: 123, action: { kind: "input.key", key: "Enter" } },
+    }), { status: 200 });
+    completion.value = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "http://127.0.0.1:3000",
+    credentials: store,
+    driver: driver(calls),
+    allowedCapabilities: ["input:control"],
+    requestApproval: async () => false,
+    fetchImpl,
+  });
+  assert.equal(await client.pollOnce(), true);
+  assert.deepEqual(calls, []);
+  assert.equal(typeof completion.value?.error, "string");
+  assert.match(completion.value?.error as string, /denied/);
+});
+
+test("Desktop Companion clears revoked credentials and rejects insecure remote HTTP URLs", async () => {
+  const store = credentials();
+  store.value = "e".repeat(43);
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => true,
+    fetchImpl: async () => new Response("{}", { status: 401 }),
+  });
+  await assert.rejects(client.pollOnce(), /pairing was revoked/);
+  assert.equal(store.value, null);
+  assert.throws(() => createDesktopCompanionClient({
+    apiBaseUrl: "http://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => true,
+  }), /requires HTTPS/);
+});
+
+test("stopping keeps the OS credential; explicit disconnect revokes server pairing and clears it", async () => {
+  const store = credentials();
+  store.value = "f".repeat(43);
+  const calls: Array<{ url: string; authorization?: string }> = [];
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => false,
+    fetchImpl: async (input, init) => {
+      calls.push({
+        url: String(input),
+        authorization: (init?.headers as Record<string, string> | undefined)?.authorization,
+      });
+      return new Response(JSON.stringify({ disconnected: true }), { status: 200 });
+    },
+  });
+  client.stop();
+  assert.equal(store.value, "f".repeat(43));
+  await client.disconnect("owner-api-secret");
+  assert.equal(store.value, null);
+  assert.equal(calls[0]?.url, "https://sofia.example.com/v1/desktop/companion/disconnect");
+  assert.equal(calls[0]?.authorization, "Bearer owner-api-secret");
+});
+
+test("screen capture requires a separate local capability and explicit approval", async () => {
+  const store = credentials();
+  store.value = "s".repeat(43);
+  const calls: string[] = [];
+  const completion: { value?: Record<string, unknown> } = {};
+  let approvals = 0;
+  const baseDriver = driver(calls);
+  const captureDriver: DesktopHostDriver = {
+    ...baseDriver,
+    async captureScreen() {
+      calls.push("capture");
+      return { mimeType: "image/png", data: new Uint8Array([1, 2, 3]), width: 2, height: 1 };
+    },
+  };
+  const fetchImpl: typeof fetch = async (_input, init) => {
+    if (String(_input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: { id: "00000000-0000-4000-8000-000000000003", createdAt: 123, action: { kind: "screen.capture" } },
+    }), { status: 200 });
+    completion.value = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const withoutGrant = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: captureDriver,
+    allowedCapabilities: [], requestApproval: async () => { approvals += 1; return true; }, fetchImpl,
+  });
+  assert.equal(await withoutGrant.pollOnce(), true);
+  assert.deepEqual(calls, []);
+  assert.match(completion.value?.error as string, /has not granted screen:capture/);
+  assert.equal(approvals, 0);
+  completion.value = undefined;
+  const enabled = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com", credentials: store, driver: captureDriver,
+    allowedCapabilities: ["screen:capture"],
+    requestApproval: async (action) => { approvals += 1; return action.kind === "screen.capture"; },
+    fetchImpl,
+  });
+  assert.equal(await enabled.pollOnce(), true);
+  assert.deepEqual(calls, ["capture"]);
+  assert.equal(approvals, 1);
+  const completedPayload = completion.value as Record<string, unknown> | undefined;
+  assert.deepEqual(completedPayload?.result, {
+    mimeType: "image/png", dataBase64: "AQID", width: 2, height: 1,
+  });
+});
+
+
+test("Desktop Companion bounds response memory while streaming untrusted API bodies", async () => {
+  const store = credentials();
+  let cancelled = false;
+  const oversizedBody = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(1024 * 1024 + 1));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => false,
+    fetchImpl: async () => new Response(oversizedBody, { status: 201 }),
+  });
+  await assert.rejects(client.pair("owner-api-secret"), /response is too large/);
+  assert.equal(cancelled, true);
+  assert.equal(store.value, null);
+});
+
+
+test("Desktop Companion forwards cancellation to an in-flight app launch and does not report completion", async () => {
+  const store = credentials();
+  store.value = "l".repeat(43);
+  let launchSignal: AbortSignal | undefined;
+  let launchStarted!: () => void;
+  const started = new Promise<void>((resolve) => { launchStarted = resolve; });
+  const calls: string[] = [];
+  const launchDriver: DesktopHostDriver = {
+    ...driver(calls),
+    async launchApplication(_applicationId, _args, signal) {
+      launchSignal = signal;
+      launchStarted();
+      await new Promise<void>((resolve) => {
+        if (signal?.aborted) resolve();
+        else signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      throw new Error("Native desktop command aborted.");
+    },
+  };
+  let completionRequests = 0;
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).endsWith("/commands")) return new Response(JSON.stringify({
+      command: {
+        id: "00000000-0000-4000-8000-000000000004",
+        createdAt: 123,
+        action: { kind: "app.launch", applicationId: "calculator", args: [] },
+      },
+    }), { status: 200 });
+    completionRequests += 1;
+    return new Response(JSON.stringify({ completed: true }), { status: 200 });
+  };
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: launchDriver,
+    allowedCapabilities: ["app:launch"],
+    allowedApplications: ["calculator"],
+    requestApproval: async () => true,
+    fetchImpl,
+  });
+  const controller = new AbortController();
+  const polling = client.pollOnce(controller.signal);
+  await started;
+  assert.equal(launchSignal, controller.signal);
+  controller.abort(new Error("cancelled by operator"));
+  assert.equal(await polling, false);
+  assert.equal(completionRequests, 0, "an aborted native action must not be posted as completed");
+});
+
+
+test("Desktop Companion exponentially backs off failed Cloud polls and resets after recovery", async () => {
+  const store = credentials();
+  store.value = "b".repeat(43);
+  const requestTimes: number[] = [];
+  const controller = new AbortController();
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => false,
+    pollIntervalMs: 500,
+    fetchImpl: async () => {
+      requestTimes.push(Date.now());
+      if (requestTimes.length < 3) return new Response("temporarily unavailable", { status: 503 });
+      controller.abort(new Error("test complete"));
+      return new Response(JSON.stringify({ command: null }), { status: 200 });
+    },
+  });
+  await client.start(controller.signal);
+  assert.equal(requestTimes.length, 3);
+  assert.ok(requestTimes[1]! - requestTimes[0]! >= 450,
+    "first retry should wait at least the configured poll interval");
+  assert.ok(requestTimes[2]! - requestTimes[1]! >= 900,
+    "second consecutive failure should double the retry delay");
+});
+
+test("Desktop Companion start does not poll when its signal was already aborted", async () => {
+  const store = credentials();
+  store.value = "p".repeat(43);
+  let requests = 0;
+  const client = createDesktopCompanionClient({
+    apiBaseUrl: "https://sofia.example.com",
+    credentials: store,
+    driver: driver([]),
+    allowedCapabilities: [],
+    requestApproval: async () => false,
+    fetchImpl: async () => {
+      requests += 1;
+      return new Response(JSON.stringify({ command: null }), { status: 200 });
+    },
+  });
+  const controller = new AbortController();
+  controller.abort(new Error("cancelled before start"));
+  await client.start(controller.signal);
+  assert.equal(requests, 0, "an already-aborted signal must prevent the first poll");
+});

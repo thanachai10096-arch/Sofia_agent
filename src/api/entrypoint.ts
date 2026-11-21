@@ -10,6 +10,13 @@ import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplica
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
 import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
 import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { DesktopCommandBroker } from "../desktop/remote-command-broker.js";
+import { FileDesktopCompanionStore } from "../desktop/companion-store.js";
+import { CloudBrowserSessionManager } from "../browser/cloud-session-manager.js";
+import { PlaywrightBrowserRuntime } from "../browser/runtime.js";
+import { ApprovalInbox } from "../agent/approval-inbox.js";
+import { FileApprovalAuditStore } from "../agent/approval-audit-store.js";
+import { WorkspaceOidcAuth } from "./workspace-oidc-auth.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -20,7 +27,47 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+// Remote desktop is an explicit deployment-level opt-in in addition to API-key scopes.
+const remoteDesktopEnabled = process.env.SOFIA_ALLOW_REMOTE_DESKTOP === "true";
+const desktopCompanionStore = remoteDesktopEnabled
+  ? new FileDesktopCompanionStore(path.join(workspace, ".sofia", "desktop-companions"))
+  : undefined;
+const desktopCommandBroker = desktopCompanionStore
+  ? new DesktopCommandBroker({ store: desktopCompanionStore })
+  : undefined;
+const approvalAuditStore = new FileApprovalAuditStore(path.join(workspace, ".sofia"));
+// Never replay an approval after restart: close orphaned audit entries before accepting traffic.
+approvalAuditStore.recoverInterrupted();
+const approvalInbox = new ApprovalInbox({ ttlMs: 120_000, maxPendingPerOwner: 30, auditStore: approvalAuditStore });
+const workspaceOidcValues = [
+  process.env.SOFIA_WORKSPACE_OIDC_ISSUER,
+  process.env.SOFIA_WORKSPACE_OIDC_CLIENT_ID,
+  process.env.SOFIA_WORKSPACE_OIDC_CLIENT_SECRET,
+  process.env.SOFIA_WORKSPACE_OIDC_REDIRECT_URI,
+  process.env.SOFIA_WORKSPACE_OIDC_ALLOWED_SUBJECT,
+];
+const workspaceOidcRequested = workspaceOidcValues.some((value) => Boolean(value?.trim()));
+const workspaceAuth = workspaceOidcValues.every((value) => Boolean(value?.trim()))
+  ? new WorkspaceOidcAuth({
+      issuer: process.env.SOFIA_WORKSPACE_OIDC_ISSUER!,
+      clientId: process.env.SOFIA_WORKSPACE_OIDC_CLIENT_ID!,
+      clientSecret: process.env.SOFIA_WORKSPACE_OIDC_CLIENT_SECRET!,
+      redirectUri: process.env.SOFIA_WORKSPACE_OIDC_REDIRECT_URI!,
+      allowedSubject: process.env.SOFIA_WORKSPACE_OIDC_ALLOWED_SUBJECT!,
+      sessionDirectory: path.join(workspace, ".sofia", "workspace-sessions"),
+    })
+  : undefined;
+if (workspaceOidcRequested && !workspaceAuth) {
+  console.error("Mobile Workspace login disabled: all SOFIA_WORKSPACE_OIDC_* settings are required.");
+}
+
+const cloudBrowserSessions = process.env.SOFIA_CLOUD_BROWSER_ENABLED === "true"
+  ? new CloudBrowserSessionManager(new PlaywrightBrowserRuntime(), {
+      maxSessionsPerOwner: Number(process.env.SOFIA_CLOUD_BROWSER_MAX_SESSIONS_PER_OWNER ?? 2),
+      idleTimeoutMs: Number(process.env.SOFIA_CLOUD_BROWSER_IDLE_TIMEOUT_MS ?? 900_000),
+    })
+  : undefined;
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalInbox.request, undefined, desktopCommandBroker);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -208,12 +255,20 @@ const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
+  ...(desktopCommandBroker ? { desktopCommandBroker } : {}),
+  approvalInbox,
+  ...(workspaceAuth ? { workspaceAuth, workspaceApiKey: apiKey, workspaceStaticDirectory: path.resolve(process.cwd(), "web/mobile-workspace") } : {}),
+  approvalAuditStore,
+  ...(cloudBrowserSessions ? { cloudBrowserSessions } : {}),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
   ...(discordTransport ? { discordInteractionRoute: { transport: discordTransport } } : {}),
 });
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
+  deps.desktopCommandBroker?.close();
+  approvalInbox.close();
+  void cloudBrowserSessions?.closeAll().catch(() => console.error("Cloud browser shutdown failed."));
   deps.closeSessionStore();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
