@@ -149,7 +149,7 @@ export function createInternalRoute(
           return {
             value,
             usage: response.usage,
-            finishReason: "complete",
+            finishReason: response.finishReason ?? "complete",
           };
         },
       };
