@@ -18,6 +18,8 @@ The host application configures `createSofiaApi(dependencies, config)` and suppl
 
 The API computes an opaque owner ID from each key and scopes run/job operations to that owner. Treat run and job IDs as opaque.
 
+**Workspace isolation limitation:** the current API entrypoint constructs one Brain/runtime against the operator-configured `SOFIA_WORKSPACE`. API key ownership protects selected run/job/memory/cron records, but it does not create a separate filesystem, project memory, run snapshots, skill/evolution state, or tool runtime per API principal. Desktop capabilities also target the configured shared workspace. Do not expose this deployment as a multi-tenant workspace service or issue desktop/process scopes to untrusted users. Client-supplied `workspace` paths are rejected until a trusted server-side principal-to-workspace resolver and per-tenant runtime/storage boundaries are implemented. Discord principals are separate for job ownership but currently share the configured workspace and project state; keep messaging access limited to trusted operators. See [Multi-Tenant Isolation Architecture](./MULTI_TENANT_ISOLATION_ARCHITECTURE.md) for the required implementation and release gates.
+
 ## CORS and browser clients
 
 Set `allowedOrigins` to exact trusted origins including scheme and port. Keep it empty if cross-origin browser access is unnecessary. Avoid wildcard CORS in production. CORS is not authentication; non-browser clients can call the server directly and must still authenticate.

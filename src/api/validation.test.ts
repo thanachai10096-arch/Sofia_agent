@@ -59,3 +59,13 @@ test("API run validation rejects malformed model route selectors", () => {
   });
   assert.equal(validateAgentRunInput({ task: "inspect", modelRouteId: 123 }).valid, false);
 });
+
+test("API run validation rejects client-selected workspace paths until tenant isolation exists", () => {
+  assert.deepEqual(validateAgentRunInput({
+    task: "inspect project",
+    workspace: "/srv/other-user/private-project",
+  }), {
+    valid: false,
+    error: "workspace_override_unsupported",
+  });
+});

@@ -5,6 +5,10 @@ export function validateAgentRunInput(value: unknown): { valid: true; input: Age
     return { valid: false, error: "invalid_request_body" };
   }
   const input = value as Record<string, unknown>;
+  // The API currently runs against one operator-configured workspace. Never
+  // accept a client-selected path until an authenticated per-principal workspace
+  // resolver exists; silently ignoring this field would imply false isolation.
+  if (input.workspace !== undefined) return { valid: false, error: "workspace_override_unsupported" };
   if (typeof input.task !== "string" || !input.task.trim()) return { valid: false, error: "task_required" };
   if (input.task.length > 100_000) return { valid: false, error: "task_too_long" };
   if (input.context !== undefined && typeof input.context !== "string" && (input.context === null || typeof input.context !== "object" || Array.isArray(input.context))) {
