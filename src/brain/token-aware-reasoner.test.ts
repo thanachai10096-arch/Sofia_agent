@@ -137,11 +137,37 @@ test("task intent labels map to supported provider capabilities", async () => {
   const reasoner = new TokenAwareBrainReasoner(gateway);
   const controller = new AbortController();
   const prepared = await reasoner.prepare(JSON.stringify({
-    phase: "understand",
-    payload: { task: "Analyze a code issue", understanding: { requiredCapabilities: ["analysis", "code", "general"] } },
+    phase: "plan",
+    payload: {
+      task: "Inspect the browser and write a file",
+      understanding: {
+        requiredCapabilities: ["analysis", "code", "general", "file-write", "browser", "terminal", "mcp", "vision"],
+      },
+    },
   }), { signal: controller.signal, maxContextTokens: 16_000 });
   await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
-  assert.deepEqual(captured?.requiredCapabilities, ["fast"], "understanding selects its route independently of the capabilities it discovers");
+  assert.deepEqual(captured?.requiredCapabilities, ["reasoning", "coding", "tool-use", "vision"]);
+});
+
+test("unknown task capability labels remain fail-closed instead of being discarded", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway);
+  const controller = new AbortController();
+  const prepared = await reasoner.prepare(JSON.stringify({
+    phase: "plan",
+    payload: {
+      task: "Run a specialized task",
+      understanding: { requiredCapabilities: ["quantum-computing"] },
+    },
+  }), { signal: controller.signal, maxContextTokens: 16_000 });
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 100 });
+  assert.deepEqual(captured?.requiredCapabilities, ["reasoning", "quantum-computing"]);
 });
 
 

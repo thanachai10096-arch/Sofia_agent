@@ -47,30 +47,52 @@ function phaseFromRequest(request: string): BrainPhase {
 }
 
 /**
- * Understanding labels describe task intent, while the gateway expects
- * provider-route capabilities. Require capabilities needed by each Brain
- * phase first, then merge task-derived requirements and leave unknown labels
- * intact so the gateway continues to fail closed for unsupported needs.
+ * Understanding labels describe task intent, while the gateway expects the
+ * finite ModelCapability vocabulary. Normalize known task/tool synonyms at
+ * this boundary so labels such as "browser" or "file-write" do not become
+ * impossible provider capabilities. Unknown labels remain intact and fail
+ * closed in the gateway rather than silently weakening route requirements.
  */
 function routeCapabilities(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
   const mapped = values
     .filter((value): value is string => typeof value === "string")
     .map((value) => {
-      switch (value.trim().toLowerCase()) {
+      const label = value.trim().toLowerCase().replace(/[\\s_]+/g, "-");
+      switch (label) {
         case "general":
         case "conversation":
           return undefined;
         case "chat":
         case "simple-chat":
+        case "response":
           return "fast";
         case "analysis":
         case "research":
+        case "planning":
           return "reasoning";
         case "code":
+        case "code-edit":
+        case "development":
+        case "implementation":
           return "coding";
+        case "file":
+        case "file-read":
+        case "file-write":
+        case "filesystem":
+        case "browser":
+        case "web":
+        case "web-search":
+        case "shell":
+        case "terminal":
+        case "mcp":
+        case "tool":
+        case "tools":
+        case "automation":
+        case "desktop":
+          return "tool-use";
         default:
-          return value.trim();
+          return label;
       }
     })
     .filter((value): value is string => Boolean(value));
