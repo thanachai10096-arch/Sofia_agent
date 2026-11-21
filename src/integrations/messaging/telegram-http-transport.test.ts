@@ -229,3 +229,35 @@ test("Telegram polling reports HTTP errors with status", async () => {
   await transport.stop();
   assert.deepEqual(events[0], { event: "poll_failed", status: 503, kind: "http" });
 });
+
+
+test("Telegram polling recovers after a transient network failure without leaking details", async () => {
+  let pollCount = 0;
+  let recoveredResolve!: () => void;
+  const recovered = new Promise<void>((resolve) => { recoveredResolve = resolve; });
+  const events: Array<{ event: string; kind?: string }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/deleteWebhook")) return ok(true);
+    if (String(input).endsWith("/getUpdates")) {
+      pollCount++;
+      if (pollCount === 1) throw new Error("private DNS and token details must not escape");
+      recoveredResolve();
+      return waitForAbort(init?.signal);
+    }
+    throw new Error("Unexpected Telegram endpoint.");
+  };
+  const transport = createTelegramHttpTransport({
+    token,
+    fetchImpl,
+    onError(event, _status, kind) { events.push({ event, ...(kind ? { kind } : {}) }); },
+  });
+  await transport.start(new AbortController().signal, async () => {});
+  await Promise.race([
+    recovered,
+    new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Timed out waiting for network recovery")), 3_000)),
+  ]);
+  assert.equal(pollCount, 2);
+  assert.deepEqual(events, [{ event: "poll_failed", kind: "network" }]);
+  assert.equal(JSON.stringify(events).includes("private"), false);
+  await transport.stop();
+});
