@@ -220,3 +220,59 @@ test("async API rejects an idempotency key reused with a different request", asy
   assert.equal(mismatch.status, 409);
   assert.equal((await mismatch.json() as { error: string }).error, "idempotency_key_reused");
 });
+
+test("async API deduplicates an in-flight request with the same idempotency key", async (t) => {
+  let markStarted!: () => void;
+  let finishProvider!: () => void;
+  let providerCalls = 0;
+  const started = new Promise<void>((resolve) => { markStarted = resolve; });
+  const providerResult = new Promise<void>((resolve) => { finishProvider = resolve; });
+  const provider: ModelProvider = {
+    async generate() {
+      providerCalls += 1;
+      markStarted();
+      await providerResult;
+      return { text: "single execution result" };
+    },
+  };
+  const { server, url } = await startApi(provider);
+  t.after(() => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+
+  const post = () => fetch(url + "/v1/agent/runs", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test-token",
+      "content-type": "application/json",
+      "idempotency-key": "in-flight-deduplication-key",
+    },
+    body: JSON.stringify({ task: "run exactly once", async: true }),
+  });
+
+  const first = await post();
+  assert.equal(first.status, 202);
+  const firstRun = await first.json() as { id: string; status: string };
+  await started;
+
+  const duplicate = await post();
+  assert.equal(duplicate.status, 200);
+  const duplicateRun = await duplicate.json() as { id: string; status: string };
+  assert.equal(duplicateRun.id, firstRun.id);
+  assert.equal(duplicateRun.status, "running");
+  assert.equal(providerCalls, 1, "an in-flight duplicate must not start a second provider call");
+
+  finishProvider();
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const response = await fetch(url + "/v1/agent/runs/" + firstRun.id, {
+      headers: { authorization: "Bearer test-token" },
+    });
+    assert.equal(response.status, 200);
+    const run = await response.json() as { status: string };
+    if (run.status === "completed") break;
+    if (run.status === "failed" || run.status === "cancelled") {
+      throw new Error("Original idempotent run ended with status " + run.status);
+    }
+    if (attempt === 99) throw new Error("Original idempotent run did not complete");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal(providerCalls, 1);
+});
