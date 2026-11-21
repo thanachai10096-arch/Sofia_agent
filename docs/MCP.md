@@ -2,6 +2,8 @@
 
 Sofia exposes an opt-in MCP client that adapts remote MCP tools into Sofia's existing tool format. The adapter does not execute tools directly: register the returned SofiaTool array with the existing Tool Registry so the normal Tool Gateway, policy, approval, and audit path remains authoritative.
 
+The async `createSofiaAgentDependenciesWithSessions(workspace, approval, databasePath, mcpServers)` factory can now accept an explicit list of trusted `ManagedMcpServerConfig` entries. It connects them during startup and injects their allowlisted tools into every Brain run's Tool Registry. The returned dependencies expose `closeMcpServers()`; call it during graceful shutdown. Existing calls that omit `mcpServers` keep the previous behavior.
+
 ## Transports
 
 - stdio launches an explicitly configured command. Only a small environment-variable allowlist is inherited by default; pass additional variables explicitly. Only connect to MCP servers whose commands and packages you trust.
@@ -9,18 +11,47 @@ Sofia exposes an opt-in MCP client that adapts remote MCP tools into Sofia's exi
 
 ## Example
 
-    import { McpClient } from "sofia-agent";
-    import { McpStdioTransport } from "sofia-agent";
+    import {
+      createSofiaAgentDependenciesWithSessions,
+      McpStdioTransport,
+    } from "sofia-agent";
 
-    const transport = new McpStdioTransport({
-      command: "node",
-      args: ["./trusted-mcp-server.js"],
-      env: { MCP_MODE: "read-only" },
-    });
-    const client = new McpClient(transport);
-    await client.initialize();
-    const tools = await client.createSofiaTools();
-    // Register tools with Sofia's existing registry; do not call them outside ToolGateway.
+    const deps = await createSofiaAgentDependenciesWithSessions(
+      process.cwd(),
+      undefined,
+      undefined,
+      [{
+        transport: new McpStdioTransport({
+          command: "node",
+          args: ["./trusted-mcp-server.js"],
+          env: { MCP_MODE: "read-only" },
+        }),
+        options: { id: "docs", allowedTools: ["lookup"] },
+      }],
+    );
+    // The allowlisted MCP tools are now in deps.tools and available to Brain.
+    // On graceful shutdown, call await deps.closeMcpServers().
+
+
+## API runtime configuration
+
+The API entrypoint can load trusted MCP server definitions from the operator environment variable `SOFIA_MCP_SERVERS_JSON`. It must be a JSON array. Each entry requires a stable `id`, a non-empty `allowedTools` array, and an explicit `transport`:
+
+    [
+      {
+        "id": "docs",
+        "allowedTools": ["lookup"],
+        "transport": {
+          "type": "http",
+          "endpoint": "https://mcp.example.com/rpc",
+          "headers": { "authorization": "Bearer <server-specific-token>" }
+        }
+      }
+    ]
+
+For stdio, set `transport.type` to `stdio` and provide `command`, with optional `args`, `cwd`, `inheritEnv`, and `env`. Stdio commands execute with the API process identity; configure only commands and packages controlled by the operator. Never place the master Sofia API key in MCP server environment variables. Keep this configuration in the hosting platform's secret/environment settings, not source control.
+
+The API connects servers during startup, injects only the allowlisted tools into the Brain's process-wide base registry, and closes transports during graceful shutdown. MCP tool calls still pass through the same Tool Gateway, execution policy, approvals, and audit path as built-in tools. An MCP server is not enabled unless explicitly configured.
 
 ## Security and limitations
 
