@@ -13,3 +13,6 @@ export type { LocalPairingHost, LocalPairingHostConfig } from "./local-pairing-h
 
 export { startLocalDesktopActionHost } from "./local-action-host.js";
 export type { LocalDesktopActionHost, LocalDesktopActionHostConfig } from "./local-action-host.js";
+
+export { createDesktopRelayNonce, signDesktopRelayRequest, verifyDesktopRelayRequest, DesktopRelayReplayGuard } from "./relay-protocol.js";
+export type { DesktopRelayRequest, DesktopRelayAuthHeaders, DesktopRelayReplayGuardOptions } from "./relay-protocol.js";
