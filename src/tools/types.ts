@@ -7,6 +7,8 @@ export interface SofiaTool {
   inputSchema: Record<string, unknown>;
   /** Explicit security effects for policy/approval; inferred from name when omitted. */
   effects?: readonly ToolEffect[];
+  /** Operator-owned fixed HTTPS targets for network tools; never populated from model input. */
+  trustedNetworkTargets?: readonly string[];
   execute(input: Record<string, unknown>, context: ToolContext): Promise<unknown>;
 }
 export interface ToolRegistry { get(name: string): SofiaTool | undefined; list(): SofiaTool[]; }
