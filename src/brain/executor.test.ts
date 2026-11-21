@@ -848,14 +848,14 @@ test("Brain saves reusable workflow memory only after verified completion and ex
 });
 
 
-test("Brain rejects unknown delegated tools and falls back to the primary planner", async () => {
+test("Brain recovers from failed tool results without evidence and rejects unknown delegated tools", async () => {
   let writes = 0;
   const tools = makeTools();
   const originalExecute = tools.execute.bind(tools);
   tools.execute = async (call, context) => {
     if (call.tool === "workspace.write_file") {
       writes += 1;
-      if (writes === 1) return { ok: false, data: null, evidenceId: "failure-unknown-delegate", error: { category: "tool_error", message: "initial write failed" } };
+      if (writes === 1) return { ok: false, data: null, evidenceId: "", error: { category: "tool_error", message: "initial write failed" } };
     }
     return originalExecute(call, context);
   };
@@ -1001,4 +1001,95 @@ test("explicit Thai file-edit requests stay on the action path even if the model
   assert.ok(phases.includes("plan"));
   assert.ok(!phases.includes("respond"));
   assert.ok(report.usage.toolCalls > 0);
+});
+
+
+test("Brain fails closed when a successful tool result has no evidence ID", async () => {
+  let executions = 0;
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.write_file") {
+      executions += 1;
+      return { ok: true, data: { written: true }, evidenceId: "" };
+    }
+    return originalExecute(call, context);
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({ task: "Create hello.txt" });
+
+  assert.equal(report.completed, false);
+  assert.match(report.summary, /no evidence ID/);
+  assert.equal(executions, 1, "a side-effecting tool must not be retried when its evidence is missing");
+});
+
+
+test("Brain fails closed when a successful custom acceptance probe has no evidence", async () => {
+  let probeExecutions = 0;
+  const tools = makeTools();
+  const originalExecute = tools.execute.bind(tools);
+  tools.execute = async (call, context) => {
+    if (call.tool === "workspace.list_files") {
+      probeExecutions += 1;
+      return { ok: true, data: ["hello.txt"], evidenceId: "   " };
+    }
+    return originalExecute(call, context);
+  };
+
+  const brain = createSofiaBrain({
+    dependencies: {
+      reasoner: makeReasoner(),
+      tools,
+      allowShell: false,
+      allowNetwork: false,
+    },
+    limits: {
+      maxSteps: 4,
+      maxToolCalls: 10,
+      maxReplans: 1,
+      maxModelCalls: 4,
+      maxTokens: 1_000,
+      maxContextTokens: 500,
+      maxOutputTokens: 100,
+      timeoutMs: 5_000,
+    },
+  });
+
+  const report = await brain.run({
+    task: "Create hello.txt",
+    acceptanceCriteria: [{
+      id: "file-exists",
+      description: "hello.txt exists",
+      probe: { tool: "workspace.list_files", input: { path: "." } },
+      evaluate(data) {
+        return {
+          passed: Array.isArray(data) && data.includes("hello.txt"),
+          detail: "hello.txt exists",
+        };
+      },
+    }],
+  });
+
+  assert.equal(report.completed, false);
+  assert.match(report.summary, /Verification probe succeeded without evidence/);
+  assert.equal(probeExecutions, 1);
 });

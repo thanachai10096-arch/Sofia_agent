@@ -44,16 +44,23 @@ export async function runVerification(
       },
     });
 
-    const evaluated = criterion.evaluate(result.data);
+    const evidenceId = typeof result.evidenceId === "string" ? result.evidenceId.trim() : "";
+    if (result.ok && evidenceId.length === 0) {
+      throw new Error("Verification probe succeeded without evidence: " + criterion.id);
+    }
+
+    const evaluated = result.ok
+      ? criterion.evaluate(result.data)
+      : { passed: false, detail: result.error?.message ?? "Verification tool failed" };
     results.push({
       criterionId: criterion.id,
-      passed: result.ok && evaluated.passed,
-      detail: result.ok ? evaluated.detail : result.error?.message ?? "Verification tool failed",
-      evidenceIds: [result.evidenceId],
+      passed: result.ok && evidenceId.length > 0 && evaluated.passed,
+      detail: evaluated.detail,
+      evidenceIds: evidenceId ? [evidenceId] : [],
       workspaceRevision: snapshot.revision,
     });
 
-    if (!result.ok || !evaluated.passed) break;
+    if (!result.ok || !evidenceId || !evaluated.passed) break;
   }
 
   return results;

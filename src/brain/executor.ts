@@ -704,16 +704,24 @@ export class SofiaBrain {
       throw new RecoverableFailure(failureCategory(error), errorMessage(error));
     }
 
+    // A successful tool response must carry evidence: without it, a side effect
+    // may have happened but cannot be safely correlated, so never retry it.
+    // Failed results remain recoverable even when they have no evidence identifier.
+    const evidenceId = typeof result.evidenceId === "string" ? result.evidenceId.trim() : "";
+    if (result.ok && evidenceId.length === 0) {
+      throw new Stop(`Tool returned no evidence ID: ${step.call.tool}`);
+    }
+
     const p = preview(result.data);
     const fenced = fenceUntrustedOutput(step.call.tool, p.text);
     const observation: Observation = {
-      stepId: step.id, tool: step.call.tool, ok: result.ok, evidenceId: result.evidenceId,
+      stepId: step.id, tool: step.call.tool, ok: result.ok, evidenceId,
       preview: fenced.text, truncated: p.truncated,
       ...(fenced.suspicious ? { suspicious: true } : {}),
     };
 
     this.observations.push(observation);
-    this.evidenceIndex.push(result.evidenceId);
+    if (evidenceId) this.evidenceIndex.push(evidenceId);
 
     this.emit({
       type: result.ok ? "brain.tool.completed" : "brain.tool.failed",
@@ -763,23 +771,26 @@ export class SofiaBrain {
         }),
       );
 
-      if (!result.evidenceId) {
-        throw new Stop(`Verification probe returned no evidence: ${criterion.id}`);
+      const evidenceId = typeof result.evidenceId === "string" ? result.evidenceId.trim() : "";
+      // A successful verification must be correlated to evidence. A failed probe
+      // without evidence is still a real failure and must remain recoverable.
+      if (result.ok && evidenceId.length === 0) {
+        throw new Stop(`Verification probe succeeded without evidence: ${criterion.id}`);
       }
 
-      const evaluated = criterion.evaluate(result.data);
+      const evaluated = result.ok
+        ? criterion.evaluate(result.data)
+        : { passed: false, detail: result.error?.message ?? "Verification probe failed" };
 
       results.push({
         criterionId: criterion.id,
-        passed: evaluated.passed && result.ok,
-        detail: result.ok
-          ? evaluated.detail
-          : result.error?.message ?? "Verification probe failed",
-        evidenceIds: [result.evidenceId],
+        passed: result.ok && evidenceId.length > 0 && evaluated.passed,
+        detail: evaluated.detail,
+        evidenceIds: evidenceId ? [evidenceId] : [],
         workspaceRevision: snapshot.revision,
       });
 
-      if (!(evaluated.passed && result.ok)) {
+      if (!(result.ok && evidenceId.length > 0 && evaluated.passed)) {
         this.emit({
           type: "brain.verification.completed",
           passed: false,
