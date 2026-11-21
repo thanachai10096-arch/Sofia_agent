@@ -137,7 +137,8 @@ export interface TelegramMessagingEnvironment {
 export function createTelegramMessagingRuntime(
   env: TelegramMessagingEnvironment = process.env,
   workspace = process.cwd(),
-  onWarning: (message: string) => void = (message) => console.error(message),
+  onWarning: (message: string) => void = (message) => console.warn(message),
+  onInfo: (message: string) => void = (message) => console.info(message),
 ): TelegramMessagingRuntime | undefined {
   const requested = env.SOFIA_MESSAGING_ENABLED === "true";
   if (!requested) return undefined;
@@ -172,7 +173,7 @@ export function createTelegramMessagingRuntime(
     const handler = createSofiaMessagingHandler({
       client, accessPolicy, deduplicator, commandPrefix: "/run",
       onAccepted: ({ runId, runStatus, message }) => {
-        onWarning("Telegram messaging event: telegram_run_accepted run_id=" + runId + " status=" + runStatus + ".");
+        onInfo("Telegram messaging event: telegram_run_accepted run_id=" + runId + " status=" + runStatus + ".");
         // Poll in the background so one long task does not block incoming Telegram updates.
         void reportTelegramRunCompletion({
           runId,
@@ -182,7 +183,7 @@ export function createTelegramMessagingRuntime(
             ? gateway.send("telegram", outbound)
             : Promise.resolve(false),
           onWarning: (event) => onWarning("Telegram messaging warning: " + event + "."),
-          onEvent: (event) => onWarning("Telegram messaging event: " + event + "."),
+          onEvent: (event) => onInfo("Telegram messaging event: " + event + "."),
         });
       },
     });
@@ -203,7 +204,7 @@ export function createTelegramMessagingRuntime(
       rateWindowMs: 60_000,
       onMessage: (message) => handler(message),
       logger: {
-        info: (event) => onWarning("Telegram messaging event: " + event + "."),
+        info: (event) => onInfo("Telegram messaging event: " + event + "."),
         warn: (event) => onWarning("Telegram messaging warning: " + event + "."),
       },
     });

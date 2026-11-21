@@ -111,3 +111,35 @@ test("invalid command prefixes are rejected at configuration time", () => {
   assert.throws(() => createSofiaMessagingHandler({ ...h, commandPrefix: "/run\nadmin" }), /commandPrefix/);
 });
 
+test("accepted run invokes onAccepted with run metadata and original inbound message", async () => {
+  const h = harness();
+  const accepted: Array<{ runId: string; runStatus: string; message: InboundMessage }> = [];
+  const message = inbound("please inspect the latest deployment");
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    onAccepted: (input) => accepted.push(input),
+  });
+
+  const acknowledgement = await handle(message);
+
+  assert.equal(acknowledgement, "รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: run-123)");
+  assert.equal(accepted.length, 1);
+  assert.equal(accepted[0]?.runId, "run-123");
+  assert.equal(accepted[0]?.runStatus, "queued");
+  assert.equal(accepted[0]?.message, message);
+  assert.equal(h.starts.length, 1);
+});
+
+test("onAccepted callback failure does not suppress accepted acknowledgement", async () => {
+  const h = harness();
+  const handle = createSofiaMessagingHandler({
+    ...h,
+    onAccepted: () => { throw new Error("notification callback failed"); },
+  });
+
+  assert.equal(
+    await handle(inbound("continue the task")),
+    "รับคำขอแล้วครับ กำลังเริ่มทำงาน (รหัสงาน: run-123)",
+  );
+  assert.equal(h.starts.length, 1);
+});
