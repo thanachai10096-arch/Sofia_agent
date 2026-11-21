@@ -40,6 +40,52 @@ test("skill ranking smooths tiny samples instead of treating one success as cert
   assert.ok((ranked[0]?.successRate ?? 0) > (ranked[1]?.successRate ?? 1));
 });
 
+test("skill reliability records actual tool calls and execution duration", () => {
+  const engine = new EvolutionEngine();
+  engine.recordSuccess("measured-skill", 2, 1, "coding", { toolCalls: 2, durationMs: 850 });
+  engine.recordFailure("measured-skill", "handler failed", "coding", { toolCalls: 1, durationMs: 150 });
+
+  const skill = engine.getSkill("measured-skill");
+  assert.ok(skill);
+  assert.equal(skill.avgToolCalls, 1.5);
+  assert.equal(skill.avgDurationMs, 500);
+  assert.equal(skill.durationSamples, 2);
+  assert.equal(skill.toolCallSamples, 2);
+  assert.deepEqual(skill.successHistory[0] && {
+    toolCalls: skill.successHistory[0].toolCalls,
+    durationMs: skill.successHistory[0].durationMs,
+  }, { toolCalls: 2, durationMs: 850 });
+  assert.deepEqual(skill.failureHistory[0] && {
+    toolCalls: skill.failureHistory[0].toolCalls,
+    durationMs: skill.failureHistory[0].durationMs,
+  }, { toolCalls: 1, durationMs: 150 });
+});
+
+test("skill ranking prefers lower measured cost when reliability evidence is equal", () => {
+  const engine = new EvolutionEngine();
+  for (let i = 0; i < 5; i++) {
+    engine.recordSuccess("fast-skill", 2, 0, "coding", { toolCalls: 1, durationMs: 100 });
+    engine.recordSuccess("slow-skill", 2, 0, "coding", { toolCalls: 3, durationMs: 1_000 });
+  }
+
+  const ranked = engine.rank(["slow-skill", "fast-skill"], "coding");
+  assert.equal(ranked[0]?.id, "fast-skill");
+  assert.ok((ranked.find(item => item.id === "slow-skill")?.efficiencyPenalty ?? 0) > 0);
+  assert.equal(ranked.find(item => item.id === "fast-skill")?.efficiencyPenalty, 0);
+});
+
+test("missing legacy execution metrics do not receive a zero-cost ranking advantage", () => {
+  const engine = new EvolutionEngine();
+  for (let i = 0; i < 5; i++) {
+    engine.recordSuccess("measured", 2, 0, "coding", { toolCalls: 1, durationMs: 500 });
+    engine.recordSuccess("unmeasured", 2, 0, "coding");
+  }
+
+  const ranked = engine.rank(["measured", "unmeasured"], "coding");
+  assert.equal(ranked.find(item => item.id === "unmeasured")?.efficiencyPenalty, 0);
+  assert.equal(ranked.find(item => item.id === "measured")?.avgDurationMs, 500);
+});
+
 test("run-level task type statistics track success and failure", () => {
   const engine = new EvolutionEngine();
   engine.recordRun("coding", true);
@@ -114,6 +160,8 @@ test("legacy evolution snapshots load with safe defaults", async () => {
     }), "utf8");
     const engine = new EvolutionEngine(file);
     assert.deepEqual(engine.getSkill("legacy")?.taskTypes, {});
+    assert.equal(engine.getSkill("legacy")?.avgDurationMs, 0);
+    assert.equal(engine.getSkill("legacy")?.durationSamples, 0);
     engine.recordSuccess("legacy", 1, 0, "coding");
     assert.equal(engine.getSkill("legacy")?.taskTypes.coding?.successes, 1);
     await engine.flush();

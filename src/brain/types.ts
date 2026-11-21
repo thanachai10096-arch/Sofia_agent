@@ -76,6 +76,8 @@ export interface ToolResult {
 export interface ToolExecutionContext {
   runId: string;
   principalId?: string | undefined;
+  /** Trusted messaging destination used only to route approval prompts. */
+  notificationChannelId?: string | undefined;
   signal: AbortSignal;
   requireApproval: boolean;
   notifyApproval(waiting: boolean): void;

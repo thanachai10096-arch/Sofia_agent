@@ -15,6 +15,18 @@ function limits(overrides: Partial<SandboxLimits> = {}): SandboxLimits {
   };
 }
 
+test("ProcessSandbox rejects actual NUL bytes in commands and arguments", async () => {
+  const sandbox = new ProcessSandbox();
+  await assert.rejects(
+    () => sandbox.run("node\0", [], limits()),
+    /valid command without NUL bytes/,
+  );
+  await assert.rejects(
+    () => sandbox.run("node", ["--version\0"], limits()),
+    /without NUL bytes/,
+  );
+});
+
 test("ProcessSandbox fails closed when network isolation is requested", async () => {
   const sandbox = new ProcessSandbox();
   await assert.rejects(
@@ -85,6 +97,7 @@ test("ContainerSandbox constructs a restrictive Docker command and disables netw
     const result = await sandbox.run("node", ["-e", "process.stdout.write('ok')"], limits({
       workspaceRoot,
       allowNetwork: false,
+      readOnlyWorkspace: true,
       timeoutMs: 1234,
       maxOutputBytes: 4096,
     }));
@@ -100,11 +113,36 @@ test("ContainerSandbox constructs a restrictive Docker command and disables netw
     assert.ok(capturedArgs.includes("--memory=512m"));
     assert.ok(capturedArgs.includes("--cpus=1"));
     assert.ok(capturedArgs.includes("none"));
-    assert.ok(capturedArgs.some((arg) => arg.startsWith("type=bind,source=") && arg.endsWith(",target=/workspace")));
+    assert.ok(capturedArgs.some((arg) => arg.startsWith("type=bind,source=") && arg.endsWith(",target=/workspace,readonly")));
     assert.ok(capturedArgs.includes("registry.example/sofia-runner@sha256:" + "a".repeat(64)));
     assert.deepEqual(capturedArgs.slice(-3), ["node", "-e", "process.stdout.write('ok')"]);
     assert.equal(capturedOptions?.timeoutMs, 1234);
     assert.equal(capturedOptions?.maxOutputBytes, 4096);
+  } finally {
+    await rm(workspaceRoot, { recursive: true, force: true });
+  }
+});
+
+test("ContainerSandbox rejects actual NUL bytes in image, command, and arguments", async () => {
+  const validImage = "registry.example/sofia-runner@sha256:" + "e".repeat(64);
+  assert.throws(
+    () => new ContainerSandbox({ image: validImage + "\0" }),
+    /pinned by an immutable sha256 digest/,
+  );
+  const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "sofia-container-sandbox-"));
+  const sandbox = new ContainerSandbox({
+    image: validImage,
+    runner: async () => ({ stdout: "", stderr: "", code: 0 }),
+  });
+  try {
+    await assert.rejects(
+      () => sandbox.run("node\0", [], limits({ workspaceRoot })),
+      /valid container command/,
+    );
+    await assert.rejects(
+      () => sandbox.run("node", ["--version\0"], limits({ workspaceRoot })),
+      /without NUL bytes/,
+    );
   } finally {
     await rm(workspaceRoot, { recursive: true, force: true });
   }

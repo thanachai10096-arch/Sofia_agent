@@ -151,7 +151,21 @@ export function assessAction(action: Omit<SecurityAction, "actionHash" | "risk">
   const patchPaths = Array.isArray(action.input.operations)
     ? action.input.operations.map((op) => (op && typeof op === "object" ? (op as { path?: unknown }).path : undefined)).filter((p): p is string => typeof p === "string")
     : [];
-  for (const candidate of [...(pathValue ? [pathValue] : []), ...patchPaths]) assertSafePath(candidate, blockedPaths);
+  for (const candidate of [...(pathValue ? [pathValue] : []), ...patchPaths]) {
+    try {
+      assertSafePath(candidate, blockedPaths);
+    } catch (error) {
+      // Keep the assessment API decision-based: callers can handle every denied
+      // action uniformly instead of an unsafe path escaping as an exception.
+      return {
+        allowed: false,
+        risk: "critical",
+        requireApproval: true,
+        reason: error instanceof Error ? error.message : "Unsafe workspace path.",
+        actionHash: hash,
+      };
+    }
+  }
 
   // Treat command/URL/query text as untrusted control input. Content being written is
   // deliberately excluded so legitimate source code/comments can contain these phrases.

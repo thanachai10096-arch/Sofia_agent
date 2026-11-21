@@ -20,11 +20,24 @@ function harness() {
     },
     async get(id: string) { return jobs.get(id); },
     async list() { return []; },
-    async markNotificationDelivered(id: string) { delivered.push(id); },
+    async claimNotificationDelivery(id: string) {
+      if (claims.has(id)) return undefined;
+      const token = "lease-" + id;
+      claims.set(id, token);
+      return token;
+    },
+    async markNotificationDelivered(id: string, token?: string) {
+      if (claims.get(id) !== token) throw new Error("stale notification lease");
+      delivered.push(id);
+      claims.delete(id);
+    },
+    async releaseNotificationDelivery(id: string, token: string) {
+      if (claims.get(id) === token) claims.delete(id);
+    },
   } as unknown as JobRuntime;
-  const claims = new Set<string>();
+  const claims = new Map<string, string>();
   const deduplicator: ChatMessageDeduplicator = {
-    claim(key) { if (claims.has(key)) return false; claims.add(key); return true; },
+    claim(key) { if (claims.has(key)) return false; claims.set(key, "dedupe-" + key); return true; },
     release(key) { claims.delete(key); },
   };
   const sender = {

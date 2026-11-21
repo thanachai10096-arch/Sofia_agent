@@ -17,3 +17,22 @@ export function parseDiscordIdAllowlist(value: string | undefined, variableName:
   }
   return entries;
 }
+
+/**
+ * Revalidate persisted Discord notification routes against the current allowlists.
+ * Stored job metadata is not an authorization grant: configuration may have
+ * changed since the job was created or before a process restart.
+ */
+export function isDiscordRecoveryDestinationAllowed(
+  ownerKeyId: string | undefined,
+  notificationChannelId: string | undefined,
+  allowedUserIds: readonly string[],
+  allowedChannelIds: readonly string[],
+): boolean {
+  if (!ownerKeyId?.startsWith("discord:") || !notificationChannelId) return false;
+  const userId = ownerKeyId.slice("discord:".length);
+  return /^\d{1,24}$/.test(userId) &&
+    allowedUserIds.includes(userId) &&
+    /^\d{1,24}$/.test(notificationChannelId) &&
+    allowedChannelIds.includes(notificationChannelId);
+}

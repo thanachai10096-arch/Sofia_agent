@@ -75,3 +75,33 @@ The code outline above is not a claim that the repository's API server is alread
 - The Discord route is opt-in via `SofiaApiConfig.discordInteractionRoute`; the host deployment must still terminate TLS/serve the API over HTTPS. No live production credentials are configured here.
 - The related chat/idempotency base branch had a TypeScript narrowing error in `src/api/server.ts`; it was fixed with an explicit entry guard in the base PR. CI for this updated stack must still confirm the fix.
 - Attachment downloading, durable cross-host message deduplication, Redis integration testing against a live Redis service, provider registration, and end-to-end live tests remain follow-up work. `RedisMessagingRateLimiter` is included, but the application must supply and manage the Redis client/connection.
+
+
+## Discord privileged-action approvals
+
+The standalone Discord runtime accepts `/approve` and `/deny` as additional signed slash commands. Register each with two required string options: `request_id` and `action_hash`. The repository registration helper now includes these commands; run `npm run discord:register-command` with `DISCORD_APPLICATION_ID`, `DISCORD_GUILD_ID`, and `DISCORD_BOT_TOKEN` configured in the environment. The same commands can also be sent as ordinary Discord messages when the Gateway message intake is enabled:
+
+```text
+/approve <request-id> <action-hash>
+/deny <request-id> <action-hash>
+```
+
+Approval prompts are delivered only to the originating allowlisted channel. A decision is accepted only from the same allowlisted Discord user and channel that started the job, and only when the full action hash matches. Requests are single-use, expire after two minutes, and fail closed on timeout, cancellation, delivery failure, process restart, or mismatch. The broker is in-memory and intentionally does not restore pending approvals after restart. Telegram/API-key-originated requests are not approved by this Discord-only broker and remain fail-closed until a trusted Telegram approval transport is implemented.
+
+
+
+## Operator-managed MCP server bootstrap
+
+Set `SOFIA_MCP_SERVERS` to a bounded JSON array of explicitly configured servers. Every server must provide a unique lowercase `id` and a non-empty `allowedTools` list; only those exact advertised tools are exposed under the `mcp.<id>.<tool>` namespace. Unknown fields, duplicate IDs/tools, oversized configs, and unlisted tools are rejected.
+
+- All MCP configurations require `SOFIA_ALLOW_TOOLS=true`.
+- `stdio` starts a local child process and additionally requires `SOFIA_ALLOW_SHELL=true`. Its environment is isolated to a small inherited allowlist plus explicitly supplied values.
+- `http` requires HTTPS, `SOFIA_ALLOW_NETWORK=true`, and a matching hostname in `SOFIA_ALLOWED_HOSTS`. Redirects are rejected; endpoint credentials/query/fragments are not accepted.
+- Remote read-only annotations are advisory and cannot lower privilege. Only tools explicitly listed by the operator in `readOnlyTools` are treated as read actions; all other MCP tools are treated as writes and require per-action approval under Sofia's normal policy.
+- MCP tool invocation does not itself bypass Sofia's normal policy, approval, or workspace controls. Server metadata is untrusted and cannot expand the operator allowlist.
+
+Example (keep bearer credentials in a server-side secret, not source control):
+
+```json
+[{"id":"docs","transport":"http","endpoint":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer <secret>"},"allowedTools":["search"]}]
+```

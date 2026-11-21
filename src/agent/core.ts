@@ -3,9 +3,43 @@ import { randomUUID } from "node:crypto";
 import { classifyTask } from "./classifier.js";
 import type { AgentDependencies, AgentEvent, AgentRequest, AgentResult } from "./types.js";
 import type { ChatMessage, ToolDefinition } from "../models/types.js";
-import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission } from "../security/policy.js";
-import { actionHash, riskFor } from "../security/guard.js";
+import { assertSafeStep, assertToolAllowed, effectiveToolEffects, loadExecutionPolicyFromEnv, riskRank, toolPermission, shouldRequireApproval } from "../security/policy.js";
+import { actionHash, assessAction } from "../security/guard.js";
 import { validateToolInput } from "../tools/types.js";
+
+function abortable<T>(signal: AbortSignal, operation: () => Promise<T>): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(signal.reason ?? new Error("Aborted"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve()
+      .then(() => {
+        signal.throwIfAborted();
+        return operation();
+      })
+      .then(
+        (value) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(value);
+        },
+        (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error);
+        },
+      );
+  });
+}
 
 export class SofiaAgent {
   constructor(private readonly deps: AgentDependencies) {}
@@ -147,6 +181,7 @@ export class SofiaAgent {
       task: request.task,
       ...(request.context !== undefined ? { context: request.context } : {}),
       ...(request.principalId ? { principalId: request.principalId } : {}),
+      ...(request.notificationChannelId ? { notificationChannelId: request.notificationChannelId } : {}),
       ...(request.acceptanceCriteria
         ? { acceptanceCriteria: request.acceptanceCriteria }
         : {}),
@@ -288,12 +323,25 @@ export class SofiaAgent {
             const effects = effectiveToolEffects(call.name, tool.effects);
             assertToolAllowed(policy, call.name, effects);
             const permission = toolPermission(policy, call.name, effects);
-            const risk = riskFor(effects, actionInput);
+            // Apply the same path, URL allowlist, prompt-injection, and risk
+            // assessment used by the Brain gateway. The legacy executor must not
+            // become a less-protected fallback when Brain is disabled.
+            const assessment = assessAction({
+              runId,
+              principalId: request.principalId,
+              toolName: call.name,
+              input: actionInput,
+              effects,
+            }, policy.blockedPaths, policy.allowedHosts);
+            if (!assessment.allowed) {
+              throw new Error(assessment.reason ?? "Security policy denied the action.");
+            }
+            const risk = assessment.risk;
             const maximumRisk = permission.maxRisk ?? policy.maxRisk;
             if (riskRank[risk] > riskRank[maximumRisk]) {
               throw new Error(`Tool risk ${risk} exceeds configured maximum ${maximumRisk}: ${call.name}`);
             }
-            const requiresApproval = permission.requireApproval ?? risk !== "low";
+            const requiresApproval = tool.requiresApproval === true || shouldRequireApproval(policy, permission, risk);
             if (requiresApproval && !this.deps.approval) {
               throw new Error(`Approval handler required for ${risk}-risk tool: ${call.name}`);
             }
@@ -307,14 +355,20 @@ export class SofiaAgent {
             });
 
             if (requiresApproval && this.deps.approval) {
-              const approved = await this.deps.approval({
+              const approvalRequest = {
+                requestId: randomUUID(),
                 runId,
                 principalId: request.principalId,
+                notificationChannelId: request.notificationChannelId,
                 toolName: call.name,
                 input: structuredClone(actionInput),
                 actionHash: actionHash(runId, call.name, actionInput, request.principalId),
                 risk,
-              });
+                signal: request.signal,
+              };
+              const approved = request.signal
+                ? await abortable(request.signal, () => this.deps.approval!(approvalRequest))
+                : await this.deps.approval(approvalRequest);
 
               if (!approved) {
                 emit({

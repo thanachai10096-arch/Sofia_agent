@@ -24,9 +24,9 @@ function fakeTransport(advertised = [{ name: "lookup", description: "Find record
 
 test("managed MCP bridge exposes only allowlisted namespaced tools", async () => {
   const transport = fakeTransport();
-  const connected = await connectManagedMcpServer(transport, { id: "docs", allowedTools: ["lookup"] });
+  const connected = await connectManagedMcpServer(transport, { id: "docs", allowedTools: ["lookup"], readOnlyTools: ["lookup"] });
   assert.deepEqual(connected.tools.map((tool) => tool.name), ["mcp.docs.lookup"]);
-  assert.deepEqual(connected.tools[0]?.effects, ["network", "read"]);
+  assert.deepEqual(connected.tools[0]?.effects, ["read"]);
   const result = await connected.tools[0]!.execute({ query: "hello" }, { runtime: {} as never });
   const envelope = result as { content?: Array<{ type?: string; text?: string }> };
   const textContent = envelope.content?.find((item) => item.type === "text")?.text;
@@ -35,6 +35,23 @@ test("managed MCP bridge exposes only allowlisted namespaced tools", async () =>
   assert.equal(payload.arguments?.query, "hello");
   await connected.close();
   assert.equal(transport.closed, true);
+});
+
+test("remote MCP read-only annotations cannot lower risk without operator declaration", async () => {
+  const transport = fakeTransport();
+  const connected = await connectManagedMcpServer(transport, { id: "docs", allowedTools: ["lookup"] });
+  assert.deepEqual(connected.tools[0]?.effects, ["write"]);
+  assert.equal(connected.tools[0]?.requiresApproval, true);
+  await connected.close();
+});
+
+test("managed MCP bridge rejects read-only declarations outside the allowlist", async () => {
+  const transport = fakeTransport();
+  await assert.rejects(
+    connectManagedMcpServer(transport, { id: "docs", allowedTools: ["lookup"], readOnlyTools: ["delete"] }),
+    /must also be allowlisted/,
+  );
+  assert.equal(transport.calls.length, 0);
 });
 
 test("managed MCP bridge requires an explicit allowlist", async () => {

@@ -25,7 +25,63 @@ Sofia exposes an opt-in MCP client that adapts remote MCP tools into Sofia's exi
 ## Security and limitations
 
 - Server-provided names, descriptions, schemas, annotations, tool results, and resource contents are untrusted.
-- Remote MCP tools are marked network-capable. Non-read-only tools are additionally marked destructive, so default policy may deny them until an operator configures appropriate permissions.
+- MCP transport connectivity is established from operator configuration at startup; each tool call remains behind Sofia's ToolGateway. Only operator-declared `readOnlyTools` are treated as reads. Other tools are writes and require per-action approval. Remote annotations cannot lower privilege.
 - Keep credentials out of source control and logs. Do not pass the master Sofia API key to an MCP server.
 - The HTTP transport handles request/response JSON and SSE responses, not long-lived server-initiated notifications or subscription streaming.
 - This is a client foundation; it does not implement an MCP server endpoint, marketplace, or automatic installation of servers.
+
+
+## Environment bootstrap
+
+The API composition root supports opt-in startup configuration through
+`SOFIA_MCP_SERVERS`, a JSON array of server definitions. All transports require
+`SOFIA_ALLOW_TOOLS=true`. Stdio launches a local process and additionally requires
+`SOFIA_ALLOW_SHELL=true`. HTTP additionally requires `SOFIA_ALLOW_NETWORK=true`;
+its endpoint must be HTTPS and its hostname must be present in
+`SOFIA_ALLOWED_HOSTS` (exact host or explicit `*.example.com` wildcard).
+
+HTTP example:
+
+```json
+[
+  {
+    "id": "docs",
+    "transport": "http",
+    "endpoint": "https://mcp.example.com/mcp",
+    "headers": { "Authorization": "Bearer <secret>" },
+    "allowedTools": ["search", "fetch"],
+    "readOnlyTools": ["search", "fetch"]
+  }
+]
+```
+
+Stdio example:
+
+```json
+[
+  {
+    "id": "local-docs",
+    "transport": "stdio",
+    "command": "node",
+    "args": ["./mcp-server.js"],
+    "cwd": "/opt/sofia/mcp-docs",
+    "allowedTools": ["search"],
+    "readOnlyTools": ["search"]
+  }
+]
+```
+
+The environment bootstrap rejects configurations over 32 KiB, more than 12
+servers, duplicate IDs/tool names, empty allowlists, unknown fields, invalid
+environment entries, unsafe headers, and HTTP URLs containing credentials,
+query strings, or fragments. Stdio commands are launched directly without a
+shell and inherit only a small environment allowlist plus explicitly supplied
+per-server variables. Treat all server definitions, commands, credentials,
+headers, and allowlisted tool names as trusted operator configuration; never
+derive them from chat input or model output.
+
+Every configured server exposes only its explicitly allowlisted tools. Remote
+MCP annotations are advisory and cannot downgrade privilege. Only an operator
+may list a tool in `readOnlyTools`; every other MCP tool is treated as a write
+and requires per-action approval. MCP metadata and results remain untrusted, and every
+tool still passes through Sofia's existing ToolGateway policy and approval controls.

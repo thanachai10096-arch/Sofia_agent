@@ -29,6 +29,8 @@ export interface ChatRunStarter {
     task: string;
     context?: string;
     sessionId?: string;
+    /** Trusted platform destination for routing approval prompts. */
+    notificationChannelId?: string;
   }, signal?: AbortSignal, options?: { idempotencyKey?: string }): Promise<{ id: string; status: string; error?: string }>;
 }
 
@@ -101,6 +103,7 @@ export function createChatCommandHandler(options: ChatCommandHandlerOptions) {
       const run = await options.client.start({
         task,
         sessionId,
+        notificationChannelId: `${command.platform}:${command.conversationId}`,
         context: `Origin: ${command.platform} chat integration. Conversation ID: ${command.conversationId}.`,
       }, undefined, { idempotencyKey });
       return { status: "accepted", runId: run.id, runStatus: run.status };

@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createSofiaApi } from "./server.js";
 import { FileRunRecordStore } from "./run-record-store.js";
@@ -8,8 +9,9 @@ import { createDiscordGatewayTransport } from "../integrations/messaging/discord
 import type { VerifiedDiscordMessage } from "../integrations/messaging/discord.js";
 import { FileChatMessageDeduplicator } from "../integrations/file-chat-deduplicator.js";
 import { createDiscordSharedChatHandler } from "../integrations/messaging/discord-shared-chat-handler.js";
-import { parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
-import { createTelegramMessagingRuntime } from "../integrations/messaging/telegram-runtime.js";
+import { isDiscordRecoveryDestinationAllowed, parseDiscordIdAllowlist } from "../integrations/messaging/discord-allowlist.js";
+import { createTelegramMessagingRuntime, parseTelegramChatAllowlist } from "../integrations/messaging/telegram-runtime.js";
+import { createDiscordApprovalBroker } from "../integrations/messaging/discord-approval-broker.js";
 
 const processStartedAt = Date.now();
 const workspace = path.resolve(process.env.SOFIA_WORKSPACE ?? process.cwd());
@@ -20,7 +22,14 @@ const runStoreDirectory = path.resolve(
   process.env.SOFIA_RUN_STORE_DIR ?? path.join(workspace, ".sofia", "api-runs"),
 );
 mkdirSync(runStoreDirectory, { recursive: true, mode: 0o700 });
-const deps = await createSofiaAgentDependenciesWithSessions(workspace);
+let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
+const approvalBroker = createDiscordApprovalBroker({
+  sendMessage: async (channelId, message) => {
+    if (!discordTransport) throw new Error("Discord approval transport is unavailable.");
+    return discordTransport.sendMessage(channelId, message);
+  },
+});
+const deps = await createSofiaAgentDependenciesWithSessions(workspace, approvalBroker.handle);
 // Telegram is an optional, explicitly enabled bridge into the existing Sofia API/Core.
 const telegramRuntime = createTelegramMessagingRuntime(process.env, workspace);
 
@@ -35,7 +44,6 @@ const discordConfigured = Boolean(discordPublicKey && discordBotToken && rawDisc
 if (discordRequested && !discordConfigured) {
   console.error("Discord integration disabled: required configuration is incomplete; API will continue without Discord.");
 }
-let discordTransport: ReturnType<typeof createDiscordInteractionTransport> | undefined;
 let discordGatewayTransport: ReturnType<typeof createDiscordGatewayTransport> | undefined;
 const discordAbort = new AbortController();
 let discordRecoveryTimer: ReturnType<typeof setInterval> | undefined;
@@ -52,7 +60,7 @@ if (discordConfigured) {
     publicKeyHex: discordPublicKey,
     botToken: discordBotToken,
     commandName: process.env.DISCORD_COMMAND_NAME?.trim() || "run",
-    additionalCommandNames: ["status", "cancel", "resume"],
+    additionalCommandNames: ["status", "cancel", "resume", "approve", "deny"],
     allowedUserIds: discordUserIds,
     allowedChannelIds: discordChannelIds,
     onError: (event, status) => console.error("Discord transport error:", event, status ?? ""),
@@ -65,7 +73,33 @@ if (discordConfigured) {
       deps.securityController?.assertRunning();
       if (!deps.jobRuntime) throw new Error("Durable job runtime is unavailable.");
       const principalId = "discord:" + message.author.id;
+      if (!discordUserIds.includes(message.author.id) || !discordChannelIds.includes(message.channelId)) {
+        await discordTransport?.sendMessage(message.channelId, "You are not authorized to approve or run Sofia in this channel.", undefined, message.id);
+        return;
+      }
       const command = message.content.trim().split(/\s+/, 1)[0] ?? "";
+      if (command === "/approve" || command === "/deny") {
+        const decision = approvalBroker.respond({
+          channelId: message.channelId,
+          authorId: message.author.id,
+          content: message.content,
+        });
+        const response = decision === "approved"
+          ? "Approval accepted. Sofia may now execute the exact reviewed action."
+          : decision === "denied"
+            ? "Approval denied. The action will not be executed."
+            : decision === "unauthorized"
+              ? "This approval request belongs to another user or channel."
+              : decision === "action_mismatch"
+                ? "The action hash does not match. The action remains blocked."
+                : decision === "not_found"
+                  ? "Approval request not found or expired."
+                  : decision === "not_ready"
+                    ? "Approval is not available until Sofia has delivered the action details. Please wait and retry."
+                    : "Invalid approval command. Use /approve <request-id> <action-hash> or /deny <request-id> <action-hash>.";
+        await discordTransport?.sendMessage(message.channelId, response, undefined, message.id);
+        return;
+      }
       const argument = message.content.trim().slice(command.length).trim();
       if (command === "/status" || command === "/cancel" || command === "/resume") {
         if (!/^([0-9a-f]{8}-[0-9a-f-]{27,})$/i.test(argument)) {
@@ -105,12 +139,47 @@ if (discordConfigured) {
           void deps.jobRuntime.resume(job.id).then(async (resumed) => {
             const summary = resumed.result?.summary?.trim() || resumed.error?.trim() || "Sofia finished processing the resumed job.";
             const content = "Sofia resumed job " + resumed.status + ".\nJob ID: " + resumed.id + "\n" + summary;
-            await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
-            await deps.jobRuntime?.markNotificationDelivered?.(resumed.id);
-          }).catch(async () => {
+            // Use the same durable, token-fenced notification protocol as recovery.
+            // If the runtime cannot claim delivery, do not send an uncoordinated notice.
+            const runtime = deps.jobRuntime;
+            if (!runtime?.claimNotificationDelivery || !runtime.markNotificationDelivered || !runtime.releaseNotificationDelivery) return;
+            let deliveryToken: string | undefined;
             try {
+              deliveryToken = await runtime.claimNotificationDelivery(resumed.id);
+              if (!deliveryToken) return;
+              await discordTransport?.sendMessage(message.channelId, content.slice(0, 1700));
+              await runtime.markNotificationDelivered(resumed.id, deliveryToken);
+              deliveryToken = undefined;
+            } finally {
+              if (deliveryToken) {
+                try {
+                  await runtime.releaseNotificationDelivery(resumed.id, deliveryToken);
+                } catch {
+                  // The bounded lease expires and permits a later retry.
+                }
+              }
+            }
+          }).catch(async () => {
+            const runtime = deps.jobRuntime;
+            if (!runtime?.claimNotificationDelivery || !runtime.markNotificationDelivered || !runtime.releaseNotificationDelivery) return;
+            let deliveryToken: string | undefined;
+            try {
+              deliveryToken = await runtime.claimNotificationDelivery(job.id);
+              if (!deliveryToken) return;
               await discordTransport?.sendMessage(message.channelId, "Sofia could not resume job " + job.id + ". Check the job status and server logs.");
-            } catch { /* durable state remains available for /status */ }
+              await runtime.markNotificationDelivered(job.id, deliveryToken);
+              deliveryToken = undefined;
+            } catch {
+              // Leave the durable job available for /status; release below permits retry.
+            } finally {
+              if (deliveryToken) {
+                try {
+                  await runtime.releaseNotificationDelivery(job.id, deliveryToken);
+                } catch {
+                  // The bounded lease expires and permits a later recovery attempt.
+                }
+              }
+            }
           });
           return;
         }
@@ -178,21 +247,35 @@ if (discordConfigured) {
     if (!deps.jobRuntime || !discordTransport || discordAbort.signal.aborted) return;
     const recoveredJobs = await deps.jobRuntime.list();
     for (const job of recoveredJobs) {
-      if (!job.ownerKeyId?.startsWith("discord:") || !job.notificationChannelId ||
+      if (!job.notificationChannelId ||
+          !isDiscordRecoveryDestinationAllowed(job.ownerKeyId, job.notificationChannelId, discordUserIds, discordChannelIds) ||
           job.notificationDelivered || job.status === "queued" || job.status === "running" ||
           Date.parse(job.createdAt) >= processStartedAt || notificationInFlight.has(job.id)) continue;
       notificationInFlight.add(job.id);
+      let deliveryToken: string | undefined;
       try {
+        // The durable claim arbitrates across local Node.js workers. If the
+        // runtime cannot provide a claim, fail closed rather than risk duplicates.
+        deliveryToken = await deps.jobRuntime.claimNotificationDelivery?.(job.id);
+        if (!deliveryToken) continue;
         const message = job.status === "completed"
           ? "Sofia has an undelivered completion notice for job " + job.id + ". Status: completed."
           : job.snapshot
             ? "Sofia recovered job " + job.id + ". Status: " + job.status + ". Use /resume job_id:" + job.id + " to continue from its checkpoint."
             : "Sofia recovered job " + job.id + ". Status: " + job.status + ". No resumable checkpoint is available.";
         await discordTransport.sendMessage(job.notificationChannelId, message);
-        await deps.jobRuntime.markNotificationDelivered?.(job.id);
+        await deps.jobRuntime.markNotificationDelivered?.(job.id, deliveryToken);
+        deliveryToken = undefined;
       } catch {
-        // Keep the marker unset so the next retry can attempt delivery again.
+        // Release the claim so a later retry can attempt delivery again.
       } finally {
+        if (deliveryToken && deps.jobRuntime.releaseNotificationDelivery) {
+          try {
+            await deps.jobRuntime.releaseNotificationDelivery(job.id, deliveryToken);
+          } catch {
+            // The bounded lease expires and allows a later retry.
+          }
+        }
         notificationInFlight.delete(job.id);
       }
     }
@@ -204,8 +287,25 @@ if (discordConfigured) {
   discordRecoveryTimer.unref?.();
 }
 
+const notificationDestinations = new Set<string>();
+// Telegram is the only adapter that submits runs through this public API.
+// Discord jobs use the in-process JobRuntime and keep their own verified route.
+// Public API request bodies cannot expand the Telegram destination allowlist.
+const rawTelegramChatIds = process.env.TELEGRAM_ALLOWED_CHAT_IDS?.trim();
+if (telegramRuntime && rawTelegramChatIds) {
+  try {
+    for (const chatId of parseTelegramChatAllowlist(rawTelegramChatIds)) {
+      notificationDestinations.add("telegram:" + chatId);
+    }
+  } catch {
+    // The adapter already fails closed on invalid configuration.
+  }
+}
+const apiKeyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
+
 const server = createSofiaApi(deps, {
   apiKeys: { [apiKey]: scopes },
+  notificationChannelAllowlistByKey: { [apiKeyId]: [...notificationDestinations] },
   allowedOrigins: (process.env.SOFIA_ALLOWED_ORIGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   runStore: new FileRunRecordStore(runStoreDirectory),
   usageStorePath: path.join(workspace, ".sofia", "api-usage.json"),
@@ -214,7 +314,9 @@ const server = createSofiaApi(deps, {
 const port = Number(process.env.PORT ?? 3000);
 if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("Invalid PORT.");
 server.on("close", () => {
+  approvalBroker.close();
   deps.closeSessionStore();
+  void deps.closeMcpRegistry().catch(() => console.error("MCP registry shutdown failed."));
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
 });
 server.listen(port, "0.0.0.0", () => {

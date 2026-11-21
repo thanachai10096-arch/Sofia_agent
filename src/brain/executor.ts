@@ -109,6 +109,8 @@ export interface BrainRunInput {
   /** Prior conversation/project context; always passed to the model as untrusted reference data. */
   context?: string;
   principalId?: string;
+  /** Trusted messaging destination propagated to approval handlers. */
+  notificationChannelId?: string;
   understanding?: unknown;
   plan?: unknown;
   acceptanceCriteria?: AcceptanceCriterion[];
@@ -271,6 +273,7 @@ export class SofiaBrain {
   private projectMemory: ProjectMemoryEntry[] = [];
   private projectMemoryLoaded = false;
   private readonly selectedSkillIds = new Set<string>();
+  private readonly skillExecutionMetrics = new Map<string, { toolCalls: number; durationMs: number }>();
   private activeSkillId?: string;
 
   constructor(
@@ -591,7 +594,7 @@ export class SofiaBrain {
     return result;
   }
 
-  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string): Promise<boolean> {
+  private async applySubagentProposal(proposal: { tool: string; input: Record<string, unknown>; reason: string }, principalId?: string, notificationChannelId?: string): Promise<boolean> {
     // The same canonical catalog policy is used when exposing tools to the
     // specialist and when validating its proposal. ToolGateway remains the
     // final authority and executeStep still enforces effects/approvals.
@@ -603,7 +606,7 @@ export class SofiaBrain {
       objective: proposal.reason,
       dependencies: [],
       call: { tool: proposal.tool, input: proposal.input },
-    }, principalId);
+    }, principalId, notificationChannelId);
     this.move("observing");
     return true;
   }
@@ -612,13 +615,37 @@ export class SofiaBrain {
     phase: "plan" | "replan",
     payload: Record<string, unknown>,
   ): Promise<ExecutionPlan> {
-    let value = await this.infer(phase, payload);
+    const availableTools = Array.isArray(payload.availableTools)
+      ? payload.availableTools.filter((item): item is { name: string; description?: string } =>
+          typeof item === "object" && item !== null &&
+          typeof (item as Record<string, unknown>).name === "string")
+      : [];
+    const registeredSkillTools = availableTools.filter((tool) => tool.name.startsWith("skill."));
+    const hasSkillDiscovery = availableTools.some((tool) => tool.name === "skills.search");
+    const enrichedPayload = registeredSkillTools.length > 0
+      ? {
+          ...payload,
+          skillRuntimePolicy: {
+            registeredSkillTools,
+            discoveryTool: hasSkillDiscovery ? "skills.search" : null,
+            instructions: [
+              "Treat registered skill handlers as executable tools, not as claims about capabilities.",
+              "Choose a skill.<id> tool only when its description directly matches a required task; otherwise use the ordinary registered tools.",
+              "When a relevant skill is selected, include an explicit plan step that calls that exact skill.<id> tool with the required input.",
+              "Do not claim a skill ran unless its tool call appears in execution observations.",
+              "After a skill call, plan or perform independent verification of the requested postconditions; a skill return value alone does not prove the overall task succeeded.",
+              "Never invent skill IDs or bypass the normal tool gateway, risk policy, or approval flow.",
+            ],
+          },
+        }
+      : payload;
+    let value = await this.infer(phase, enrichedPayload);
     try {
       return this.validatePlan(parsePlan(value, this.limits.maxSteps));
     } catch (firstError) {
       // Never guess a tool call: request one bounded schema repair, then fail closed.
       value = await this.infer(phase, {
-        ...payload,
+        ...enrichedPayload,
         outputContractRepair: {
           error: errorMessage(firstError),
           invalidResponse: preview(value, 8_000).text,
@@ -648,7 +675,7 @@ export class SofiaBrain {
     });
   }
 
-  private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string): Promise<Observation> {
+  private async executeStep(step: ExecutionPlan["steps"][number], principalId?: string, notificationChannelId?: string): Promise<Observation> {
     this.signal.throwIfAborted();
 
     if (this.usage.steps >= this.limits.maxSteps) {
@@ -671,6 +698,20 @@ export class SofiaBrain {
       );
     }
 
+    // Evolution evidence must follow an actual registered skill invocation.
+    // A skill merely matched during recovery planning is not usage evidence.
+    const invokedSkillId = step.call.tool.startsWith("skill.")
+      ? step.call.tool.slice("skill.".length)
+      : undefined;
+    if (invokedSkillId?.trim()) {
+      this.selectedSkillIds.add(invokedSkillId);
+      this.activeSkillId = invokedSkillId;
+      const metrics = this.skillExecutionMetrics.get(invokedSkillId) ?? { toolCalls: 0, durationMs: 0 };
+      metrics.toolCalls += 1;
+      this.skillExecutionMetrics.set(invokedSkillId, metrics);
+    }
+
+    const skillCallStartedAt = Date.now();
     this.emit({
       type: "brain.tool.started",
       stepId: step.id,
@@ -683,6 +724,7 @@ export class SofiaBrain {
         this.dependencies.tools.execute(step.call, {
           runId: this.runId,
           ...(principalId ? { principalId } : {}),
+          ...(notificationChannelId ? { notificationChannelId } : {}),
           signal: this.signal,
           requireApproval:
             descriptor.effects.includes("destructive") ||
@@ -700,8 +742,17 @@ export class SofiaBrain {
         }),
       );
     } catch (error) {
+      if (invokedSkillId) {
+        const metrics = this.skillExecutionMetrics.get(invokedSkillId);
+        if (metrics) metrics.durationMs += Math.max(0, Date.now() - skillCallStartedAt);
+      }
       if (this.signal.aborted) throw error;
       throw new RecoverableFailure(failureCategory(error), errorMessage(error));
+    }
+
+    if (invokedSkillId) {
+      const metrics = this.skillExecutionMetrics.get(invokedSkillId);
+      if (metrics) metrics.durationMs += Math.max(0, Date.now() - skillCallStartedAt);
     }
 
     const p = preview(result.data);
@@ -730,6 +781,13 @@ export class SofiaBrain {
         result.error?.category ?? "tool_error",
         result.error?.message ?? "Tool execution failed",
       );
+    }
+
+    // A successful skill call is usage evidence, not a failed attempt.
+    // Clear the failure-attribution pointer so a later unrelated task error
+    // cannot incorrectly penalize this skill.
+    if (step.call.tool.startsWith("skill.")) {
+      this.activeSkillId = undefined;
     }
 
     return observation;
@@ -837,10 +895,8 @@ export class SofiaBrain {
       const ranking = new Map(this.dependencies.evolution.rank(skills.map(skill => skill.id), taskType).map(item => [item.id, item.score]));
       skills = [...skills].sort((a, b) => (ranking.get(b.id) ?? 0) - (ranking.get(a.id) ?? 0));
     }
-    if (skills[0]) {
-      this.selectedSkillIds.add(skills[0].id);
-      this.activeSkillId = skills[0].id;
-    }
+    // Candidate matching informs the replan prompt only. Do not record
+    // a skill as used until executeStep observes its actual tool invocation.
     const plan = await this.inferValidatedPlan("replan", {
       task,
       understanding,
@@ -856,6 +912,16 @@ export class SofiaBrain {
 
     if (previousFingerprint === nextFingerprint) {
       throw new Stop("Replanner returned the same effective plan");
+    }
+
+    // Legacy learned repair skills are prompt-guidance, not executable
+    // skill.<id> handlers. Count one only after it was supplied to the
+    // recovery planner and that planner produced a materially changed plan.
+    // Advanced handler skills continue to be attributed only by executeStep.
+    const selectedRecoverySkill = skills[0];
+    if (selectedRecoverySkill) {
+      this.selectedSkillIds.add(selectedRecoverySkill.id);
+      this.activeSkillId = selectedRecoverySkill.id;
     }
 
     return plan;
@@ -1033,7 +1099,7 @@ export class SofiaBrain {
               }
             }
 
-            await this.executeStep(step, input.principalId);
+            await this.executeStep(step, input.principalId, input.notificationChannelId);
             done.add(step.id);
             completedStepIds.add(step.id);
             await checkpointState(currentPlan);
@@ -1133,6 +1199,7 @@ export class SofiaBrain {
               this.activeSkillId,
               diagnosis.message,
               understanding?.requiredCapabilities[0] ?? "general",
+              this.skillExecutionMetrics.get(this.activeSkillId) ?? {},
             );
             this.selectedSkillIds.delete(this.activeSkillId);
             this.activeSkillId = undefined;
@@ -1163,7 +1230,7 @@ export class SofiaBrain {
 
             // Only registered, explicitly permitted proposals enter ToolGateway.
             // Invalid proposals fall through to the primary planner's bounded replan.
-            const applied = await this.applySubagentProposal(specialist.proposedAction, input.principalId);
+            const applied = await this.applySubagentProposal(specialist.proposedAction, input.principalId, input.notificationChannelId);
             if (applied) {
               recoveryRounds += 1;
               recoveryFingerprints.add(diagnosis.fingerprint);
@@ -1210,7 +1277,13 @@ export class SofiaBrain {
         const taskType = understanding.requiredCapabilities[0] ?? "general";
         // This block is reachable only after trusted verification and code review pass.
         for (const skillId of this.selectedSkillIds) {
-          this.dependencies.evolution.recordSuccess(skillId, this.usage.steps, recoveryRounds, taskType);
+          this.dependencies.evolution.recordSuccess(
+            skillId,
+            this.usage.steps,
+            recoveryRounds,
+            taskType,
+            this.skillExecutionMetrics.get(skillId) ?? {},
+          );
         }
         this.dependencies.evolution.recordRun(taskType, true);
       }

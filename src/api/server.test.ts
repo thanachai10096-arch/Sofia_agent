@@ -125,6 +125,56 @@ test("API lists configured models and honors an explicit model route", async () 
   }
 });
 
+test("API restricts approval notification destinations to the authenticated key allowlist", async () => {
+  const apiKey = "messaging-key";
+  const keyId = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
+  let providerCalls = 0;
+  const server = createSofiaApi({
+    provider: { generate: async () => { providerCalls += 1; return { text: "Task completed." }; } },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+  }, {
+    apiKeys: { [apiKey]: ["agent:run"] },
+    notificationChannelAllowlistByKey: { [keyId]: ["telegram:12345"] },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const baseUrl = "http://127.0.0.1:" + address.port;
+  try {
+    const forbidden = await fetch(baseUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" },
+      body: JSON.stringify({ task: "do not route to another chat", notificationChannelId: "telegram:99999" }),
+    });
+    assert.equal(forbidden.status, 403);
+    assert.deepEqual(await forbidden.json(), { error: "notification_channel_forbidden" });
+    assert.equal(providerCalls, 0);
+
+    const allowed = await fetch(baseUrl + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" },
+      body: JSON.stringify({ task: "complete this task", notificationChannelId: "telegram:12345" }),
+    });
+    assert.equal(allowed.status, 200);
+    assert.equal(providerCalls, 1);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test("API rejects invalid notification destination allowlist configuration", () => {
+  assert.throws(() => createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+  }, {
+    apiKeys: { "key": ["agent:run"] },
+    notificationChannelAllowlistByKey: { "not-a-key-id": ["telegram:12345"] },
+  }), /notificationChannelAllowlistByKey/);
+});
+
 test("API rejects unknown model routes before starting a run", async () => {
   const server = createSofiaApi({
     provider: { generate: async () => ({ text: "Should not run." }) },
