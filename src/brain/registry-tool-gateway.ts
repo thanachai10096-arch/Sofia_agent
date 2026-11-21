@@ -37,6 +37,10 @@ export class RegistryToolGateway implements ToolGateway {
   describe(name:string){const tool=this.dependencies.tools.get(name);if(!tool)return undefined;return{effects:effectiveToolEffects(name,tool.effects)};}
 
   async execute(call:ToolCall,context:ToolExecutionContext):Promise<ToolResult>{
+    const production = process.env.NODE_ENV === "production" || process.env.SOFIA_ENV === "production";
+    if (production && (!context.principalId || context.principalId.trim() !== context.principalId || context.principalId.length > 512)) {
+      return {ok:false,data:null,evidenceId:randomUUID(),error:{category:"permission_error",message:"Production tool execution requires an authenticated principal."}};
+    }
     // Bind the approval hash and actual execution to one immutable input snapshot.
     // The caller and approval UI must not be able to swap the action while approval is pending.
     const input = deepFreeze(structuredClone(call.input));
@@ -67,8 +71,8 @@ export class RegistryToolGateway implements ToolGateway {
     }
     const requiresApproval=permission.requireApproval===true||assessment.requireApproval||descriptor.effects.some(x=>x==="write"||x==="shell"||x==="destructive"||x==="browser");
     const capabilitySecret=this.policy.capabilitySecret;
-    const capability=capabilitySecret?issueCapability({principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret):undefined;
-    if(capabilitySecret && capability && !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret)) return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability verification failed."}};
+    const capability=capabilitySecret?issueCapability({principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk,actionHash:assessment.actionHash},capabilitySecret):undefined;
+    if(capabilitySecret && capability && !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk,actionHash:assessment.actionHash},capabilitySecret)) return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability verification failed."}};
     await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:requiresApproval?"approval_required":"allow",input:redactSecrets(input)});
     if(requiresApproval){
       if(!this.approval)return{ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Approval is required for this tool."}};
@@ -81,30 +85,43 @@ export class RegistryToolGateway implements ToolGateway {
         }
       }finally{context.notifyApproval(false);}
     }
+    let data:unknown;
     try{
       this.security.assertRunning();
       context.signal.throwIfAborted();
-      if(capabilitySecret && (!capability || !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk},capabilitySecret))) {
+      if(capabilitySecret && (!capability || !verifyCapability(capability,{principalId:context.principalId??"anonymous",runId:context.runId,tool:call.tool,effects:descriptor.effects,risk:assessment.risk,actionHash:assessment.actionHash},capabilitySecret))) {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Capability validation failed immediately before execution."}};
       }
       if(!capabilitySecret && (process.env.NODE_ENV==="production"||process.env.SOFIA_ENV==="production")) {
         return {ok:false,data:null,evidenceId,error:{category:"permission_error",message:"Production tool execution requires a capability secret."}};
       }
       const boundSignal=this.security.bindSignal(context.signal);
-      let data:unknown;
       try {
         data=await registeredTool.execute(input,{runtime:this.dependencies.runtime,signal:boundSignal.signal});
       } finally {
         boundSignal.dispose();
       }
-      const safeData = redactSecrets(data);
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
-      return{ok:true,data:safeData,evidenceId};
     }catch(error){
       const message=String(redactSecrets(error instanceof Error?error.message:String(error)));
-      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:redactSecrets(input)});
-      return{ok:false,data:null,evidenceId,error:{category:descriptor.effects.includes("network")?"network_error":"tool_error",message}};
+      const warnings:string[]=[];
+      try {
+        await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"failed",reason:message,input:redactSecrets(input)});
+      } catch {
+        warnings.push("Security audit could not persist the tool failure event.");
+      }
+      return{ok:false,data:null,evidenceId,error:{category:descriptor.effects.includes("network")?"network_error":"tool_error",message},...(warnings.length?{warnings}:{})};
     }
+
+    // Execution has already completed. A failure to persist its audit event must
+    // never turn a successful side effect into a retryable tool failure.
+    const safeData=redactSecrets(data);
+    const warnings:string[]=[];
+    try {
+      await this.audit?.record({id:randomUUID(),at:new Date().toISOString(),runId:context.runId,principalId:context.principalId,toolName:call.tool,actionHash:assessment.actionHash,risk:assessment.risk,decision:"completed",input:redactSecrets(input),result:safeData});
+    } catch {
+      warnings.push("Tool execution succeeded, but its completion audit event could not be persisted.");
+    }
+    return{ok:true,data:safeData,evidenceId,...(warnings.length?{warnings}:{})};
   }
 
   async snapshot(signal:AbortSignal):Promise<WorkspaceSnapshot>{

@@ -12,6 +12,55 @@ async function fixture() {
   return { parent, root, runtime: createNodeWorkspaceRuntime(root) };
 }
 
+
+test("workspace commands do not inherit runtime code-injection environment variables", async () => {
+  const f = await fixture();
+  const names = ["NODE_OPTIONS", "NODE_PATH", "PYTHONPATH"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    process.env.NODE_OPTIONS = "--trace-warnings";
+    process.env.NODE_PATH = "/tmp/untrusted-node-modules";
+    process.env.PYTHONPATH = "/tmp/untrusted-python";
+    const result = await f.runtime.run(process.execPath, [
+      "-e",
+      "process.stdout.write(JSON.stringify({nodeOptions:process.env.NODE_OPTIONS ?? null,nodePath:process.env.NODE_PATH ?? null,pythonPath:process.env.PYTHONPATH ?? null}))",
+    ]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      nodeOptions: null,
+      nodePath: null,
+      pythonPath: null,
+    });
+  } finally {
+    for (const name of names) {
+      const value = previous[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
+
+
+test("Docker sandbox mode never falls back to host Git when its pinned image is missing", async () => {
+  const f = await fixture();
+  const oldMode = process.env.SOFIA_SANDBOX_MODE;
+  const oldImage = process.env.SOFIA_SANDBOX_IMAGE;
+  process.env.SOFIA_SANDBOX_MODE = "docker";
+  delete process.env.SOFIA_SANDBOX_IMAGE;
+  try {
+    const result = await f.runtime.git(["status"]);
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr, /SOFIA_SANDBOX_IMAGE must name a preloaded SHA-256-pinned container image/);
+  } finally {
+    if (oldMode === undefined) delete process.env.SOFIA_SANDBOX_MODE;
+    else process.env.SOFIA_SANDBOX_MODE = oldMode;
+    if (oldImage === undefined) delete process.env.SOFIA_SANDBOX_IMAGE;
+    else process.env.SOFIA_SANDBOX_IMAGE = oldImage;
+    await rm(f.parent, { recursive: true, force: true });
+  }
+});
+
 test("workspace runtime rejects lexical path traversal", async () => {
   const f = await fixture();
   try {

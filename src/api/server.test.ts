@@ -147,3 +147,43 @@ test("API rejects unknown model routes before starting a run", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API ignores client-supplied principalId and derives identity only from bearer authentication", async () => {
+  const observedPrincipals: string[] = [];
+  const apiKey = "trusted-api-key";
+  const expectedPrincipal = createHash("sha256").update(apiKey).digest("hex").slice(0, 32);
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "Task completed." }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "Output verified." }) },
+    userMemoryStore: {
+      async save() {},
+      async list() { return []; },
+      async find(userId: string) { observedPrincipals.push(userId); return []; },
+      async delete() { return false; },
+      async clear() {},
+    },
+  }, { apiKeys: { [apiKey]: ["agent:run"] } });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/agent/runs", {
+      method: "POST",
+      headers: { authorization: "Bearer " + apiKey, "content-type": "application/json" },
+      body: JSON.stringify({
+        task: "read my preferences",
+        principalId: "attacker-selected-victim",
+        ownerKeyId: "another-user",
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(observedPrincipals, [expectedPrincipal]);
+    assert.notEqual(observedPrincipals[0], "attacker-selected-victim");
+    assert.notEqual(observedPrincipals[0], "another-user");
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});

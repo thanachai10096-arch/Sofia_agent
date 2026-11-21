@@ -71,6 +71,8 @@ export interface ToolResult {
   data: unknown;
   evidenceId: string;
   error?: { category: FailureCategory; message: string };
+  /** Non-fatal operational warnings; must not change the success/failure result. */
+  warnings?: string[];
 }
 
 export interface ToolExecutionContext {
@@ -151,6 +153,7 @@ export interface Observation {
   truncated: boolean;
   /** Heuristic signal: tool output contains instruction-like text. */
   suspicious?: boolean;
+  warnings?: string[];
 }
 
 export interface BrainLimits {
@@ -189,4 +192,10 @@ export interface BrainEvent {
   count?: number;
   passed?: boolean;
   category?: FailureCategory;
+  /** Parent-generated identifier linking child assignment, proposal, and execution. */
+  childTaskId?: string;
+  agentRole?: string;
+  /** Parent-computed SHA-256 fingerprint of the exact delegated tool/input. */
+  proposalFingerprint?: string;
+  toolName?: string;
 }

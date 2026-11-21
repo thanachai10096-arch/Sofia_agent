@@ -62,6 +62,10 @@ export class SofiaAgent {
       const shouldUseBrain =
         this.deps.brainFactory !== undefined &&
         request.useBrain !== false;
+      const production = process.env.NODE_ENV === "production" || process.env.SOFIA_ENV === "production";
+      if (production && (!shouldUseBrain || !request.principalId?.trim())) {
+        throw new Error("Production Agent runs require the Brain execution path and an authenticated principal.");
+      }
       const result = shouldUseBrain ? await this.runBrain(activeRequest) : await this.runLegacy(activeRequest);
       if (session && this.deps.sessionStore) {
         session.messages.push(`assistant: ${result.output}`);
