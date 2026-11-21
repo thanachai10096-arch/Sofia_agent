@@ -147,3 +147,39 @@ test("API rejects unknown model routes before starting a run", async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 });
+
+
+test("API reports memory storage failures as server errors rather than invalid client input", async () => {
+  const server = createSofiaApi({
+    provider: { generate: async () => ({ text: "unused" }) },
+    router: { select: () => route, markUnhealthy: () => undefined },
+    reviewer: { review: async () => ({ approved: true, reason: "unused" }) },
+    userMemoryStore: {
+      async save() { throw new Error("memory filesystem is read-only"); },
+      async list() { return []; },
+      async find() { return []; },
+      async delete() { return false; },
+      async clear() {},
+    },
+  }, {
+    apiKeys: { "memory-write-key": ["memory:write"] },
+  });
+
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const response = await fetch("http://127.0.0.1:" + address.port + "/v1/memory", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer memory-write-key",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ kind: "fact", content: "A valid memory entry." }),
+    });
+    assert.equal(response.status, 500);
+    assert.deepEqual(await response.json(), { error: "memory_write_failed" });
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
