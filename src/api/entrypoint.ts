@@ -216,6 +216,7 @@ if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("In
 server.on("close", () => {
   deps.closeSessionStore();
   void deps.closeBrowserProfiles?.().catch(() => console.error("Browser profile shutdown failed."));
+  void deps.closeMcpServers?.().catch(() => console.error("MCP server shutdown failed."));
 });
 server.listen(port, "0.0.0.0", () => {
   console.log("Sofia Agent API listening on port " + port);

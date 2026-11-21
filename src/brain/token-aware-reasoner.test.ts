@@ -182,3 +182,42 @@ test("implementation and response phases request their matching route capabiliti
     assert.deepEqual(captured?.requiredCapabilities, expected);
   }
 });
+
+test("tool and platform capabilities do not disqualify every model route", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway);
+  const controller = new AbortController();
+  const prepared = await reasoner.prepare(JSON.stringify({
+    phase: "plan",
+    payload: {
+      task: "Research a website and inspect its files",
+      understanding: { requiredCapabilities: ["fast", "browser", "desktop", "filesystem", "mcp", "coding"] },
+    },
+  }), { signal: controller.signal, maxContextTokens: 16_000 });
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 700 });
+  assert.deepEqual(captured?.requiredCapabilities, ["reasoning", "coding"]);
+});
+
+test("unknown model-route capability labels remain fail-closed", async () => {
+  let captured: InferenceRequest | undefined;
+  const gateway = {
+    async generateMetered(input: InferenceRequest) {
+      captured = input;
+      return { value: {}, usage: { inputTokens: 1, outputTokens: 1 } };
+    },
+  } as unknown as TokenAwareGateway;
+  const reasoner = new TokenAwareBrainReasoner(gateway);
+  const controller = new AbortController();
+  const prepared = await reasoner.prepare(JSON.stringify({
+    phase: "plan",
+    payload: { task: "Test", understanding: { requiredCapabilities: ["unsupported-model-feature"] } },
+  }), { signal: controller.signal, maxContextTokens: 16_000 });
+  await prepared.invoke({ signal: controller.signal, maxOutputTokens: 700 });
+  assert.deepEqual(captured?.requiredCapabilities, ["reasoning", "unsupported-model-feature"]);
+});

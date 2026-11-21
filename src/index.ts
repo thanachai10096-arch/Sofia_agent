@@ -114,6 +114,7 @@ export { checkpointManager, naturalConversation, userPreferenceMemory, conversat
 export { browserWorkflowPlanner, browserStateVerifier, approvalGateManager, securityRegressionTester, integrationTestDesigner, endToEndTestPlanner, flakyTestDetector, releaseReadinessAuditor, agentMessageValidator, sharedTaskBoard, agentResultReviewer, loopDeadlockDetector, humanGoalAlignmentMonitor, workflowTriggerEvaluator, longRunningJobMonitor, slaWatchdog, notificationPlanner, failureMemoryCurator, gitWorkflowOperator, externalActionApproval, secretLeakDetector, commandRiskClassifier, registerVerifiedSecurityCoordinationSkills } from "./skills/security-coordination-handlers.js";
 export { patchGenerator, pythonSpecialist, apiContractDesigner, codeReviewAuditor, unitTestGenerator, auditTrailWriter, toolDiscoveryRouter, terminalTaskRunner, fileWorkspaceOperator, apiConnectorOrchestrator, technicalDocumentationReader, marketGapAnalyst, modelRouterOptimizer, registerVerifiedRemainingDomainSkills } from "./skills/remaining-domain-handlers.js";
 export { createAdvancedSkillRegistry, listUnregisteredVerifiedSkills } from "./skills/advanced-skill-registry.js";
+export { createAdvancedSkillTools } from "./skills/tool-adapter.js";
 export type { AdvancedSkillRegistryOptions } from "./skills/advanced-skill-registry.js";
 export { MemorySessionStore } from "./session/store.js";
 export { SqliteSessionStore } from "./session/sqlite-store.js";
