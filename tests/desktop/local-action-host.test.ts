@@ -89,6 +89,26 @@ test("paired local desktop host authenticates, scopes actions, and requires expl
     body: JSON.stringify({ tool: "desktop.input.click", input: { x: 12, y: 34 } }),
   });
   assert.equal(hostileOrigin.status, 403);
+
+  const revoke = await fetch(`${host.url}/revoke`, {
+    method: "POST",
+    headers: { origin, authorization: `Bearer ${session.token}` },
+  });
+  assert.equal(revoke.status, 200);
+  assert.deepEqual(await revoke.json(), { revoked: true });
+
+  const afterRevoke = await fetch(`${host.url}/action`, {
+    method: "POST",
+    headers: { origin, authorization: `Bearer ${session.token}`, "content-type": "application/json" },
+    body: JSON.stringify({ tool: "desktop.input.click", input: { x: 12, y: 34, button: "left" } }),
+  });
+  assert.equal(afterRevoke.status, 401, "revoked credentials must stop authorizing actions immediately");
+
+  const repeatedRevoke = await fetch(`${host.url}/revoke`, {
+    method: "POST",
+    headers: { origin, authorization: `Bearer ${session.token}` },
+  });
+  assert.equal(repeatedRevoke.status, 401);
 });
 
 test("local desktop host rejects wildcard or non-origin CORS configuration", async () => {

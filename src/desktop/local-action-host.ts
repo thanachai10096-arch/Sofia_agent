@@ -146,7 +146,7 @@ export async function startLocalDesktopActionHost(config: LocalDesktopActionHost
       return;
     }
 
-    if (req.url !== "/action") {
+    if (req.url !== "/action" && req.url !== "/revoke") {
       send(res, 404, { error: "not_found" }, origin);
       return;
     }
@@ -158,6 +158,12 @@ export async function startLocalDesktopActionHost(config: LocalDesktopActionHost
       principal = authority.authenticate(token);
     } catch {
       send(res, 401, { error: "unauthorized" }, origin);
+      return;
+    }
+
+    if (req.url === "/revoke") {
+      const revoked = authority.revoke(token);
+      send(res, revoked ? 200 : 401, { revoked }, origin);
       return;
     }
 
