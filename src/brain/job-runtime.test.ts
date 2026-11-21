@@ -489,20 +489,31 @@ test("DurableJobRuntime resumes a saved checkpoint after a real process restart"
 test("DurableJobRuntime preserves concurrent submissions from independent runtime instances", async () => {
   const namespace = "job-runtime-concurrent-workers-" + randomUUID();
   const runtimes = Array.from({ length: 12 }, () => new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
+    run: async () => ({ completed: true, state: "completed" }),
   } as unknown as SofiaBrain), undefined, namespace));
 
   const submitted = await Promise.all(runtimes.map((runtime, index) =>
     runtime.submit({ task: "concurrent worker submission " + index }),
   ));
   const reader = new DurableJobRuntime(() => ({
-    run: async () => new Promise(() => undefined),
+    run: async () => ({ completed: true, state: "completed" }),
   } as unknown as SofiaBrain), undefined, namespace);
-  const persisted = await reader.list();
-  const persistedIds = new Set(persisted.map((record) => record.id));
+  const persistedIds = new Set(submitted.map((job) => job.id));
+  let persisted = await reader.list();
+
+  // submit() deliberately schedules execution in the background. Wait until every
+  // worker has persisted its terminal state before deleting the shared state file.
+  for (let attempt = 0; attempt < 200 && persisted.some((record) => persistedIds.has(record.id) && record.status !== "completed"); attempt += 1) {
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    persisted = await reader.list();
+  }
 
   assert.equal(persisted.length, submitted.length, "no job records should be lost to concurrent read-modify-write");
-  for (const job of submitted) assert.ok(persistedIds.has(job.id), "missing persisted job " + job.id);
+  for (const job of submitted) {
+    const record = persisted.find((item) => item.id === job.id);
+    assert.ok(record, "missing persisted job " + job.id);
+    assert.equal(record.status, "completed", "background execution should settle before cleanup");
+  }
 
   const file = path.join(
     os.tmpdir(),
